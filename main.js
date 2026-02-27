@@ -87,35 +87,7 @@ ipcMain.handle('save-config', (_, config) => {
 
 // ── IPC: Build system prompt from directories ──
 
-ipcMain.handle('build-system-prompt', () => {
-  const parts = []
-
-  // Data dir files
-  if (dataDir) {
-    for (const f of ['SOUL.md', 'MEMORY.md']) {
-      const p = path.join(dataDir, f)
-      if (fs.existsSync(p)) parts.push(`## ${f}\n${fs.readFileSync(p, 'utf8')}`)
-    }
-    // Skills
-    const skillsDir = path.join(dataDir, 'skills')
-    if (fs.existsSync(skillsDir)) {
-      const skills = fs.readdirSync(skillsDir).filter(d => fs.existsSync(path.join(skillsDir, d, 'SKILL.md')))
-      if (skills.length) {
-        parts.push(`## Available Skills\n${skills.map(s => `- ${s}`).join('\n')}`)
-      }
-    }
-  }
-
-  // Workspace files
-  if (workDir) {
-    for (const f of ['AGENTS.md', 'NOW.md', 'USER.md', 'IDENTITY.md']) {
-      const p = path.join(workDir, f)
-      if (fs.existsSync(p)) parts.push(`## ${f}\n${fs.readFileSync(p, 'utf8')}`)
-    }
-  }
-
-  return parts.join('\n\n---\n\n')
-})
+ipcMain.handle('build-system-prompt', () => buildSystemPrompt())
 
 // ── IPC: Chat with LLM ──
 
@@ -160,6 +132,11 @@ async function buildSystemPrompt() {
     for (const f of ['SOUL.md', 'MEMORY.md']) {
       const p = path.join(dataDir, f)
       if (fs.existsSync(p)) parts.push(`## ${f}\n${fs.readFileSync(p, 'utf8')}`)
+    }
+    const skillsDir = path.join(dataDir, 'skills')
+    if (fs.existsSync(skillsDir)) {
+      const skills = fs.readdirSync(skillsDir).filter(d => fs.existsSync(path.join(skillsDir, d, 'SKILL.md')))
+      if (skills.length) parts.push(`## Available Skills\n${skills.map(s => `- ${s}`).join('\n')}`)
     }
   }
   if (workDir) {
