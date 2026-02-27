@@ -1,0 +1,15 @@
+{
+  "name": "openclaw-lite",
+  "version": "0.1.0",
+  "description": "Portable local AI assistant, compatible with OpenClaw data format",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "author": "momomo-agent",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}

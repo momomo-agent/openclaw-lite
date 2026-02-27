@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenClaw Lite</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11/highlight.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Setup screen -->
+  <div id="setupScreen" class="screen">
+    <div class="setup-container">
+      <h1>⚡ OpenClaw Lite</h1>
+      <p class="subtitle">Portable local AI assistant</p>
+
+      <div class="dir-picker">
+        <label>Data Directory</label>
+        <div class="dir-row">
+          <span id="dataDirPath" class="dir-path">Not selected</span>
+          <button onclick="selectDataDir()">Browse</button>
+        </div>
+        <p class="hint">~/.openclaw/ or compatible directory (config, skills, memory)</p>
+      </div>
+
+      <div class="dir-picker">
+        <label>Workspace Directory</label>
+        <div class="dir-row">
+          <span id="workDirPath" class="dir-path">Not selected</span>
+          <button onclick="selectWorkDir()">Browse</button>
+        </div>
+        <p class="hint">~/clawd/ or compatible directory (AGENTS.md, projects)</p>
+      </div>
+
+      <button id="continueBtn" class="primary-btn" disabled onclick="enterChat()">Continue</button>
+    </div>
+  </div>
+
+  <!-- Chat screen -->
+  <div id="chatScreen" class="screen" style="display:none">
+    <div class="chat-header">
+      <span>⚡ OpenClaw Lite</span>
+      <button class="icon-btn" onclick="openSettings()">⚙️</button>
+    </div>
+    <div id="messages" class="messages"></div>
+    <div class="input-bar">
+      <textarea id="input" placeholder="Ask anything..." rows="1"></textarea>
+      <button id="sendBtn" onclick="send()">↑</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
