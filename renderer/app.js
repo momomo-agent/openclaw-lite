@@ -1,10 +1,6 @@
 // OpenClaw Lite — Renderer App
 
 marked.setOptions({
-  highlight: (code, lang) => {
-    if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value
-    return hljs.highlightAuto(code).value
-  },
   breaks: true,
 })
 
@@ -111,7 +107,6 @@ function addCard(role, content) {
     card.innerHTML = `<div class="msg-label user-label">You</div><div>${esc(content)}</div>`
   } else if (role === 'assistant') {
     card.innerHTML = `<div class="md-content">${marked.parse(content || '(no answer)')}</div>`
-    card.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el))
   } else if (role === 'error') {
     card.innerHTML = `<div style="color:#ef4444">${esc(content)}</div>`
   }
