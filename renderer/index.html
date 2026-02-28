@@ -14,16 +14,18 @@
       <h1>⚡ OpenClaw Lite</h1>
       <p class="subtitle">Portable local AI assistant</p>
 
-      <div class="dir-picker">
-        <label>Claw Directory</label>
-        <div class="dir-row">
-          <span id="clawDirPath" class="dir-path">Not selected</span>
-          <button onclick="selectClawDir()">Browse</button>
-        </div>
-        <p class="hint">All-in-one: config, skills, memory, projects</p>
+      <div class="setup-actions">
+        <button class="setup-btn" onclick="createNew()">
+          <span class="setup-icon">+</span>
+          <span class="setup-label">Create New</span>
+          <span class="setup-hint">Set up a new Claw directory</span>
+        </button>
+        <button class="setup-btn" onclick="openExisting()">
+          <span class="setup-icon">📂</span>
+          <span class="setup-label">Open Existing</span>
+          <span class="setup-hint">Use an existing directory</span>
+        </button>
       </div>
-
-      <button id="continueBtn" class="primary-btn" disabled onclick="enterChat()">Continue</button>
     </div>
   </div>
 

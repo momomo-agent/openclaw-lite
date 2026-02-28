@@ -50,6 +50,35 @@ app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) creat
 
 ipcMain.handle('get-prefs', () => ({ clawDir }))
 
+ipcMain.handle('create-claw-dir', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory', 'createDirectory'],
+    title: 'Choose location for new Claw directory',
+  })
+  if (result.canceled || !result.filePaths[0]) return null
+  const dir = result.filePaths[0]
+
+  // Scaffold initial files
+  const scaffold = {
+    'config.json': JSON.stringify({ provider: 'anthropic', apiKey: '', model: '' }, null, 2),
+    'SOUL.md': '# Soul\n\nDescribe who your AI assistant is.\n',
+    'AGENTS.md': '# Agents\n\nWorkspace instructions and conventions.\n',
+    'USER.md': '# User\n\nAbout you.\n',
+  }
+  for (const [name, content] of Object.entries(scaffold)) {
+    const p = path.join(dir, name)
+    if (!fs.existsSync(p)) fs.writeFileSync(p, content)
+  }
+  for (const d of ['skills', 'memory']) {
+    const p = path.join(dir, d)
+    if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true })
+  }
+
+  clawDir = dir
+  savePrefs({ clawDir })
+  return dir
+})
+
 ipcMain.handle('select-claw-dir', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openDirectory'],

@@ -10,21 +10,17 @@ let history = []
 
 async function init() {
   const prefs = await window.api.getPrefs()
-  if (prefs.clawDir) {
-    document.getElementById('clawDirPath').textContent = prefs.clawDir
-    document.getElementById('clawDirPath').classList.add('set')
-    document.getElementById('continueBtn').disabled = false
-  }
   if (prefs.clawDir) enterChat()
 }
 
-async function selectClawDir() {
+async function createNew() {
+  const dir = await window.api.createClawDir()
+  if (dir) enterChat()
+}
+
+async function openExisting() {
   const dir = await window.api.selectClawDir()
-  if (dir) {
-    document.getElementById('clawDirPath').textContent = dir
-    document.getElementById('clawDirPath').classList.add('set')
-    document.getElementById('continueBtn').disabled = false
-  }
+  if (dir) enterChat()
 }
 
 async function enterChat() {
