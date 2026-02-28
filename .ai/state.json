@@ -1,6 +1,8 @@
 {
-  "currentMilestone": "M1",
+  "currentMilestone": "M9",
   "currentFeature": null,
-  "phase": "bootstrap",
-  "lastUpdate": ""
+  "phase": "gate-passed",
+  "version": "0.9.0",
+  "lastUpdate": "2026-02-28",
+  "completedMilestones": ["M1","M2","M3","M5","M6","M7","M8","M9"]
 }
