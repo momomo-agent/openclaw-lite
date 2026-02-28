@@ -1,13 +1,12 @@
 {
   "name": "paw",
-  "version": "0.12.1",
+  "version": "0.12.2",
   "description": "Portable local AI assistant with multi-agent chat",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
     "dist": "electron-builder --mac",
-    "dist:notarize": "electron-builder --mac && bash scripts/notarize.sh",
     "dist:notarize": "electron-builder --mac && bash scripts/notarize.sh",
     "dbb": "node .ai/dbb/dbb-test.js"
   },
@@ -18,7 +17,9 @@
     "productName": "Paw",
     "mac": {
       "category": "public.app-category.productivity",
-      "target": "dmg"
+      "target": "dmg",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
     },
     "files": ["main.js", "preload.js", "renderer/**/*", "assets/**/*", "package.json"],
     "dmg": { "title": "Paw" }
