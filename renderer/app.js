@@ -239,7 +239,7 @@ async function send() {
   const card = document.createElement('div')
   card.className = 'msg-card assistant'
   const _t = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
-  card.innerHTML = `<div class="msg-avatar">🤖</div><div class="msg-body"><div class="msg-header"><span class="msg-name">${esc(targetAgentName)}</span><span class="msg-time">${_t}</span></div><div class="msg-content md-content"></div></div>`
+  card.innerHTML = `<div class="msg-avatar">🤖</div><div class="msg-body"><div class="msg-header"><span class="msg-name">${esc(targetAgentName)}</span><span class="msg-time">${_t}</span></div><div class="msg-content md-content"><span class="typing-indicator">思考中…</span></div></div>`
   messages.appendChild(card)
   const contentEl = card.querySelector('.md-content')
   let fullText = ''
@@ -256,7 +256,13 @@ async function send() {
 
   try {
     const result = await window.api.chat({ prompt: text, history, agentId: targetAgentId, files })
-    contentEl.innerHTML = linkifyPaths(marked.parse(result.answer || fullText))
+    console.log('[Paw] chat result:', JSON.stringify({ answer: (result?.answer || '').slice(0, 100), fullText: fullText.slice(0, 100) }))
+    const finalText = result?.answer || fullText
+    if (finalText.trim()) {
+      contentEl.innerHTML = linkifyPaths(marked.parse(finalText))
+    } else {
+      contentEl.innerHTML = '<span style="color:#666;font-style:italic">（无文本回复）</span>'
+    }
     // Auto-collapse tool steps
     collapseToolSteps()
     history.push({ prompt: text, answer: result.answer || fullText })

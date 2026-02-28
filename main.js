@@ -539,7 +539,7 @@ async function streamAnthropic(messages, systemPrompt, config, win) {
       }
     }
 
-    if (!toolCalls.length) { pushStatus(win, 'done', 'Done'); pushWatsonStatus('done', '已完成本次回复'); return { answer: fullText } }
+    if (!toolCalls.length) { pushStatus(win, 'done', 'Done'); pushWatsonStatus('done', '已完成本次回复'); console.log('[Paw] streamAnthropic done, fullText length:', fullText.length); return { answer: fullText } }
 
     // Execute tools and continue
     const assistantContent = []
