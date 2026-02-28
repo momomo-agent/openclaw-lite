@@ -3,8 +3,7 @@ const path = require('path')
 const fs = require('fs')
 
 let mainWindow
-let dataDir = null   // ~/.openclaw/ compatible
-let workDir = null   // ~/clawd/ compatible
+let clawDir = null   // single directory for everything
 
 // Persist directory choices
 const PREFS_PATH = path.join(app.getPath('userData'), 'prefs.json')
@@ -40,8 +39,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   const prefs = loadPrefs()
-  dataDir = prefs.dataDir || null
-  workDir = prefs.workDir || null
+  clawDir = prefs.clawDir || null
   createWindow()
 })
 
@@ -50,30 +48,17 @@ app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) creat
 
 // ── IPC: Directory selection ──
 
-ipcMain.handle('get-prefs', () => ({ dataDir, workDir }))
+ipcMain.handle('get-prefs', () => ({ clawDir }))
 
-ipcMain.handle('select-data-dir', async () => {
+ipcMain.handle('select-claw-dir', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openDirectory'],
-    title: 'Select Data Directory (e.g. ~/.openclaw)',
+    title: 'Select Claw Directory',
   })
   if (!result.canceled && result.filePaths[0]) {
-    dataDir = result.filePaths[0]
-    savePrefs({ dataDir, workDir })
-    return dataDir
-  }
-  return null
-})
-
-ipcMain.handle('select-work-dir', async () => {
-  const result = await dialog.showOpenDialog(mainWindow, {
-    properties: ['openDirectory'],
-    title: 'Select Workspace Directory (e.g. ~/clawd)',
-  })
-  if (!result.canceled && result.filePaths[0]) {
-    workDir = result.filePaths[0]
-    savePrefs({ dataDir, workDir })
-    return workDir
+    clawDir = result.filePaths[0]
+    savePrefs({ clawDir })
+    return clawDir
   }
   return null
 })
@@ -81,14 +66,14 @@ ipcMain.handle('select-work-dir', async () => {
 // ── IPC: Read config.json from data dir ──
 
 ipcMain.handle('get-config', () => {
-  if (!dataDir) return null
-  const p = path.join(dataDir, 'config.json')
+  if (!clawDir) return null
+  const p = path.join(clawDir, 'config.json')
   try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch { return {} }
 })
 
 ipcMain.handle('save-config', (_, config) => {
-  if (!dataDir) return false
-  fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify(config, null, 2))
+  if (!clawDir) return false
+  fs.writeFileSync(path.join(clawDir, 'config.json'), JSON.stringify(config, null, 2))
   return true
 })
 
@@ -100,8 +85,8 @@ ipcMain.handle('build-system-prompt', () => buildSystemPrompt())
 
 ipcMain.handle('chat', async (_, { prompt, history }) => {
   const config = (() => {
-    if (!dataDir) return {}
-    const p = path.join(dataDir, 'config.json')
+    if (!clawDir) return {}
+    const p = path.join(clawDir, 'config.json')
     try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch { return {} }
   })()
 
@@ -134,22 +119,16 @@ ipcMain.handle('chat', async (_, { prompt, history }) => {
 // Helper: reuse build-system-prompt logic
 async function buildSystemPrompt() {
   const parts = []
-  if (dataDir) {
-    for (const f of ['SOUL.md', 'MEMORY.md']) {
-      const p = path.join(dataDir, f)
-      if (fs.existsSync(p)) parts.push(`## ${f}\n${fs.readFileSync(p, 'utf8')}`)
-    }
-    const skillsDir = path.join(dataDir, 'skills')
-    if (fs.existsSync(skillsDir)) {
-      const skills = fs.readdirSync(skillsDir).filter(d => fs.existsSync(path.join(skillsDir, d, 'SKILL.md')))
-      if (skills.length) parts.push(`## Available Skills\n${skills.map(s => `- ${s}`).join('\n')}`)
-    }
+  if (!clawDir) return ''
+  // All files from single directory
+  for (const f of ['SOUL.md', 'MEMORY.md', 'AGENTS.md', 'NOW.md', 'USER.md', 'IDENTITY.md']) {
+    const p = path.join(clawDir, f)
+    if (fs.existsSync(p)) parts.push(`## ${f}\n${fs.readFileSync(p, 'utf8')}`)
   }
-  if (workDir) {
-    for (const f of ['AGENTS.md', 'NOW.md', 'USER.md', 'IDENTITY.md']) {
-      const p = path.join(workDir, f)
-      if (fs.existsSync(p)) parts.push(`## ${f}\n${fs.readFileSync(p, 'utf8')}`)
-    }
+  const skillsDir = path.join(clawDir, 'skills')
+  if (fs.existsSync(skillsDir)) {
+    const skills = fs.readdirSync(skillsDir).filter(d => fs.existsSync(path.join(skillsDir, d, 'SKILL.md')))
+    if (skills.length) parts.push(`## Available Skills\n${skills.map(s => `- ${s}`).join('\n')}`)
   }
   return parts.join('\n\n---\n\n')
 }

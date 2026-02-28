@@ -15,21 +15,12 @@
       <p class="subtitle">Portable local AI assistant</p>
 
       <div class="dir-picker">
-        <label>Data Directory</label>
+        <label>Claw Directory</label>
         <div class="dir-row">
-          <span id="dataDirPath" class="dir-path">Not selected</span>
-          <button onclick="selectDataDir()">Browse</button>
+          <span id="clawDirPath" class="dir-path">Not selected</span>
+          <button onclick="selectClawDir()">Browse</button>
         </div>
-        <p class="hint">~/.openclaw/ or compatible directory (config, skills, memory)</p>
-      </div>
-
-      <div class="dir-picker">
-        <label>Workspace Directory</label>
-        <div class="dir-row">
-          <span id="workDirPath" class="dir-path">Not selected</span>
-          <button onclick="selectWorkDir()">Browse</button>
-        </div>
-        <p class="hint">~/clawd/ or compatible directory (AGENTS.md, projects)</p>
+        <p class="hint">All-in-one: config, skills, memory, projects</p>
       </div>
 
       <button id="continueBtn" class="primary-btn" disabled onclick="enterChat()">Continue</button>

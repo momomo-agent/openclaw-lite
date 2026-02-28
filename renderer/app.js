@@ -10,42 +10,21 @@ let history = []
 
 async function init() {
   const prefs = await window.api.getPrefs()
-  if (prefs.dataDir) {
-    document.getElementById('dataDirPath').textContent = prefs.dataDir
-    document.getElementById('dataDirPath').classList.add('set')
+  if (prefs.clawDir) {
+    document.getElementById('clawDirPath').textContent = prefs.clawDir
+    document.getElementById('clawDirPath').classList.add('set')
+    document.getElementById('continueBtn').disabled = false
   }
-  if (prefs.workDir) {
-    document.getElementById('workDirPath').textContent = prefs.workDir
-    document.getElementById('workDirPath').classList.add('set')
-  }
-  updateContinueBtn()
-
-  // If both dirs already set, go straight to chat
-  if (prefs.dataDir && prefs.workDir) enterChat()
+  if (prefs.clawDir) enterChat()
 }
 
-async function selectDataDir() {
-  const dir = await window.api.selectDataDir()
+async function selectClawDir() {
+  const dir = await window.api.selectClawDir()
   if (dir) {
-    document.getElementById('dataDirPath').textContent = dir
-    document.getElementById('dataDirPath').classList.add('set')
-    updateContinueBtn()
+    document.getElementById('clawDirPath').textContent = dir
+    document.getElementById('clawDirPath').classList.add('set')
+    document.getElementById('continueBtn').disabled = false
   }
-}
-
-async function selectWorkDir() {
-  const dir = await window.api.selectWorkDir()
-  if (dir) {
-    document.getElementById('workDirPath').textContent = dir
-    document.getElementById('workDirPath').classList.add('set')
-    updateContinueBtn()
-  }
-}
-
-function updateContinueBtn() {
-  const d = document.getElementById('dataDirPath').classList.contains('set')
-  const w = document.getElementById('workDirPath').classList.contains('set')
-  document.getElementById('continueBtn').disabled = !(d && w)
 }
 
 async function enterChat() {
