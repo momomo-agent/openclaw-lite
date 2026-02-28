@@ -1,32 +1,40 @@
-# Roadmap — M12 体验修复（工具过程 + 回复不显示 + scrollbar）
+# M12 Roadmap — 对话体验重构
 
-## 意图确认
-- **根因**：三个独立问题——①token listener 全局覆盖导致多轮 tool loop 后回复写不到正确卡片 ②工具输出原文堆叠无折叠 ③系统默认 scrollbar 突兀 + 内容水平溢出
-- **最优方案**：requestId 绑定（不是 hack 修 listener，而是从数据流层面保证正确性）
-- **架构 vs 局部**：requestId 是架构级改动（影响 main→preload→renderer 三层），scrollbar/overflow 是局部 CSS
-- **影响范围**：main.js（两个 streaming 函数）、preload.js（桥接）、app.js（渲染）、style.css（视觉）
+## F028: 工具步骤内联显示（REQ-M12-01）
 
-## Phase 1: 根因修复（已完成）
-- [x] main.js: 每次 chat 生成 requestId，chat-token/chat-tool-step 事件带 requestId
-- [x] preload.js: 透传事件数据对象
-- [x] app.js: onToken 接收 {requestId, text}，兼容旧格式 string
-- [x] app.js: 工具步骤渲染到每条回复自带的 tool-group-slot（不再全局 append）
+### Phase 1: 数据流改造
+- [ ] main.js: streaming 时区分"文本块"和"工具块"，每个工具调用完成后发 `chat-tool-step` 事件（含 requestId + name + output）
+- [ ] main.js: 每轮新文本开始时发 `chat-text-start` 事件，让 renderer 知道"工具块结束，新文本开始"
+- [ ] preload.js: 暴露 `onTextStart` 回调
 
-## Phase 2: 视觉修复（已完成）
-- [x] style.css: 自定义 scrollbar（6px thin, 半透明）
-- [x] style.css: body overflow:hidden, messages overflow-x:hidden
-- [x] style.css: msg-content/md-content word-break:break-word + overflow-x:hidden
-- [x] style.css: tool-group-live 样式（折叠/展开、计数、摘要）
+### Phase 2: Renderer 内联渲染
+- [ ] app.js: msg-card 内部用 `msg-flow` 容器替代固定的 `msg-content` + `tool-group-slot`
+- [ ] app.js: 收到 token → 追加到当前文本段；收到 tool-step → 插入内联工具块；收到 text-start → 创建新文本段
+- [ ] app.js: 连续工具调用折叠在同一个 `tool-group-inline` 里，显示"N 个工具调用"，可展开/折叠
+- [ ] style.css: `tool-group-inline` 样式（圆角、边框、折叠动画）
 
-## Phase 3: 自审 Layer 1（待做）
-- [ ] Code review: 读 git diff，检查 SOLID/安全/边界条件/精简度
-- [ ] 确认 build 零错误
-- [ ] 确认 DBB 6/6
+### Phase 3: 完成态
+- [ ] app.js: 对话完成时折叠所有内联工具组（保留可展开）
+- [ ] 验证：发一条触发工具调用的消息，确认工具步骤在文本中间内联显示
 
-## Phase 4: DBB Layer 2 六维度（待做）
-- [ ] 设计测试用例（正常/边界/异常/交互）
-- [ ] 用 agent-control 截图验证六维度
-- [ ] 出 test-results.md + 截图存 .ai/dbb/latest/
+## F029: 侧边栏状态行（REQ-M12-02）
 
-## Phase 5: Gate
-- [ ] 全部通过 → 标记 [F✓][G✓]
+### Phase 1: 去掉 per-card 状态行
+- [ ] app.js: 移除 card-status-line 的创建和更新逻辑
+- [ ] style.css: 清理 card-status-line 相关样式
+
+### Phase 2: watson status 反映对话状态
+- [ ] app.js: 发送消息时更新 watson status 为 thinking
+- [ ] app.js: 收到 tool-step 时更新为 running + 工具名
+- [ ] app.js: 完成时更新为 done → 3秒后回到 idle
+- [ ] 验证：发消息观察侧边栏状态变化
+
+## F030: system prompt 工具引导（REQ-M12-03）
+
+- [ ] main.js: buildSystemPrompt() 末尾追加完整工具列表和使用规则
+- [ ] 验证：发"帮我写个报告存成 markdown"，确认 AI 调用 file_write
+
+## F031: 目录自动初始化（REQ-M12-04）
+
+- [ ] main.js: select-claw-dir 和 create-claw-dir 后自动 mkdirSync memory/sessions/agents/skills
+- [ ] 验证：选一个空目录，确认子目录自动创建

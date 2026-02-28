@@ -25,5 +25,9 @@
   {"id":"F024","category":"core","description":"OpenAI 工具调用（function calling + tool loop）","passes":true,"milestone":"M11"},
   {"id":"F025","category":"ecosystem","description":"记忆实时 watch（fs.watch memory/ + renderer 通知）","passes":true,"milestone":"M11"},
   {"id":"F026","category":"ecosystem","description":"Skill 脚本执行（skill_exec 工具）","passes":true,"milestone":"M11"},
-  {"id":"F027","category":"dist","description":"官网更新到 v0.11 全貌","passes":true,"milestone":"M11"}
+  {"id":"F027","category":"dist","description":"官网更新到 v0.11 全貌","passes":true,"milestone":"M11"},
+  {"id":"F028","category":"ux","description":"工具步骤内联显示（按对话顺序，连续折叠）","passes":false,"milestone":"M12"},
+  {"id":"F029","category":"ux","description":"侧边栏状态行反映当前对话状态","passes":false,"milestone":"M12"},
+  {"id":"F030","category":"core","description":"system prompt 工具引导（file_write 等）","passes":false,"milestone":"M12"},
+  {"id":"F031","category":"core","description":"选目录后自动创建子目录","passes":false,"milestone":"M12"}
 ]
