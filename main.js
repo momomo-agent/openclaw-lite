@@ -16,11 +16,12 @@ function savePrefs(p) {
   fs.writeFileSync(PREFS_PATH, JSON.stringify(p, null, 2))
 }
 
+app.disableHardwareAcceleration()
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 900, height: 700,
     minWidth: 600, minHeight: 400,
-    titleBarStyle: 'hiddenInset',
     backgroundColor: '#0a0a0a',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -29,6 +30,12 @@ function createWindow() {
     },
   })
   mainWindow.loadFile('renderer/index.html')
+  mainWindow.webContents.on('console-message', (_, level, msg) => {
+    console.log(`[renderer ${level}] ${msg}`)
+  })
+  mainWindow.webContents.on('did-finish-load', () => {
+    mainWindow.focus()
+  })
 }
 
 app.whenReady().then(() => {
