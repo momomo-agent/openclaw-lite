@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Paw — Portable AI Workspace</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+  background: #0a0a0a; color: #e0e0e0; line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: #ccc; text-decoration: none; }
+a:hover { color: #fff; }
+
+/* Hero */
+.hero {
+  min-height: 80vh; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; text-align: center;
+  padding: 80px 24px 60px;
+}
+.hero-icon { font-size: 64px; margin-bottom: 24px; }
+.hero h1 { font-size: 48px; font-weight: 700; letter-spacing: -1px; color: #fff; }
+.hero .tagline {
+  font-size: 18px; color: #888; margin-top: 12px; max-width: 480px;
+}
+.hero-actions { margin-top: 32px; display: flex; gap: 12px; }
+.btn {
+  padding: 12px 28px; border-radius: 8px; font-size: 14px;
+  font-weight: 600; transition: opacity 0.15s; display: inline-block;
+}
+.btn-primary { background: #e0e0e0; color: #0a0a0a; }
+.btn-primary:hover { opacity: 0.85; color: #0a0a0a; }
+.btn-ghost { border: 1px solid #333; color: #ccc; }
+.btn-ghost:hover { border-color: #555; color: #fff; }
+
+/* Features */
+.features {
+  max-width: 900px; margin: 0 auto; padding: 60px 24px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 32px;
+}
+.feature {
+  padding: 24px; border: 1px solid #ffffff08; border-radius: 12px;
+  background: #0f0f0f;
+}
+.feature-icon { font-size: 28px; margin-bottom: 12px; }
+.feature h3 { font-size: 16px; font-weight: 600; color: #fff; margin-bottom: 6px; }
+.feature p { font-size: 14px; color: #777; }
+
+/* How it works */
+.section { max-width: 640px; margin: 0 auto; padding: 60px 24px; }
+.section h2 {
+  font-size: 28px; font-weight: 700; color: #fff; margin-bottom: 24px;
+  letter-spacing: -0.5px;
+}
+.steps { display: flex; flex-direction: column; gap: 16px; }
+.step {
+  display: flex; gap: 16px; align-items: flex-start;
+  padding: 16px; border-radius: 8px; background: #0f0f0f;
+}
+.step-num {
+  width: 28px; height: 28px; border-radius: 50%; background: #1a1a1a;
+  color: #888; font-size: 13px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.step-text h4 { font-size: 14px; color: #fff; font-weight: 600; }
+.step-text p { font-size: 13px; color: #666; margin-top: 2px; }
+
+/* Code block */
+.code-block {
+  background: #111; border: 1px solid #ffffff0d; border-radius: 8px;
+  padding: 16px 20px; font-family: 'SF Mono', monospace; font-size: 13px;
+  color: #999; overflow-x: auto; margin-top: 24px;
+}
+.code-block .comment { color: #555; }
+.code-block .highlight { color: #e0e0e0; }
+
+/* Footer */
+.footer {
+  text-align: center; padding: 40px 24px; color: #444; font-size: 13px;
+  border-top: 1px solid #ffffff08;
+}
+.footer a { color: #666; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="hero-icon">🐾</div>
+  <h1>Paw</h1>
+  <p class="tagline">Portable AI workspace. One folder, one assistant. Local-first, multi-agent, zero setup.</p>
+  <div class="hero-actions">
+    <a href="https://github.com/momomo-agent/paw/releases" class="btn btn-primary">Download for Mac</a>
+    <a href="https://github.com/momomo-agent/paw" class="btn btn-ghost">GitHub</a>
+  </div>
+</div>
+
+<div class="features">
+  <div class="feature">
+    <div class="feature-icon">📁</div>
+    <h3>One Folder = One Workspace</h3>
+    <p>Config, skills, memory, sessions — all in one directory. Copy it to another machine and keep going.</p>
+  </div>
+  <div class="feature">
+    <div class="feature-icon">🤖</div>
+    <h3>Multi-Agent Chat</h3>
+    <p>Create agents with custom personalities. Add them to sessions. @mention to route. Group chat with AI.</p>
+  </div>
+  <div class="feature">
+    <div class="feature-icon">🔧</div>
+    <h3>Built-in Tools</h3>
+    <p>Search, code execution, file read/write. Agents can use tools autonomously in a loop.</p>
+  </div>
+  <div class="feature">
+    <div class="feature-icon">🔒</div>
+    <h3>Local First</h3>
+    <p>API keys stay on your machine. Conversations stay on your disk. Nothing goes through third-party servers.</p>
+  </div>
+  <div class="feature">
+    <div class="feature-icon">🐚</div>
+    <h3>OpenClaw Compatible</h3>
+    <p>Reads SOUL.md, MEMORY.md, skills/. Drop in an OpenClaw workspace and it just works.</p>
+  </div>
+  <div class="feature">
+    <div class="feature-icon">⚡</div>
+    <h3>Lightweight</h3>
+    <p>No daemon, no backend, no message bus. Just an app and a folder. Under 1200 lines of code.</p>
+  </div>
+</div>
+
+<div class="section">
+  <h2>Get started in 30 seconds</h2>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-text">
+        <h4>Open Paw</h4>
+        <p>Download the DMG, drag to Applications, launch.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-text">
+        <h4>Pick a folder</h4>
+        <p>Choose any directory as your workspace. Or point to an existing OpenClaw workspace.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-text">
+        <h4>Add your API key</h4>
+        <p>Click ⚙️, paste your Anthropic or OpenAI key. Start chatting.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="code-block">
+    <span class="comment"># Your workspace structure</span><br>
+    <span class="highlight">~/my-workspace/</span><br>
+    ├── SOUL.md &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># personality</span><br>
+    ├── MEMORY.md &nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># long-term memory</span><br>
+    ├── config.json &nbsp;&nbsp;&nbsp;<span class="comment"># provider + api key</span><br>
+    ├── agents/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># custom agents</span><br>
+    ├── sessions/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># chat history</span><br>
+    └── skills/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># capabilities</span>
+  </div>
+</div>
+
+<div class="footer">
+  <p>Built by <a href="https://github.com/momomo-agent">momomo-agent</a> · <a href="https://github.com/momomo-agent/paw">Source</a></p>
+</div>
+
+</body>
+</html>
