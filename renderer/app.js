@@ -262,7 +262,9 @@ async function send() {
   try {
     const result = await window.api.chat({ prompt: text, history, agentId: targetAgentId, files })
     console.log('[Paw] chat result:', JSON.stringify({ answer: (result?.answer || '').slice(0, 100), fullText: fullText.slice(0, 100) }))
-    const finalText = result?.answer || fullText
+    // Use streaming fullText (already rendered by onToken) — don't overwrite with result.answer
+    // which may contain intermediate round fragments
+    const finalText = fullText || result?.answer || ''
     if (finalText.trim()) {
       contentEl.innerHTML = linkifyPaths(marked.parse(finalText))
     } else {
@@ -270,14 +272,14 @@ async function send() {
     }
     // Auto-collapse tool steps
     collapseToolSteps()
-    history.push({ prompt: text, answer: result.answer || fullText })
+    history.push({ prompt: text, answer: finalText })
     // Persist to session
     if (currentSessionId) {
       const s = await window.api.loadSession(currentSessionId)
       if (s) {
         s.messages.push(
           { role: 'user', content: text, sender: 'You' },
-          { role: 'assistant', content: result.answer || fullText, sender: targetAgentName }
+          { role: 'assistant', content: finalText, sender: targetAgentName }
         )
         if (s.messages.length === 2) s.title = text.slice(0, 40)
         await window.api.saveSession(s)
