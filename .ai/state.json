@@ -1,8 +1,8 @@
 {
   "currentMilestone": "M12",
-  "currentFeature": "F028",
-  "phase": "do",
+  "currentFeature": null,
+  "phase": "review",
   "version": "0.12.5",
   "lastUpdate": "2026-02-28",
-  "completedMilestones": ["M1","M2","M3","M5","M6","M7","M8","M9","M10","M11"]
+  "completedMilestones": ["M1","M2","M3","M5","M6","M7","M8","M9","M10","M11","M12"]
 }
