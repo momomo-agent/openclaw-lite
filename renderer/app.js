@@ -245,8 +245,11 @@ async function send() {
   const toolSlot = card.querySelector('.tool-group-slot')
   let fullText = ''
   let myToolSteps = []
+  // Get requestId synchronously BEFORE chat() so filtering is ready
+  const myRequestId = await window.api.chatPrepare()
 
   window.api.onToken((d) => {
+    if (d.requestId && d.requestId !== myRequestId) return
     const t = typeof d === 'string' ? d : d.text
     if (!t) return
     fullText += t
@@ -254,8 +257,9 @@ async function send() {
     messages.scrollTop = messages.scrollHeight
   })
 
-  window.api.onToolStep(({ name, output }) => {
-    myToolSteps.push({ name, output: String(output).slice(0, 120) })
+  window.api.onToolStep((d) => {
+    if (d.requestId && d.requestId !== myRequestId) return
+    myToolSteps.push({ name: d.name, output: String(d.output).slice(0, 120) })
     renderToolGroup(toolSlot, myToolSteps)
   })
 

@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('api', {
   saveConfig: (c) => ipcRenderer.invoke('save-config', c),
   buildSystemPrompt: () => ipcRenderer.invoke('build-system-prompt'),
   chat: (msg) => ipcRenderer.invoke('chat', msg),
+  chatPrepare: () => ipcRenderer.invoke('chat-prepare'),
   onToken: (cb) => {
     ipcRenderer.removeAllListeners('chat-token')
     ipcRenderer.on('chat-token', (_, d) => cb(d))

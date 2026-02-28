@@ -412,8 +412,16 @@ ipcMain.handle('read-file', (_, filePath) => {
 
 // ── IPC: Chat with LLM ──
 
+// Current active requestId — renderer calls chat-prepare to get it before chat()
+let _nextRequestId = null
+ipcMain.handle('chat-prepare', () => {
+  _nextRequestId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+  return _nextRequestId
+})
+
 ipcMain.handle('chat', async (_, { prompt, history, agentId, files }) => {
-  const requestId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+  const requestId = _nextRequestId || Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+  _nextRequestId = null
   const config = (() => {
     if (!clawDir) return {}
     const p = path.join(clawDir, 'config.json')
@@ -500,9 +508,10 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId) {
   const base = (config.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '')
   const endpoint = base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`
   const headers = { 'Content-Type': 'application/json', 'x-api-key': config.apiKey, 'anthropic-version': '2023-06-01' }
-  let fullText = '', msgs = [...messages]
+  let fullText = '', roundText = '', msgs = [...messages]
 
   for (let round = 0; round < 5; round++) {
+    roundText = ''
     pushStatus(win, 'thinking', 'Thinking...')
     // Watson status is AI-authored; provide a default fallback when no call happens.
     pushWatsonStatus('thinking', '正在思考问题中')
@@ -531,7 +540,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId) {
           if (evt.type === 'content_block_start' && evt.content_block?.type === 'tool_use') {
             curBlock = { id: evt.content_block.id, name: evt.content_block.name, json: '' }
           } else if (evt.type === 'content_block_delta') {
-            if (evt.delta?.text) { fullText += evt.delta.text; win.webContents.send('chat-token', { requestId, text: evt.delta.text }) }
+            if (evt.delta?.text) { roundText += evt.delta.text; fullText += evt.delta.text; win.webContents.send('chat-token', { requestId, text: evt.delta.text }) }
             if (evt.delta?.partial_json && curBlock) curBlock.json += evt.delta.partial_json
           } else if (evt.type === 'content_block_stop' && curBlock) {
             toolCalls.push(curBlock); curBlock = null
@@ -540,11 +549,16 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId) {
       }
     }
 
-    if (!toolCalls.length) { pushStatus(win, 'done', 'Done'); pushWatsonStatus('done', '已完成本次回复'); console.log('[Paw] streamAnthropic done, fullText length:', fullText.length); return { answer: fullText } }
+    if (!toolCalls.length) {
+      pushStatus(win, 'done', 'Done')
+      pushWatsonStatus('done', '已完成本次回复')
+      console.log('[Paw] streamAnthropic done, fullText length:', fullText.length)
+      return { answer: fullText }
+    }
 
     // Execute tools and continue
     const assistantContent = []
-    if (fullText) assistantContent.push({ type: 'text', text: fullText })
+    if (roundText) assistantContent.push({ type: 'text', text: roundText })
     for (const tc of toolCalls) assistantContent.push({ type: 'tool_use', id: tc.id, name: tc.name, input: JSON.parse(tc.json || '{}') })
     msgs.push({ role: 'assistant', content: assistantContent })
 
@@ -562,8 +576,10 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId) {
     }
     msgs.push({ role: 'user', content: toolResults })
     fullText += '\n'
+    win.webContents.send('chat-token', { requestId, text: '\n' })
   }
   pushStatus(win, 'done', 'Done')
+  pushWatsonStatus('done', '已完成本次回复')
   return { answer: fullText }
 }
 
@@ -583,9 +599,10 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId) {
   if (systemPrompt) msgs.push({ role: 'system', content: systemPrompt })
   msgs.push(...messages)
 
-  let fullText = ''
+  let fullText = '', roundText = ''
 
   for (let round = 0; round < 5; round++) {
+    roundText = ''
     pushStatus(win, 'thinking', 'Thinking...')
     pushWatsonStatus('thinking', '正在思考问题中')
 
@@ -611,6 +628,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId) {
           const choice = JSON.parse(line.slice(6)).choices?.[0]
           const delta = choice?.delta
           if (delta?.content) {
+            roundText += delta.content
             fullText += delta.content
             win.webContents.send('chat-token', { requestId, text: delta.content })
           }
@@ -635,7 +653,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId) {
     }
 
     // Build assistant message with tool_calls
-    const assistantMsg = { role: 'assistant', content: fullText || null, tool_calls: tcList.map(tc => ({
+    const assistantMsg = { role: 'assistant', content: roundText || null, tool_calls: tcList.map(tc => ({
       id: tc.id, type: 'function', function: { name: tc.name, arguments: tc.args }
     }))}
     msgs.push(assistantMsg)
@@ -654,6 +672,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId) {
       msgs.push({ role: 'tool', tool_call_id: tc.id, content: String(result) })
     }
     fullText += '\n'
+    win.webContents.send('chat-token', { requestId, text: '\n' })
   }
 
   pushStatus(win, 'done', 'Done')
