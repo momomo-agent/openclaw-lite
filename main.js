@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron')
 const path = require('path')
 const fs = require('fs')
-const { execSync } = require('child_process')
+const vm = require('vm')
 
 let mainWindow
 let clawDir = null   // single directory for everything
@@ -41,7 +41,12 @@ async function executeTool(name, input, config) {
       return data.results?.map(r => `${r.title}\n${r.url}\n${r.content}`).join('\n\n') || 'No results'
     }
     case 'code_exec': {
-      try { return String(eval(input.code)) } catch (e) { return `Error: ${e.message}` }
+      try {
+        const sandbox = { result: undefined, console: { log: (...a) => a.join(' ') } }
+        vm.createContext(sandbox)
+        sandbox.result = vm.runInContext(input.code, sandbox, { timeout: 5000 })
+        return String(sandbox.result)
+      } catch (e) { return `Error: ${e.message}` }
     }
     case 'file_read': {
       if (!clawDir) return 'Error: No claw directory'
