@@ -31,14 +31,27 @@
 
   <!-- Chat screen -->
   <div id="chatScreen" class="screen" style="display:none">
-    <div class="chat-header">
-      <span>⚡ OpenClaw Lite</span>
-      <button class="icon-btn" onclick="openSettings()">⚙️</button>
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <span>Sessions</span>
+        <button class="icon-btn" onclick="newSession()">+</button>
+      </div>
+      <div id="sessionList" class="session-list"></div>
     </div>
-    <div id="messages" class="messages"></div>
-    <div class="input-bar">
-      <textarea id="input" placeholder="Ask anything..." rows="1"></textarea>
-      <button id="sendBtn" onclick="send()">↑</button>
+    <div class="chat-main">
+      <div class="chat-header">
+        <button class="icon-btn" onclick="toggleSidebar()">☰</button>
+        <span id="sessionTitle">New Chat</span>
+        <div class="header-actions">
+          <button class="icon-btn" onclick="exportChat()">📥</button>
+          <button class="icon-btn" onclick="openSettings()">⚙️</button>
+        </div>
+      </div>
+      <div id="messages" class="messages"></div>
+      <div class="input-bar">
+        <textarea id="input" placeholder="Ask anything..." rows="1"></textarea>
+        <button id="sendBtn" onclick="send()">↑</button>
+      </div>
     </div>
   </div>
 

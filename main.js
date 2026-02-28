@@ -4,7 +4,39 @@ const fs = require('fs')
 const vm = require('vm')
 
 let mainWindow
-let clawDir = null   // single directory for everything
+let clawDir = null
+let currentSessionId = null
+
+// ── Session helpers ──
+function sessionsDir() { return clawDir ? path.join(clawDir, 'sessions') : null }
+
+function listSessions() {
+  const dir = sessionsDir()
+  if (!dir || !fs.existsSync(dir)) return []
+  return fs.readdirSync(dir).filter(f => f.endsWith('.json')).map(f => {
+    try { const d = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); return { id: d.id, title: d.title, updatedAt: d.updatedAt } } catch { return null }
+  }).filter(Boolean).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+}
+
+function loadSession(id) {
+  const p = path.join(sessionsDir(), `${id}.json`)
+  try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch { return null }
+}
+
+function saveSession(session) {
+  const dir = sessionsDir()
+  if (!dir) return
+  fs.mkdirSync(dir, { recursive: true })
+  session.updatedAt = Date.now()
+  fs.writeFileSync(path.join(dir, `${session.id}.json`), JSON.stringify(session, null, 2))
+}
+
+function createSession(title) {
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+  const session = { id, title: title || 'New Chat', messages: [], createdAt: Date.now(), updatedAt: Date.now() }
+  saveSession(session)
+  return session
+}
 
 // ── Tool definitions ──
 const TOOLS = [
@@ -165,6 +197,24 @@ ipcMain.handle('save-config', (_, config) => {
   if (!clawDir) return false
   fs.writeFileSync(path.join(clawDir, 'config.json'), JSON.stringify(config, null, 2))
   return true
+})
+
+// ── IPC: Sessions ──
+
+ipcMain.handle('sessions-list', () => listSessions())
+ipcMain.handle('session-load', (_, id) => loadSession(id))
+ipcMain.handle('session-save', (_, session) => { saveSession(session); return true })
+ipcMain.handle('session-create', (_, title) => createSession(title))
+ipcMain.handle('session-delete', (_, id) => {
+  const p = path.join(sessionsDir(), `${id}.json`)
+  try { fs.unlinkSync(p); return true } catch { return false }
+})
+ipcMain.handle('session-export', (_, id) => {
+  const s = loadSession(id)
+  if (!s) return null
+  let md = `# ${s.title}\n\n`
+  for (const m of s.messages) md += `**${m.role === 'user' ? 'You' : 'Assistant'}:**\n${m.content}\n\n---\n\n`
+  return md
 })
 
 // ── IPC: Build system prompt from directories ──

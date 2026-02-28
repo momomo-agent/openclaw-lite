@@ -7,6 +7,7 @@ body {
 }
 
 .screen { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; overflow-y: auto; }
+#chatScreen { flex-direction: row; justify-content: stretch; align-items: stretch; }
 
 /* Setup */
 .setup-container {
@@ -52,6 +53,29 @@ button:hover { background: #2a2a2a; }
 }
 .primary-btn:hover { opacity: 0.9; }
 .primary-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* Sidebar */
+.sidebar {
+  width: 220px; background: #0a0a0a; border-right: 1px solid #1a1a1a;
+  display: flex; flex-direction: column; flex-shrink: 0;
+}
+.sidebar.hidden { display: none; }
+.sidebar-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 14px; font-size: 13px; font-weight: 600; color: #888;
+}
+.session-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
+.session-item {
+  padding: 8px 10px; border-radius: 6px; cursor: pointer;
+  font-size: 13px; color: #999; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; display: flex; justify-content: space-between; align-items: center;
+}
+.session-item:hover { background: #141414; color: #e0e0e0; }
+.session-item.active { background: #1a1a1a; color: #fbbf24; }
+.session-item .del-btn { opacity: 0; font-size: 11px; color: #555; cursor: pointer; }
+.session-item:hover .del-btn { opacity: 1; }
+.chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.header-actions { display: flex; gap: 4px; }
 
 /* Chat */
 .chat-header {
