@@ -315,8 +315,6 @@ function addCard(role, content, sender, rawHtml) {
   messages.scrollTop = messages.scrollHeight
 }
 
-let pendingToolSteps = []
-
 function renderToolGroup(slot, steps) {
   if (!steps.length) return
   slot.innerHTML = ''
@@ -343,10 +341,7 @@ function renderToolGroup(slot, steps) {
   messages.scrollTop = messages.scrollHeight
 }
 
-function addToolCard(name, output) {
-  // Legacy fallback — not used in new flow
-  renderToolGroup(document.createElement('div'), [{ name, output }])
-}
+// addToolCard removed — tool steps now render inline via renderToolGroup
 
 function linkifyPaths(html) {
   return html.replace(/(?<![="'])(\/([\w./-]+\/)+[\w.-]+\.\w+)/g, (m) => {
@@ -355,7 +350,7 @@ function linkifyPaths(html) {
 }
 
 function collapseToolSteps() {
-  pendingToolSteps = []
+  // Tool steps now render inline per-card via tool-group-slot; nothing to collapse globally
 }
 
 function esc(s) {
