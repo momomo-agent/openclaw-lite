@@ -1,11 +1,31 @@
 // Paw — Renderer App
 
-// Watson status listener (AI-native)
-window.api.onWatsonStatus(({ level, text }) => {
+// ── Request Event Bus ──
+// All chat requests register here; events are routed by requestId
+const requestHandlers = new Map() // requestId -> { onToken, onToolStep, onStatus }
+
+// Persistent listeners — never removed, just dispatch by requestId
+window.api.onToken((d) => {
+  const h = requestHandlers.get(d.requestId)
+  if (h?.onToken) h.onToken(d)
+})
+window.api.onToolStep((d) => {
+  const h = requestHandlers.get(d.requestId)
+  if (h?.onToolStep) h.onToolStep(d)
+})
+
+// Watson status — update both global sidebar AND active request's card
+window.api.onWatsonStatus(({ level, text, requestId }) => {
+  // Global sidebar (kept for idle/general status)
   const dot = document.getElementById('watsonDot')
   const t = document.getElementById('watsonText')
   if (dot) dot.className = `watson-dot ${level}`
   if (t) t.textContent = text || ''
+  // Per-card status if requestId provided
+  if (requestId) {
+    const h = requestHandlers.get(requestId)
+    if (h?.onStatus) h.onStatus(level, text)
+  }
 })
 
 // Memory change listener
@@ -248,19 +268,36 @@ async function send() {
   // Get requestId synchronously BEFORE chat() so filtering is ready
   const myRequestId = await window.api.chatPrepare()
 
-  window.api.onToken((d) => {
-    if (d.requestId && d.requestId !== myRequestId) return
-    const t = typeof d === 'string' ? d : d.text
-    if (!t) return
-    fullText += t
-    contentEl.innerHTML = marked.parse(fullText)
-    messages.scrollTop = messages.scrollHeight
-  })
+  // Add per-card status line
+  const statusLine = document.createElement('div')
+  statusLine.className = 'card-status-line'
+  statusLine.innerHTML = '<span class="card-status-dot thinking"></span><span class="card-status-text">思考中…</span>'
+  card.querySelector('.msg-body').appendChild(statusLine)
 
-  window.api.onToolStep((d) => {
-    if (d.requestId && d.requestId !== myRequestId) return
-    myToolSteps.push({ name: d.name, output: String(d.output).slice(0, 120) })
-    renderToolGroup(toolSlot, myToolSteps)
+  // Register handlers in the event bus
+  requestHandlers.set(myRequestId, {
+    onToken(d) {
+      const t = typeof d === 'string' ? d : d.text
+      if (!t) return
+      fullText += t
+      contentEl.innerHTML = marked.parse(fullText)
+      messages.scrollTop = messages.scrollHeight
+    },
+    onToolStep(d) {
+      myToolSteps.push({ name: d.name, output: String(d.output).slice(0, 120) })
+      renderToolGroup(toolSlot, myToolSteps)
+    },
+    onStatus(level, text) {
+      const dot = statusLine.querySelector('.card-status-dot')
+      const txt = statusLine.querySelector('.card-status-text')
+      if (dot) dot.className = `card-status-dot ${level}`
+      if (txt) txt.textContent = text || ''
+      if (level === 'done') {
+        setTimeout(() => { statusLine.style.display = 'none' }, 2000)
+      } else {
+        statusLine.style.display = ''
+      }
+    }
   })
 
   try {
@@ -274,8 +311,14 @@ async function send() {
     } else {
       contentEl.innerHTML = '<span style="color:#666;font-style:italic">（无文本回复）</span>'
     }
-    // Auto-collapse tool steps
-    collapseToolSteps()
+    // Clean up event bus (keep tool steps visible, don't collapse)
+    requestHandlers.delete(myRequestId)
+    // Mark card status as done
+    const sDot = statusLine.querySelector('.card-status-dot')
+    const sTxt = statusLine.querySelector('.card-status-text')
+    if (sDot) sDot.className = 'card-status-dot done'
+    if (sTxt) sTxt.textContent = '已完成'
+    setTimeout(() => { statusLine.style.display = 'none' }, 2000)
     history.push({ prompt: text, answer: finalText })
     // Persist to session
     if (currentSessionId) {

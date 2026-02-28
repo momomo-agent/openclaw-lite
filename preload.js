@@ -10,11 +10,9 @@ contextBridge.exposeInMainWorld('api', {
   chat: (msg) => ipcRenderer.invoke('chat', msg),
   chatPrepare: () => ipcRenderer.invoke('chat-prepare'),
   onToken: (cb) => {
-    ipcRenderer.removeAllListeners('chat-token')
     ipcRenderer.on('chat-token', (_, d) => cb(d))
   },
   onToolStep: (cb) => {
-    ipcRenderer.removeAllListeners('chat-tool-step')
     ipcRenderer.on('chat-tool-step', (_, d) => cb(d))
   },
   onChatDone: (cb) => ipcRenderer.on('chat-done', (_, r) => cb(r)),
@@ -41,7 +39,7 @@ contextBridge.exposeInMainWorld('api', {
   heartbeatStop: () => ipcRenderer.invoke('heartbeat-stop'),
   onHeartbeat: (cb) => ipcRenderer.on('heartbeat-result', (_, r) => cb(r)),
   onStatus: (cb) => { ipcRenderer.removeAllListeners('agent-status'); ipcRenderer.on('agent-status', (_, s) => cb(s)) },
-  onWatsonStatus: (cb) => { ipcRenderer.removeAllListeners('watson-status'); ipcRenderer.on('watson-status', (_, s) => cb(s)) },
+  onWatsonStatus: (cb) => { ipcRenderer.on('watson-status', (_, s) => cb(s)) },
   // File operations
   openFile: (p) => ipcRenderer.invoke('open-file', p),
   readFile: (p) => ipcRenderer.invoke('read-file', p),

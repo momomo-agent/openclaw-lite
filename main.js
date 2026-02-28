@@ -505,6 +505,7 @@ async function buildSystemPrompt() {
 // ── Anthropic Streaming ──
 
 async function streamAnthropic(messages, systemPrompt, config, win, requestId) {
+  _activeRequestId = requestId
   const base = (config.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '')
   const endpoint = base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`
   const headers = { 'Content-Type': 'application/json', 'x-api-key': config.apiKey, 'anthropic-version': '2023-06-01' }
@@ -586,6 +587,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId) {
 // ── OpenAI Streaming ──
 
 async function streamOpenAI(messages, systemPrompt, config, win, requestId) {
+  _activeRequestId = requestId
   const base = (config.baseUrl || 'https://api.openai.com').replace(/\/+$/, '')
   const endpoint = base.endsWith('/v1') ? `${base}/chat/completions` : `${base}/v1/chat/completions`
 
@@ -719,12 +721,16 @@ function sendNotification(title, body) {
   if (Notification.isSupported()) new Notification({ title, body }).show()
 }
 
-function pushWatsonStatus(level, text) {
-  const payload = { level, text }
+// requestId is optional — when provided, renderer routes to per-card status
+let _activeRequestId = null
+function pushWatsonStatus(level, text, requestId) {
+  const rid = requestId || _activeRequestId
+  const payload = { level, text, requestId: rid }
   mainWindow?.webContents?.send('watson-status', payload)
-  // Keep tray tooltip in sync with human-readable status
   if (tray) tray.setToolTip(`Paw — ${text}`)
-  if (level === 'done') setTimeout(() => pushWatsonStatus('idle', '空闲待命中'), 2000)
+  if (level === 'done') setTimeout(() => {
+    pushWatsonStatus('idle', '空闲待命中', null)
+  }, 2000)
 }
 
 ipcMain.handle('notify', (_, { title, body }) => { sendNotification(title, body); return true })

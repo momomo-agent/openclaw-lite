@@ -276,3 +276,22 @@ button:hover { background: #2a2a2a; }
 .tool-step-item:first-child { border-top: none; }
 .tool-step-name { color: #777; font-weight: 500; }
 .tool-step-output { color: #444; }
+
+/* Per-card status line */
+.card-status-line {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 0 0; font-size: 12px; color: #555;
+}
+.card-status-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  flex-shrink: 0;
+}
+.card-status-dot.thinking { background: #f59e0b; animation: pulse-dot 1.2s infinite; }
+.card-status-dot.running { background: #3b82f6; animation: pulse-dot 1.2s infinite; }
+.card-status-dot.need_you { background: #ef4444; }
+.card-status-dot.done { background: #22c55e; }
+.card-status-dot.idle { background: #444; }
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
