@@ -186,23 +186,28 @@ async function executeTool(name, input, config) {
     }
     case 'file_read': {
       if (!clawDir) return 'Error: No claw directory'
-      const p = path.resolve(clawDir, input.path)
+      const wsDir = path.join(clawDir, 'workspace')
+      fs.mkdirSync(wsDir, { recursive: true })
+      const p = path.resolve(wsDir, input.path)
       if (!p.startsWith(clawDir)) return 'Error: Path outside claw directory'
       try { return fs.readFileSync(p, 'utf8') } catch (e) { return `Error: ${e.message}` }
     }
     case 'file_write': {
       if (!clawDir) return 'Error: No claw directory'
-      const p = path.resolve(clawDir, input.path)
+      const wsDir = path.join(clawDir, 'workspace')
+      const p = path.resolve(wsDir, input.path)
       if (!p.startsWith(clawDir)) return 'Error: Path outside claw directory'
       fs.mkdirSync(path.dirname(p), { recursive: true })
       fs.writeFileSync(p, input.content)
-      return `Written ${input.content.length} bytes to ${input.path}`
+      return `Written ${input.content.length} bytes to workspace/${input.path}`
     }
     case 'shell_exec': {
       if (!clawDir) return 'Error: No claw directory'
+      const wsDir = path.join(clawDir, 'workspace')
+      fs.mkdirSync(wsDir, { recursive: true })
       const { execSync } = require('child_process')
       try {
-        const out = execSync(input.command, { cwd: clawDir, timeout: 30000, maxBuffer: 1024 * 512, encoding: 'utf8' })
+        const out = execSync(input.command, { cwd: wsDir, timeout: 30000, maxBuffer: 1024 * 512, encoding: 'utf8' })
         return out.slice(0, 5000) || '(no output)'
       } catch (e) { return `Error: ${e.stderr || e.message}`.slice(0, 2000) }
     }
@@ -374,7 +379,7 @@ ipcMain.handle('create-claw-dir', async () => {
     const p = path.join(dir, name)
     if (!fs.existsSync(p)) fs.writeFileSync(p, content)
   }
-  for (const d of ['skills', 'memory', 'sessions', 'agents']) {
+  for (const d of ['skills', 'memory', 'sessions', 'agents', 'workspace']) {
     const p = path.join(dir, d)
     if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true })
   }
@@ -395,7 +400,7 @@ ipcMain.handle('select-claw-dir', async () => {
     clawDir = result.filePaths[0]
     savePrefs({ clawDir })
     // Ensure essential subdirectories exist
-    for (const sub of ['memory', 'sessions', 'agents', 'skills']) {
+    for (const sub of ['memory', 'sessions', 'agents', 'skills', 'workspace']) {
       const d = path.join(clawDir, sub)
       if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true })
     }
@@ -478,6 +483,12 @@ ipcMain.handle('open-claw-dir', () => {
 ipcMain.handle('open-file', (_, filePath) => {
   const p = path.resolve(clawDir || '', filePath)
   shell.openPath(p)
+})
+
+ipcMain.handle('open-external', (_, url) => {
+  if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+    shell.openExternal(url)
+  }
 })
 
 ipcMain.handle('read-file', (_, filePath) => {

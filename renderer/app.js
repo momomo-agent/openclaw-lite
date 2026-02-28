@@ -65,6 +65,16 @@ marked.setOptions({
 
 // File click handler — detect file paths in rendered messages
 document.addEventListener('click', async (e) => {
+  // Handle http/https links — open in system browser
+  const link = e.target.closest('a[href]')
+  if (link) {
+    const href = link.getAttribute('href')
+    if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
+      e.preventDefault()
+      window.api.openExternal(href)
+      return
+    }
+  }
   const el = e.target.closest('.file-link')
   if (!el) return
   e.preventDefault()
@@ -139,6 +149,7 @@ async function refreshSessionList() {
     const st = sessionStatus.get(s.id) || { level: 'idle', text: '' }
     el.innerHTML = `<div class="session-item-main"><span class="session-status-dot ${st.level}"></span><span class="session-title">${esc(s.title)}</span></div><div class="session-item-meta"><span class="session-status-text">${esc(st.text)}</span><span class="del-btn" onclick="event.stopPropagation();deleteSession('${s.id}')">✕</span></div>`
     el.onclick = () => switchSession(s.id)
+    el.ondblclick = (e) => { e.stopPropagation(); renameSession(s.id, el) }
     list.appendChild(el)
   }
 }
@@ -182,6 +193,29 @@ async function deleteSession(id) {
 
 function toggleSidebar() {
   document.getElementById('sidebar').classList.toggle('hidden')
+}
+
+async function renameSession(id, el) {
+  const titleEl = el.querySelector('.session-title')
+  if (!titleEl) return
+  const old = titleEl.textContent
+  const inp = document.createElement('input')
+  inp.type = 'text'
+  inp.value = old
+  inp.className = 'session-rename-input'
+  inp.style.cssText = 'width:100%;background:#222;color:#eee;border:1px solid #555;border-radius:4px;padding:2px 4px;font-size:13px'
+  titleEl.replaceWith(inp)
+  inp.focus()
+  inp.select()
+  const finish = async () => {
+    const newTitle = inp.value.trim() || old
+    const s = await window.api.loadSession(id)
+    if (s) { s.title = newTitle; await window.api.saveSession(s) }
+    if (id === currentSessionId) document.getElementById('sessionTitle').textContent = newTitle
+    await refreshSessionList()
+  }
+  inp.onblur = finish
+  inp.onkeydown = (e) => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.value = old; inp.blur() } }
 }
 
 async function exportChat() {
@@ -248,6 +282,9 @@ async function send() {
   const text = input.value.trim()
   if (!text && !pendingFiles.length) return
 
+  // Snapshot sessionId at send time — immune to session switches
+  const sendSessionId = currentSessionId
+
   input.value = ''
   input.style.height = 'auto'
   const files = [...pendingFiles]
@@ -257,14 +294,14 @@ async function send() {
   // Detect @mention to pick agent
   let targetAgentId = null, targetAgentName = 'Assistant'
   const mention = text.match(/^@(\S+)\s/)
-  if (mention && currentSessionId) {
+  if (mention && sendSessionId) {
     const agents = await window.api.listAgents()
     const found = agents.find(a => a.name.toLowerCase() === mention[1].toLowerCase())
     if (found) { targetAgentId = found.id; targetAgentName = found.name }
   }
   // Fallback: first agent member in session
-  if (!targetAgentId && currentSessionId) {
-    const s = await window.api.loadSession(currentSessionId)
+  if (!targetAgentId && sendSessionId) {
+    const s = await window.api.loadSession(sendSessionId)
     if (s?.members) {
       const agents = await window.api.listAgents()
       const first = s.members.find(m => m !== 'user')
@@ -293,7 +330,7 @@ async function send() {
   let myToolSteps = []
   let currentToolGroup = null
   const myRequestId = await window.api.chatPrepare()
-  setSessionStatus(currentSessionId, 'thinking', '思考中…')
+  setSessionStatus(sendSessionId, 'thinking', '思考中…')
 
   // Register handlers in the event bus
   requestHandlers.set(myRequestId, {
@@ -325,7 +362,7 @@ async function send() {
     },
     onToolStep(d) {
       myToolSteps.push({ name: d.name, output: String(d.output).slice(0, 120) })
-      setSessionStatus(currentSessionId, 'running', `执行 ${d.name}…`)
+      setSessionStatus(sendSessionId, 'running', `执行 ${d.name}…`)
       // Insert tool step inline in the flow (after current text)
       if (!currentToolGroup) {
         currentToolGroup = document.createElement('div')
@@ -369,9 +406,11 @@ async function send() {
     // Clean up event bus, collapse inline tool groups on completion
     requestHandlers.delete(myRequestId)
     // Keep AI's last watson status if it wrote one; otherwise show fallback
-    const curStatus = sessionStatus.get(currentSessionId)
+    const curStatus = sessionStatus.get(sendSessionId)
     if (!curStatus?.aiAuthored) {
-      setSessionStatus(currentSessionId, 'done', '已完成回复')
+      // Fallback: summarize what was done based on user's question
+      const summary = text.length > 15 ? text.slice(0, 15) + '…' : text
+      setSessionStatus(sendSessionId, 'done', `已回复: ${summary}`)
     }
     // Don't clear to empty — keep showing what was done
     // Collapse all inline tool groups
@@ -383,21 +422,25 @@ async function send() {
     })
     history.push({ prompt: text, answer: finalText })
     // Persist to session
-    if (currentSessionId) {
-      const s = await window.api.loadSession(currentSessionId)
+    if (sendSessionId) {
+      const s = await window.api.loadSession(sendSessionId)
       if (s) {
         s.messages.push(
           { role: 'user', content: text, sender: 'You' },
           { role: 'assistant', content: finalText, sender: targetAgentName }
         )
-        if (s.messages.length === 2) s.title = text.slice(0, 40)
+        if (s.messages.length === 2) {
+          // Auto-generate title from first exchange
+          const autoTitle = generateTitle(text, finalText)
+          s.title = autoTitle
+        }
         await window.api.saveSession(s)
         document.getElementById('sessionTitle').textContent = s.title
         await refreshSessionList()
       }
     }
   } catch (err) {
-    setSessionStatus(currentSessionId, 'idle', '出错了')
+    setSessionStatus(sendSessionId, 'idle', '出错了')
     requestHandlers.delete(myRequestId)
     requestHandlers.delete(myRequestId)
     if (!fullText) {
@@ -468,6 +511,20 @@ function linkifyPaths(html) {
 
 function collapseToolSteps() {
   // Tool steps now render inline per-card via tool-group-slot; nothing to collapse globally
+}
+
+function generateTitle(userText, assistantText) {
+  // Smart title: extract key topic from user message
+  const clean = userText.replace(/\n/g, ' ').trim()
+  // If short enough, use as-is
+  if (clean.length <= 25) return clean
+  // Try to extract a meaningful prefix
+  const stops = ['，', '。', '？', '！', '、', ',', '.', '?', '!', ' ']
+  for (const s of stops) {
+    const idx = clean.indexOf(s, 8)
+    if (idx > 0 && idx <= 30) return clean.slice(0, idx)
+  }
+  return clean.slice(0, 25) + '…'
 }
 
 function esc(s) {
