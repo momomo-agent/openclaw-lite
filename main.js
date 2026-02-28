@@ -544,7 +544,6 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId) {
     roundText = ''
     if (round > 0) win.webContents.send('chat-text-start', { requestId })
     pushStatus(win, 'thinking', 'Thinking...')
-    pushWatsonStatus('thinking', '正在思考问题中')
     const body = {
       model: config.model || 'claude-sonnet-4-20250514',
       max_tokens: 4096, stream: true,
@@ -581,7 +580,6 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId) {
 
     if (!toolCalls.length) {
       pushStatus(win, 'done', 'Done')
-      pushWatsonStatus('done', '已完成本次回复')
       console.log('[Paw] streamAnthropic done, fullText length:', fullText.length)
       return { answer: fullText }
     }
@@ -609,7 +607,6 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId) {
     win.webContents.send('chat-token', { requestId, text: '\n' })
   }
   pushStatus(win, 'done', 'Done')
-  pushWatsonStatus('done', '已完成本次回复')
   return { answer: fullText }
 }
 
@@ -636,7 +633,6 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId) {
     roundText = ''
     if (round > 0) win.webContents.send('chat-text-start', { requestId })
     pushStatus(win, 'thinking', 'Thinking...')
-    pushWatsonStatus('thinking', '正在思考问题中')
 
     const res = await fetch(endpoint, {
       method: 'POST',
@@ -680,7 +676,6 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId) {
     const tcList = Object.values(toolCalls)
     if (!tcList.length || !tcList[0].name) {
       pushStatus(win, 'done', 'Done')
-      pushWatsonStatus('done', '已完成本次回复')
       return { answer: fullText }
     }
 
@@ -708,7 +703,6 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId) {
   }
 
   pushStatus(win, 'done', 'Done')
-  pushWatsonStatus('done', '已完成本次回复')
   return { answer: fullText }
 }
 

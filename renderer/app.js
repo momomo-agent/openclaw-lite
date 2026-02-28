@@ -1,11 +1,14 @@
 // Paw — Renderer App
 
 // ── Per-Session Status ──
-const sessionStatus = new Map() // sessionId -> { level, text }
+const sessionStatus = new Map() // sessionId -> { level, text, aiAuthored }
 
-function setSessionStatus(sessionId, level, text) {
-  sessionStatus.set(sessionId, { level, text })
-  // Update the DOM element for this session in sidebar
+function setSessionStatus(sessionId, level, text, aiAuthored = false) {
+  const cur = sessionStatus.get(sessionId)
+  // AI-authored status has priority — don't let programmatic status overwrite it
+  // unless it's also AI-authored, or we're going to idle/done
+  if (cur?.aiAuthored && !aiAuthored && level !== 'idle' && level !== 'done') return
+  sessionStatus.set(sessionId, { level, text, aiAuthored })
   const dot = document.querySelector(`.session-item[data-id="${sessionId}"] .session-status-dot`)
   const t = document.querySelector(`.session-item[data-id="${sessionId}"] .session-status-text`)
   if (dot) dot.className = `session-status-dot ${level}`
@@ -30,11 +33,10 @@ window.api.onTextStart((d) => {
   if (h?.onTextStart) h.onTextStart(d)
 })
 
-// Watson status — route to per-session status (no more global)
+// Watson status — AI-authored, highest priority
 window.api.onWatsonStatus(({ level, text, requestId }) => {
-  // Update current session status from AI-authored watson updates
   if (currentSessionId) {
-    setSessionStatus(currentSessionId, level, text || '')
+    setSessionStatus(currentSessionId, level, text || '', true)
   }
 })
 
