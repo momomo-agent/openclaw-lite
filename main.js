@@ -413,6 +413,7 @@ ipcMain.handle('read-file', (_, filePath) => {
 // ── IPC: Chat with LLM ──
 
 ipcMain.handle('chat', async (_, { prompt, history, agentId, files }) => {
+  const requestId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
   const config = (() => {
     if (!clawDir) return {}
     const p = path.join(clawDir, 'config.json')
@@ -452,9 +453,9 @@ ipcMain.handle('chat', async (_, { prompt, history, agentId, files }) => {
   messages.push({ role: 'user', content: userContent })
 
   if (provider === 'anthropic') {
-    return await streamAnthropic(messages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow)
+    return await streamAnthropic(messages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow, requestId)
   } else {
-    return await streamOpenAI(messages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow)
+    return await streamOpenAI(messages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow, requestId)
   }
 })
 
@@ -495,7 +496,7 @@ async function buildSystemPrompt() {
 
 // ── Anthropic Streaming ──
 
-async function streamAnthropic(messages, systemPrompt, config, win) {
+async function streamAnthropic(messages, systemPrompt, config, win, requestId) {
   const base = (config.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '')
   const endpoint = base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`
   const headers = { 'Content-Type': 'application/json', 'x-api-key': config.apiKey, 'anthropic-version': '2023-06-01' }
@@ -530,7 +531,7 @@ async function streamAnthropic(messages, systemPrompt, config, win) {
           if (evt.type === 'content_block_start' && evt.content_block?.type === 'tool_use') {
             curBlock = { id: evt.content_block.id, name: evt.content_block.name, json: '' }
           } else if (evt.type === 'content_block_delta') {
-            if (evt.delta?.text) { fullText += evt.delta.text; win.webContents.send('chat-token', evt.delta.text) }
+            if (evt.delta?.text) { fullText += evt.delta.text; win.webContents.send('chat-token', { requestId, text: evt.delta.text }) }
             if (evt.delta?.partial_json && curBlock) curBlock.json += evt.delta.partial_json
           } else if (evt.type === 'content_block_stop' && curBlock) {
             toolCalls.push(curBlock); curBlock = null
@@ -555,7 +556,7 @@ async function streamAnthropic(messages, systemPrompt, config, win) {
       if (!silent) pushStatus(win, 'tool', `Running ${tc.name}...`)
       const result = await executeTool(tc.name, input, config)
       if (!silent) {
-        win.webContents.send('chat-tool-step', { name: tc.name, output: String(result).slice(0, 500) })
+        win.webContents.send('chat-tool-step', { requestId, name: tc.name, output: String(result).slice(0, 500) })
       }
       toolResults.push({ type: 'tool_result', tool_use_id: tc.id, content: String(result) })
     }
@@ -568,7 +569,7 @@ async function streamAnthropic(messages, systemPrompt, config, win) {
 
 // ── OpenAI Streaming ──
 
-async function streamOpenAI(messages, systemPrompt, config, win) {
+async function streamOpenAI(messages, systemPrompt, config, win, requestId) {
   const base = (config.baseUrl || 'https://api.openai.com').replace(/\/+$/, '')
   const endpoint = base.endsWith('/v1') ? `${base}/chat/completions` : `${base}/v1/chat/completions`
 
@@ -611,7 +612,7 @@ async function streamOpenAI(messages, systemPrompt, config, win) {
           const delta = choice?.delta
           if (delta?.content) {
             fullText += delta.content
-            win.webContents.send('chat-token', delta.content)
+            win.webContents.send('chat-token', { requestId, text: delta.content })
           }
           if (delta?.tool_calls) {
             for (const tc of delta.tool_calls) {
@@ -648,7 +649,7 @@ async function streamOpenAI(messages, systemPrompt, config, win) {
       if (!silent) pushStatus(win, 'tool', `Running ${tc.name}...`)
       const result = await executeTool(tc.name, input, config)
       if (!silent) {
-        win.webContents.send('chat-tool-step', { name: tc.name, output: String(result).slice(0, 500) })
+        win.webContents.send('chat-tool-step', { requestId, name: tc.name, output: String(result).slice(0, 500) })
       }
       msgs.push({ role: 'tool', tool_call_id: tc.id, content: String(result) })
     }

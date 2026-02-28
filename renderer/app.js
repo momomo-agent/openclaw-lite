@@ -239,19 +239,24 @@ async function send() {
   const card = document.createElement('div')
   card.className = 'msg-card assistant'
   const _t = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
-  card.innerHTML = `<div class="msg-avatar">🤖</div><div class="msg-body"><div class="msg-header"><span class="msg-name">${esc(targetAgentName)}</span><span class="msg-time">${_t}</span></div><div class="msg-content md-content"><span class="typing-indicator">思考中…</span></div></div>`
+  card.innerHTML = `<div class="msg-avatar">🤖</div><div class="msg-body"><div class="msg-header"><span class="msg-name">${esc(targetAgentName)}</span><span class="msg-time">${_t}</span></div><div class="msg-content md-content"><span class="typing-indicator">思考中…</span></div><div class="tool-group-slot"></div></div>`
   messages.appendChild(card)
   const contentEl = card.querySelector('.md-content')
+  const toolSlot = card.querySelector('.tool-group-slot')
   let fullText = ''
+  let myToolSteps = []
 
-  window.api.onToken((t) => {
+  window.api.onToken((d) => {
+    const t = typeof d === 'string' ? d : d.text
+    if (!t) return
     fullText += t
     contentEl.innerHTML = marked.parse(fullText)
     messages.scrollTop = messages.scrollHeight
   })
 
   window.api.onToolStep(({ name, output }) => {
-    addToolCard(name, output)
+    myToolSteps.push({ name, output: String(output).slice(0, 120) })
+    renderToolGroup(toolSlot, myToolSteps)
   })
 
   try {
@@ -310,12 +315,37 @@ function addCard(role, content, sender, rawHtml) {
   messages.scrollTop = messages.scrollHeight
 }
 
-function addToolCard(name, output) {
-  const card = document.createElement('div')
-  card.className = 'msg-card tool tool-step'
-  card.innerHTML = `<div class="msg-avatar" style="width:24px;height:24px;font-size:12px">🔧</div><div class="msg-body"><div class="msg-name" style="font-size:12px;color:#555">${esc(name)}</div><div style="font-size:12px;color:#444">${esc(String(output).slice(0,200))}</div></div>`
-  messages.appendChild(card)
+let pendingToolSteps = []
+
+function renderToolGroup(slot, steps) {
+  if (!steps.length) return
+  slot.innerHTML = ''
+  const group = document.createElement('div')
+  group.className = 'tool-group-live'
+  const expanded = slot.dataset.expanded === 'true'
+  group.innerHTML = `<div class="tool-group-header">🔧 <span class="tool-count">${steps.length}</span> 个工具调用 <span class="tool-expand">${expanded ? '▼' : '▶'}</span></div><div class="tool-group-body" style="display:${expanded ? 'block' : 'none'}"></div>`
+  group.querySelector('.tool-group-header').onclick = () => {
+    const body = group.querySelector('.tool-group-body')
+    const arrow = group.querySelector('.tool-expand')
+    const show = body.style.display === 'none'
+    body.style.display = show ? 'block' : 'none'
+    arrow.textContent = show ? '▼' : '▶'
+    slot.dataset.expanded = show ? 'true' : 'false'
+  }
+  const body = group.querySelector('.tool-group-body')
+  for (const s of steps) {
+    const item = document.createElement('div')
+    item.className = 'tool-step-item'
+    item.innerHTML = `<span class="tool-step-name">${esc(s.name)}</span> <span class="tool-step-output">${esc(s.output.slice(0, 80))}</span>`
+    body.appendChild(item)
+  }
+  slot.appendChild(group)
   messages.scrollTop = messages.scrollHeight
+}
+
+function addToolCard(name, output) {
+  // Legacy fallback — not used in new flow
+  renderToolGroup(document.createElement('div'), [{ name, output }])
 }
 
 function linkifyPaths(html) {
@@ -325,25 +355,7 @@ function linkifyPaths(html) {
 }
 
 function collapseToolSteps() {
-  const steps = messages.querySelectorAll('.tool-step:not(.grouped)')
-  if (steps.length === 0) return
-  const group = document.createElement('div')
-  group.className = 'tool-group collapsed'
-  const toggle = document.createElement('div')
-  toggle.className = 'tool-group-toggle'
-  toggle.textContent = `▶ ${steps.length} tool step${steps.length > 1 ? 's' : ''}`
-  toggle.onclick = () => {
-    group.classList.toggle('collapsed')
-    toggle.textContent = group.classList.contains('collapsed')
-      ? `▶ ${steps.length} tool step${steps.length > 1 ? 's' : ''}`
-      : `▼ ${steps.length} tool step${steps.length > 1 ? 's' : ''}`
-  }
-  group.appendChild(toggle)
-  steps.forEach(s => { s.classList.add('grouped'); group.appendChild(s) })
-  // Insert group before the final assistant card
-  const lastAssistant = messages.querySelector('.msg-card.assistant:last-of-type')
-  if (lastAssistant) messages.insertBefore(group, lastAssistant)
-  else messages.appendChild(group)
+  pendingToolSteps = []
 }
 
 function esc(s) {

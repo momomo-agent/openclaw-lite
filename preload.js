@@ -10,7 +10,7 @@ contextBridge.exposeInMainWorld('api', {
   chat: (msg) => ipcRenderer.invoke('chat', msg),
   onToken: (cb) => {
     ipcRenderer.removeAllListeners('chat-token')
-    ipcRenderer.on('chat-token', (_, t) => cb(t))
+    ipcRenderer.on('chat-token', (_, d) => cb(d))
   },
   onToolStep: (cb) => {
     ipcRenderer.removeAllListeners('chat-tool-step')
