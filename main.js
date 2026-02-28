@@ -284,6 +284,10 @@ ipcMain.handle('session-remove-member', (_, { sessionId, agentId }) => {
 
 ipcMain.handle('build-system-prompt', () => buildSystemPrompt())
 
+ipcMain.handle('open-claw-dir', () => {
+  if (clawDir) require('electron').shell.openPath(clawDir)
+})
+
 // ── IPC: Chat with LLM ──
 
 ipcMain.handle('chat', async (_, { prompt, history, agentId }) => {

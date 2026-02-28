@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('api', {
   saveAgent: (a) => ipcRenderer.invoke('agent-save', a),
   createAgent: (opts) => ipcRenderer.invoke('agent-create', opts),
   deleteAgent: (id) => ipcRenderer.invoke('agent-delete', id),
+  openClawDir: () => ipcRenderer.invoke('open-claw-dir'),
   // Session members
   addMember: (sessionId, agentId) => ipcRenderer.invoke('session-add-member', { sessionId, agentId }),
   removeMember: (sessionId, agentId) => ipcRenderer.invoke('session-remove-member', { sessionId, agentId }),

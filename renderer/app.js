@@ -157,7 +157,8 @@ async function send() {
 
   const card = document.createElement('div')
   card.className = 'msg-card assistant'
-  card.innerHTML = `<div class="msg-label">${esc(targetAgentName)}</div><div class="md-content"></div>`
+  const _t = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
+  card.innerHTML = `<div class="msg-avatar">🤖</div><div class="msg-body"><div class="msg-header"><span class="msg-name">${esc(targetAgentName)}</span><span class="msg-time">${_t}</span></div><div class="msg-content md-content"></div></div>`
   messages.appendChild(card)
   const contentEl = card.querySelector('.md-content')
   let fullText = ''
@@ -170,8 +171,9 @@ async function send() {
 
   try {
     const result = await window.api.chat({ prompt: text, history, agentId: targetAgentId })
-    // Final render with complete text
     contentEl.innerHTML = marked.parse(result.answer || fullText)
+    // Auto-collapse tool steps
+    collapseToolSteps()
     history.push({ prompt: text, answer: result.answer || fullText })
     // Persist to session
     if (currentSessionId) {
@@ -201,13 +203,16 @@ async function send() {
 function addCard(role, content, sender) {
   const card = document.createElement('div')
   card.className = `msg-card ${role}`
+  const avatar = role === 'user' ? '👤' : '🤖'
+  const nameClass = role === 'user' ? 'msg-name user-name' : 'msg-name'
+  const time = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
 
-  if (role === 'user') {
-    card.innerHTML = `<div class="msg-label user-label">${esc(sender || 'You')}</div><div>${esc(content)}</div>`
-  } else if (role === 'assistant') {
-    card.innerHTML = `<div class="msg-label">${esc(sender || 'Assistant')}</div><div class="md-content">${marked.parse(content || '(no answer)')}</div>`
-  } else if (role === 'error') {
-    card.innerHTML = `<div style="color:#ef4444">${esc(content)}</div>`
+  if (role === 'error') {
+    card.innerHTML = `<div class="msg-avatar">⚠️</div><div class="msg-body"><div class="msg-content" style="color:#ef4444">${esc(content)}</div></div>`
+  } else if (role === 'user') {
+    card.innerHTML = `<div class="msg-avatar">${avatar}</div><div class="msg-body"><div class="msg-header"><span class="${nameClass}">${esc(sender||'You')}</span><span class="msg-time">${time}</span></div><div class="msg-content">${esc(content)}</div></div>`
+  } else {
+    card.innerHTML = `<div class="msg-avatar">${avatar}</div><div class="msg-body"><div class="msg-header"><span class="${nameClass}">${esc(sender||'Assistant')}</span><span class="msg-time">${time}</span></div><div class="msg-content md-content">${marked.parse(content||'')}</div></div>`
   }
 
   messages.appendChild(card)
@@ -216,10 +221,32 @@ function addCard(role, content, sender) {
 
 function addToolCard(name, output) {
   const card = document.createElement('div')
-  card.className = 'msg-card tool'
-  card.innerHTML = `<div class="msg-label">🔧 ${esc(name)}</div><div style="font-size:12px;color:#666">${esc(String(output).slice(0, 300))}</div>`
+  card.className = 'msg-card tool tool-step'
+  card.innerHTML = `<div class="msg-avatar" style="width:24px;height:24px;font-size:12px">🔧</div><div class="msg-body"><div class="msg-name" style="font-size:12px;color:#555">${esc(name)}</div><div style="font-size:12px;color:#444">${esc(String(output).slice(0,200))}</div></div>`
   messages.appendChild(card)
   messages.scrollTop = messages.scrollHeight
+}
+
+function collapseToolSteps() {
+  const steps = messages.querySelectorAll('.tool-step:not(.grouped)')
+  if (steps.length === 0) return
+  const group = document.createElement('div')
+  group.className = 'tool-group collapsed'
+  const toggle = document.createElement('div')
+  toggle.className = 'tool-group-toggle'
+  toggle.textContent = `▶ ${steps.length} tool step${steps.length > 1 ? 's' : ''}`
+  toggle.onclick = () => {
+    group.classList.toggle('collapsed')
+    toggle.textContent = group.classList.contains('collapsed')
+      ? `▶ ${steps.length} tool step${steps.length > 1 ? 's' : ''}`
+      : `▼ ${steps.length} tool step${steps.length > 1 ? 's' : ''}`
+  }
+  group.appendChild(toggle)
+  steps.forEach(s => { s.classList.add('grouped'); group.appendChild(s) })
+  // Insert group before the final assistant card
+  const lastAssistant = messages.querySelector('.msg-card.assistant:last-of-type')
+  if (lastAssistant) messages.insertBefore(group, lastAssistant)
+  else messages.appendChild(group)
 }
 
 function esc(s) {
