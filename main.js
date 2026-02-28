@@ -124,7 +124,6 @@ ipcMain.handle('chat', async (_, { prompt, history }) => {
   }
   messages.push({ role: 'user', content: prompt })
 
-  // Call LLM
   if (provider === 'anthropic') {
     return await callAnthropic(messages, systemPrompt, { apiKey, baseUrl, model })
   } else {
