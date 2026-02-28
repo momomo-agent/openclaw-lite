@@ -8,6 +8,15 @@ window.api.onWatsonStatus(({ level, text }) => {
   if (t) t.textContent = text || ''
 })
 
+// Memory change listener
+window.api.onMemoryChanged(({ file }) => {
+  const el = document.getElementById('watsonText')
+  if (!el) return
+  const prev = el.textContent
+  el.textContent = `记忆已更新: ${file || ''}`
+  setTimeout(() => { if (el.textContent.startsWith('记忆已更新')) el.textContent = prev }, 3000)
+})
+
 marked.setOptions({
   breaks: true,
   highlight: (code, lang) => {

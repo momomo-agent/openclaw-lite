@@ -13,8 +13,6 @@ body {
 }
 a { color: #ccc; text-decoration: none; }
 a:hover { color: #fff; }
-
-/* Hero */
 .hero {
   min-height: 80vh; display: flex; flex-direction: column;
   align-items: center; justify-content: center; text-align: center;
@@ -22,9 +20,8 @@ a:hover { color: #fff; }
 }
 .hero-icon { font-size: 64px; margin-bottom: 24px; }
 .hero h1 { font-size: 48px; font-weight: 700; letter-spacing: -1px; color: #fff; }
-.hero .tagline {
-  font-size: 18px; color: #888; margin-top: 12px; max-width: 480px;
-}
+.hero .tagline { font-size: 18px; color: #888; margin-top: 12px; max-width: 520px; }
+.hero .version { font-size: 13px; color: #555; margin-top: 8px; }
 .hero-actions { margin-top: 32px; display: flex; gap: 12px; }
 .btn {
   padding: 12px 28px; border-radius: 8px; font-size: 14px;
@@ -34,25 +31,19 @@ a:hover { color: #fff; }
 .btn-primary:hover { opacity: 0.85; color: #0a0a0a; }
 .btn-ghost { border: 1px solid #333; color: #ccc; }
 .btn-ghost:hover { border-color: #555; color: #fff; }
-
-/* Features */
 .features {
-  max-width: 900px; margin: 0 auto; padding: 60px 24px;
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 32px;
+  max-width: 960px; margin: 0 auto; padding: 60px 24px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 24px;
 }
 .feature {
-  padding: 24px; border: 1px solid #ffffff08; border-radius: 12px;
-  background: #0f0f0f;
+  padding: 24px; border: 1px solid #ffffff08; border-radius: 12px; background: #0f0f0f;
 }
 .feature-icon { font-size: 28px; margin-bottom: 12px; }
-.feature h3 { font-size: 16px; font-weight: 600; color: #fff; margin-bottom: 6px; }
-.feature p { font-size: 14px; color: #777; }
-
-/* How it works */
+.feature h3 { font-size: 15px; font-weight: 600; color: #fff; margin-bottom: 6px; }
+.feature p { font-size: 13px; color: #777; }
 .section { max-width: 640px; margin: 0 auto; padding: 60px 24px; }
 .section h2 {
-  font-size: 28px; font-weight: 700; color: #fff; margin-bottom: 24px;
-  letter-spacing: -0.5px;
+  font-size: 28px; font-weight: 700; color: #fff; margin-bottom: 24px; letter-spacing: -0.5px;
 }
 .steps { display: flex; flex-direction: column; gap: 16px; }
 .step {
@@ -66,8 +57,6 @@ a:hover { color: #fff; }
 }
 .step-text h4 { font-size: 14px; color: #fff; font-weight: 600; }
 .step-text p { font-size: 13px; color: #666; margin-top: 2px; }
-
-/* Code block */
 .code-block {
   background: #111; border: 1px solid #ffffff0d; border-radius: 8px;
   padding: 16px 20px; font-family: 'SF Mono', monospace; font-size: 13px;
@@ -75,8 +64,6 @@ a:hover { color: #fff; }
 }
 .code-block .comment { color: #555; }
 .code-block .highlight { color: #e0e0e0; }
-
-/* Footer */
 .footer {
   text-align: center; padding: 40px 24px; color: #444; font-size: 13px;
   border-top: 1px solid #ffffff08;
@@ -89,7 +76,8 @@ a:hover { color: #fff; }
 <div class="hero">
   <div class="hero-icon">🐾</div>
   <h1>Paw</h1>
-  <p class="tagline">Portable AI workspace. One folder, one assistant. Local-first, multi-agent, zero setup.</p>
+  <p class="tagline">Portable AI workspace. One folder, one assistant. Local-first, multi-agent, AI-native.</p>
+  <p class="version">v0.10.0 — macOS (Apple Silicon)</p>
   <div class="hero-actions">
     <a href="https://github.com/momomo-agent/paw/releases" class="btn btn-primary">Download for Mac</a>
     <a href="https://github.com/momomo-agent/paw" class="btn btn-ghost">GitHub</a>
@@ -100,32 +88,42 @@ a:hover { color: #fff; }
   <div class="feature">
     <div class="feature-icon">📁</div>
     <h3>One Folder = One Workspace</h3>
-    <p>Config, skills, memory, sessions — all in one directory. Copy it to another machine and keep going.</p>
+    <p>Config, skills, memory, sessions — all in one directory. Copy it anywhere and keep going.</p>
   </div>
   <div class="feature">
     <div class="feature-icon">🤖</div>
     <h3>Multi-Agent Chat</h3>
-    <p>Create agents with custom personalities. Discord-style UI with avatars, names, and timestamps. @mention to route.</p>
+    <p>Create agents with custom personalities. Discord-style UI with avatars and @mentions.</p>
   </div>
   <div class="feature">
     <div class="feature-icon">🔧</div>
-    <h3>Built-in Tools</h3>
-    <p>Search, code execution, file read/write. Agents can use tools autonomously in a loop.</p>
+    <h3>8 Built-in Tools</h3>
+    <p>Search, code exec, file I/O, shell, notifications, skill exec, Watson status. Autonomous tool loop.</p>
   </div>
   <div class="feature">
-    <div class="feature-icon">🔒</div>
-    <h3>Local First</h3>
-    <p>API keys stay on your machine. Conversations stay on your disk. Nothing goes through third-party servers.</p>
+    <div class="feature-icon">🪟</div>
+    <h3>Multi-Window</h3>
+    <p>Each window is an independent workspace. Cmd+Shift+N to open a new one.</p>
   </div>
   <div class="feature">
-    <div class="feature-icon">🐚</div>
-    <h3>OpenClaw Compatible</h3>
-    <p>Reads SOUL.md, MEMORY.md, skills/. Drop in an OpenClaw workspace and it just works.</p>
+    <div class="feature-icon">💓</div>
+    <h3>Heartbeat</h3>
+    <p>Configurable periodic check-ins. Your agent works in the background and notifies you when needed.</p>
   </div>
   <div class="feature">
-    <div class="feature-icon">⚡</div>
-    <h3>Lightweight</h3>
-    <p>No daemon, no backend, no message bus. Just an app and a folder. Under 1200 lines of code.</p>
+    <div class="feature-icon">🧠</div>
+    <h3>Memory Sync</h3>
+    <p>Shared memory/ directory across sessions. Real-time file watching for cross-conversation sync.</p>
+  </div>
+  <div class="feature">
+    <div class="feature-icon">🔌</div>
+    <h3>Skills & OpenClaw</h3>
+    <p>Full SKILL.md injection + script execution. Drop in an OpenClaw workspace and it just works.</p>
+  </div>
+  <div class="feature">
+    <div class="feature-icon">👁️</div>
+    <h3>Watson Status</h3>
+    <p>AI-native glanceable status. The LLM writes its own 8-14 char status line — no templates.</p>
   </div>
 </div>
 
@@ -136,7 +134,7 @@ a:hover { color: #fff; }
       <div class="step-num">1</div>
       <div class="step-text">
         <h4>Open Paw</h4>
-        <p>Download the DMG, drag to Applications, launch.</p>
+        <p>Download the signed & notarized DMG, drag to Applications, launch.</p>
       </div>
     </div>
     <div class="step">
@@ -163,12 +161,13 @@ a:hover { color: #fff; }
     ├── config.json &nbsp;&nbsp;&nbsp;<span class="comment"># provider + api key</span><br>
     ├── agents/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># custom agents</span><br>
     ├── sessions/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># chat history</span><br>
-    └── skills/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># capabilities</span>
+    ├── memory/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># shared memory (real-time sync)</span><br>
+    └── skills/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># capabilities (inject + execute)</span>
   </div>
 </div>
 
 <div class="footer">
-  <p>Built by <a href="https://github.com/momomo-agent">momomo-agent</a> · <a href="https://github.com/momomo-agent/paw">Source</a></p>
+  <p>Built by <a href="https://github.com/momomo-agent">momomo-agent</a> · <a href="https://github.com/momomo-agent/paw">Source</a> · Signed & notarized for macOS</p>
 </div>
 
 </body>

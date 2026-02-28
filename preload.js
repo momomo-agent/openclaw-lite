@@ -40,6 +40,8 @@ contextBridge.exposeInMainWorld('api', {
   // File operations
   openFile: (p) => ipcRenderer.invoke('open-file', p),
   readFile: (p) => ipcRenderer.invoke('read-file', p),
+  // Memory watch
+  onMemoryChanged: (cb) => { ipcRenderer.removeAllListeners('memory-changed'); ipcRenderer.on('memory-changed', (_, d) => cb(d)) },
   // Notify
   notify: (title, body) => ipcRenderer.invoke('notify', { title, body }),
 })

@@ -9,6 +9,27 @@ let clawDir = null
 let currentSessionId = null
 let heartbeatTimer = null
 let tray = null
+let memoryWatcher = null
+
+// ── Memory watcher ──
+let memoryDebounce = null
+function startMemoryWatch() {
+  stopMemoryWatch()
+  if (!clawDir) return
+  const memDir = path.join(clawDir, 'memory')
+  if (!fs.existsSync(memDir)) return
+  try {
+    memoryWatcher = fs.watch(memDir, { recursive: true }, (evt, filename) => {
+      if (memoryDebounce) clearTimeout(memoryDebounce)
+      memoryDebounce = setTimeout(() => {
+        mainWindow?.webContents?.send('memory-changed', { file: filename })
+      }, 300)
+    })
+  } catch {}
+}
+function stopMemoryWatch() {
+  if (memoryWatcher) { memoryWatcher.close(); memoryWatcher = null }
+}
 
 // ── Session helpers ──
 function sessionsDir() { return clawDir ? path.join(clawDir, 'sessions') : null }
@@ -101,6 +122,10 @@ const TOOLS = [
     name: 'ui_status_set', description: 'Set Watson status (sidebar glanceable status line). Use 8-14 Chinese chars.',
     input_schema: { type: 'object', properties: { level: { type: 'string', enum: ['idle','thinking','running','need_you','done'] }, text: { type: 'string' } }, required: ['level','text'] }
   },
+  {
+    name: 'skill_exec', description: 'Execute a skill script from the workspace skills/ directory',
+    input_schema: { type: 'object', properties: { skill: { type: 'string', description: 'Skill directory name' }, command: { type: 'string', description: 'Command to run inside the skill directory' } }, required: ['skill','command'] }
+  },
 ]
 
 async function executeTool(name, input, config) {
@@ -162,6 +187,17 @@ async function executeTool(name, input, config) {
       pushWatsonStatus(level, text)
       return 'OK'
     }
+    case 'skill_exec': {
+      if (!clawDir) return 'Error: No claw directory'
+      const skillDir = path.resolve(clawDir, 'skills', input.skill || '')
+      if (!skillDir.startsWith(path.join(clawDir, 'skills'))) return 'Error: Path outside skills directory'
+      if (!fs.existsSync(skillDir)) return `Error: Skill not found: ${input.skill}`
+      const { execSync } = require('child_process')
+      try {
+        const out = execSync(input.command, { cwd: skillDir, timeout: 30000, maxBuffer: 1024 * 512, encoding: 'utf8' })
+        return out.slice(0, 5000) || '(no output)'
+      } catch (e) { return `Error: ${e.stderr || e.message}`.slice(0, 2000) }
+    }
     default: return `Unknown tool: ${name}`
   }
 }
@@ -210,6 +246,7 @@ app.whenReady().then(() => {
     const prefs = loadPrefs()
     clawDir = prefs.clawDir || null
   }
+  if (clawDir) startMemoryWatch()
 
   // App menu with New Window
   const template = [
@@ -275,6 +312,7 @@ ipcMain.handle('create-claw-dir', async () => {
 
   clawDir = dir
   savePrefs({ clawDir })
+  startMemoryWatch()
   return dir
 })
 
@@ -286,6 +324,7 @@ ipcMain.handle('select-claw-dir', async () => {
   if (!result.canceled && result.filePaths[0]) {
     clawDir = result.filePaths[0]
     savePrefs({ clawDir })
+    startMemoryWatch()
     return clawDir
   }
   return null
@@ -531,39 +570,89 @@ async function streamOpenAI(messages, systemPrompt, config, win) {
   const base = (config.baseUrl || 'https://api.openai.com').replace(/\/+$/, '')
   const endpoint = base.endsWith('/v1') ? `${base}/chat/completions` : `${base}/v1/chat/completions`
 
+  // Convert TOOLS to OpenAI function calling format
+  const oaiTools = TOOLS.map(t => ({
+    type: 'function',
+    function: { name: t.name, description: t.description, parameters: t.input_schema }
+  }))
+
   const msgs = []
   if (systemPrompt) msgs.push({ role: 'system', content: systemPrompt })
   msgs.push(...messages)
 
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` },
-    body: JSON.stringify({ model: config.model || 'gpt-4o', messages: msgs, stream: true }),
-  })
+  let fullText = ''
 
-  if (!res.ok) throw new Error(`OpenAI API ${res.status}: ${await res.text()}`)
+  for (let round = 0; round < 5; round++) {
+    pushStatus(win, 'thinking', 'Thinking...')
+    pushWatsonStatus('thinking', '正在思考问题中')
 
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buf = '', fullText = ''
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` },
+      body: JSON.stringify({ model: config.model || 'gpt-4o', messages: msgs, stream: true, tools: oaiTools }),
+    })
+    if (!res.ok) throw new Error(`OpenAI API ${res.status}: ${await res.text()}`)
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
-    const lines = buf.split('\n'); buf = lines.pop()
-    for (const line of lines) {
-      if (!line.startsWith('data: ') || line === 'data: [DONE]') continue
-      try {
-        const delta = JSON.parse(line.slice(6)).choices?.[0]?.delta
-        if (delta?.content) {
-          fullText += delta.content
-          win.webContents.send('chat-token', delta.content)
-        }
-      } catch {}
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = '', toolCalls = {}
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const lines = buf.split('\n'); buf = lines.pop()
+      for (const line of lines) {
+        if (!line.startsWith('data: ') || line === 'data: [DONE]') continue
+        try {
+          const choice = JSON.parse(line.slice(6)).choices?.[0]
+          const delta = choice?.delta
+          if (delta?.content) {
+            fullText += delta.content
+            win.webContents.send('chat-token', delta.content)
+          }
+          if (delta?.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              const idx = tc.index
+              if (!toolCalls[idx]) toolCalls[idx] = { id: '', name: '', args: '' }
+              if (tc.id) toolCalls[idx].id = tc.id
+              if (tc.function?.name) toolCalls[idx].name = tc.function.name
+              if (tc.function?.arguments) toolCalls[idx].args += tc.function.arguments
+            }
+          }
+        } catch {}
+      }
     }
+
+    const tcList = Object.values(toolCalls)
+    if (!tcList.length || !tcList[0].name) {
+      pushStatus(win, 'done', 'Done')
+      pushWatsonStatus('done', '已完成本次回复')
+      return { answer: fullText }
+    }
+
+    // Build assistant message with tool_calls
+    const assistantMsg = { role: 'assistant', content: fullText || null, tool_calls: tcList.map(tc => ({
+      id: tc.id, type: 'function', function: { name: tc.name, arguments: tc.args }
+    }))}
+    msgs.push(assistantMsg)
+
+    // Execute tools and add results
+    for (const tc of tcList) {
+      let input = {}
+      try { input = JSON.parse(tc.args || '{}') } catch {}
+      pushStatus(win, 'tool', `Running ${tc.name}...`)
+      pushWatsonStatus('running', '正在执行工具中')
+      win.webContents.send('chat-token', `\n\n🔧 ${tc.name}...\n`)
+      const result = await executeTool(tc.name, input, config)
+      win.webContents.send('chat-token', `\`\`\`\n${String(result).slice(0, 500)}\n\`\`\`\n\n`)
+      msgs.push({ role: 'tool', tool_call_id: tc.id, content: String(result) })
+    }
+    fullText += '\n'
   }
+
   pushStatus(win, 'done', 'Done')
+  pushWatsonStatus('done', '已完成本次回复')
   return { answer: fullText }
 }
 
