@@ -110,6 +110,7 @@ button:hover { background: #2a2a2a; }
 
 .msg-card {
   display: flex; gap: 12px; padding: 6px 24px;
+  max-width: 100%; min-width: 0;
 }
 .msg-card:hover { background: #ffffff04; }
 .msg-card.tool { opacity: 0.6; font-size: 13px; }
@@ -197,7 +198,7 @@ button:hover { background: #2a2a2a; }
 .md-content p { margin-bottom: 10px; }
 .md-content h1, .md-content h2, .md-content h3 { margin: 12px 0 6px; font-weight: 600; }
 .md-content code { background: #1a1a1a; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
-.md-content pre { background: #0d0d0d; padding: 12px; border-radius: 8px; overflow-x: auto; margin: 10px 0; }
+.md-content pre { background: #0d0d0d; padding: 12px; border-radius: 8px; overflow-x: auto; margin: 10px 0; max-width: 100%; }
 .md-content pre code { background: none; padding: 0; }
 .md-content a { color: #fbbf24; text-decoration: none; }
 .md-content ul, .md-content ol { padding-left: 20px; margin-bottom: 10px; }
