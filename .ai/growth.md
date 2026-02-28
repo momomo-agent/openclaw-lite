@@ -57,4 +57,13 @@
 - 补建 features.json（F001-F022，M1-M9 全量）
 - 补更新 state.json（M9 / gate-passed / v0.9.0）
 - 补写 growth.md（M1-M9 全部迭代记录）
-- 原因：M8/M9 跳过了 PLAN 阶段和完整 REVIEW，后续严格按方法论走
+- 更新 methodology.md（加 commit 前 checklist + 6 条教训）
+- 原因：M8/M9 跳过了 PLAN 阶段和完整 REVIEW
+
+### 教训总结
+1. 一次只做一个 feature，不要批量塞
+2. Edit 前先确认匹配唯一性
+3. 插入代码后 Read 确认没破坏相邻函数
+4. commit 前 `node --check main.js`
+5. growth.md 实时写不攒
+6. DBB 必须截图 + taste.md 对照
