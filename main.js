@@ -1,7 +1,8 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const vm = require('vm')
+const { spawn } = require('child_process')
 
 let mainWindow
 let clawDir = null
@@ -164,13 +165,41 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  const prefs = loadPrefs()
-  clawDir = prefs.clawDir || null
+  // Support --claw-dir CLI arg
+  const clawDirArg = process.argv.find(a => a.startsWith('--claw-dir='))
+  if (clawDirArg) {
+    clawDir = clawDirArg.split('=')[1]
+  } else {
+    const prefs = loadPrefs()
+    clawDir = prefs.clawDir || null
+  }
+
+  // App menu with New Window
+  const template = [
+    { role: 'appMenu' },
+    { label: 'File', submenu: [
+      { label: 'New Window…', accelerator: 'CmdOrCtrl+Shift+N', click: openNewWindow },
+      { type: 'separator' },
+      { role: 'close' },
+    ]},
+    { role: 'editMenu' },
+    { role: 'viewMenu' },
+    { role: 'windowMenu' },
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
   createWindow()
 })
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
+
+async function openNewWindow() {
+  const result = await dialog.showOpenDialog({ properties: ['openDirectory'], title: 'Choose workspace folder' })
+  if (result.canceled || !result.filePaths[0]) return
+  const electronPath = process.argv[0]
+  const appPath = app.getAppPath()
+  spawn(electronPath, [appPath, `--claw-dir=${result.filePaths[0]}`], { detached: true, stdio: 'ignore' }).unref()
+}
 
 // ── IPC: Directory selection ──
 
