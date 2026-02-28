@@ -335,6 +335,16 @@ async function buildSystemPrompt() {
     const skills = fs.readdirSync(skillsDir).filter(d => fs.existsSync(path.join(skillsDir, d, 'SKILL.md')))
     if (skills.length) parts.push(`## Available Skills\n${skills.map(s => `- ${s}`).join('\n')}`)
   }
+  // Memory files (today + yesterday)
+  const memDir = path.join(clawDir, 'memory')
+  if (fs.existsSync(memDir)) {
+    const today = new Date().toISOString().slice(0, 10)
+    const yd = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+    for (const d of [today, yd]) {
+      const p = path.join(memDir, `${d}.md`)
+      if (fs.existsSync(p)) parts.push(`## memory/${d}.md\n${fs.readFileSync(p, 'utf8').slice(0, 2000)}`)
+    }
+  }
   return parts.join('\n\n---\n\n')
 }
 

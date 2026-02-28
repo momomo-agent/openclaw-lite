@@ -1,15 +1,28 @@
 {
   "name": "openclaw-lite",
-  "version": "0.1.0",
+  "version": "0.5.0",
   "description": "Portable local AI assistant, compatible with OpenClaw data format",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "electron . --dev"
+    "dev": "electron . --dev",
+    "dist": "electron-builder --mac",
+    "dbb": "node .ai/dbb/dbb-test.js"
   },
   "author": "momomo-agent",
   "license": "MIT",
+  "build": {
+    "appId": "com.momomo.openclaw-lite",
+    "productName": "OpenClaw Lite",
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": "dmg"
+    },
+    "files": ["main.js", "preload.js", "renderer/**/*", "package.json"],
+    "dmg": { "title": "OpenClaw Lite" }
+  },
   "devDependencies": {
-    "electron": "^33.0.0"
+    "electron": "^33.0.0",
+    "electron-builder": "^26.8.1"
   }
 }

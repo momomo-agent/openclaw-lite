@@ -2,6 +2,10 @@
 
 marked.setOptions({
   breaks: true,
+  highlight: (code, lang) => {
+    if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value
+    return hljs.highlightAuto(code).value
+  },
 })
 
 let history = []
@@ -110,6 +114,11 @@ const messages = document.getElementById('messages')
 
 input.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') send()
+})
+
+// Cmd+K to focus input
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); input.focus() }
 })
 
 // Auto-resize textarea
