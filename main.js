@@ -331,6 +331,11 @@ ipcMain.handle('select-claw-dir', async () => {
   if (!result.canceled && result.filePaths[0]) {
     clawDir = result.filePaths[0]
     savePrefs({ clawDir })
+    // Ensure essential subdirectories exist
+    for (const sub of ['memory', 'sessions', 'agents', 'skills']) {
+      const d = path.join(clawDir, sub)
+      if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true })
+    }
     startMemoryWatch()
     return clawDir
   }
@@ -505,7 +510,24 @@ async function buildSystemPrompt() {
     if (fs.existsSync(shared)) parts.push(`## Shared Memory\n${fs.readFileSync(shared, 'utf8').slice(0, 2000)}`)
   }
   parts.push('## Memory Sync\nAll sessions share the same memory/ directory. Write important context to memory/ files (e.g. memory/SHARED.md) so other sessions can see it. Read memory/ at the start of each conversation to stay in sync.')
-  parts.push("## Watson Status Rule\nYou are running inside Paw, an AI-native desktop app.\nYou MUST keep the sidebar Watson status updated by calling the tool ui_status_set({level,text}).\nRules:\n- text must be 4-20 Chinese characters.\n- Use it at: start thinking, before running a tool, when you need user action, and when you finish.\n- Prefer concrete tasks over abstract states. Example: '在整理发布说明' or '缺少 API Key'.")
+  parts.push(`## Tools & Capabilities
+You are running inside Paw, an AI-native desktop app with these tools:
+- **search**: Search the web (Tavily). Use for research, lookups, current info.
+- **file_read**: Read files from the workspace directory.
+- **file_write**: Write/create files in the workspace. USE THIS when the user asks you to create reports, save content, write markdown, etc. Always write the actual file, don't just output text.
+- **shell_exec**: Run shell commands in the workspace.
+- **code_exec**: Execute JavaScript locally.
+- **notify**: Send a desktop notification.
+- **skill_exec**: Run a skill script.
+- **ui_status_set**: Update the sidebar status line (4-20 Chinese chars).
+
+### Important Rules
+- When the user asks you to "write", "save", "create a file", or "存成markdown" — you MUST call file_write to actually create the file. Do not just output the content as text.
+- After writing a file, tell the user the file path.
+- Use ui_status_set to keep the status updated: at start, before tools, when done.
+- You can chain multiple tools in sequence (up to 5 rounds). For example: search → search → file_write.
+- Prefer Chinese for status text. Example: '在撰写报告' or '已保存文件'.`)
+
   return parts.join('\n\n---\n\n')
 }
 
