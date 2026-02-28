@@ -25,6 +25,10 @@ window.api.onToolStep((d) => {
   const h = requestHandlers.get(d.requestId)
   if (h?.onToolStep) h.onToolStep(d)
 })
+window.api.onTextStart((d) => {
+  const h = requestHandlers.get(d.requestId)
+  if (h?.onTextStart) h.onTextStart(d)
+})
 
 // Watson status — route to per-session status (no more global)
 window.api.onWatsonStatus(({ level, text, requestId }) => {
@@ -291,6 +295,16 @@ async function send() {
 
   // Register handlers in the event bus
   requestHandlers.set(myRequestId, {
+    onTextStart() {
+      // Explicit boundary: new round of text after tool execution
+      if (currentToolGroup || myToolSteps.length > 0) {
+        currentTextEl = document.createElement('div')
+        currentTextEl.className = 'msg-content md-content'
+        flowContainer.appendChild(currentTextEl)
+        currentToolGroup = null
+        segmentText = ''
+      }
+    },
     onToken(d) {
       const t = typeof d === 'string' ? d : d.text
       if (!t) return

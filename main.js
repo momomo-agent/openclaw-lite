@@ -542,8 +542,8 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId) {
 
   for (let round = 0; round < 5; round++) {
     roundText = ''
+    if (round > 0) win.webContents.send('chat-text-start', { requestId })
     pushStatus(win, 'thinking', 'Thinking...')
-    // Watson status is AI-authored; provide a default fallback when no call happens.
     pushWatsonStatus('thinking', '正在思考问题中')
     const body = {
       model: config.model || 'claude-sonnet-4-20250514',
@@ -634,6 +634,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId) {
 
   for (let round = 0; round < 5; round++) {
     roundText = ''
+    if (round > 0) win.webContents.send('chat-text-start', { requestId })
     pushStatus(win, 'thinking', 'Thinking...')
     pushWatsonStatus('thinking', '正在思考问题中')
 

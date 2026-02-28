@@ -15,6 +15,9 @@ contextBridge.exposeInMainWorld('api', {
   onToolStep: (cb) => {
     ipcRenderer.on('chat-tool-step', (_, d) => cb(d))
   },
+  onTextStart: (cb) => {
+    ipcRenderer.on('chat-text-start', (_, d) => cb(d))
+  },
   onChatDone: (cb) => ipcRenderer.on('chat-done', (_, r) => cb(r)),
   onChatError: (cb) => ipcRenderer.on('chat-error', (_, e) => cb(e)),
   // Sessions
