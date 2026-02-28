@@ -31,36 +31,14 @@ function stopMemoryWatch() {
   if (memoryWatcher) { memoryWatcher.close(); memoryWatcher = null }
 }
 
-// ── Session helpers ──
-function sessionsDir() { return clawDir ? path.join(clawDir, 'sessions') : null }
+// ── Session helpers (SQLite backend) ──
+const sessionStore = require('./session-store')
 
-function listSessions() {
-  const dir = sessionsDir()
-  if (!dir || !fs.existsSync(dir)) return []
-  return fs.readdirSync(dir).filter(f => f.endsWith('.json')).map(f => {
-    try { const d = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); return { id: d.id, title: d.title, updatedAt: d.updatedAt } } catch { return null }
-  }).filter(Boolean).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
-}
-
-function loadSession(id) {
-  const p = path.join(sessionsDir(), `${id}.json`)
-  try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch { return null }
-}
-
-function saveSession(session) {
-  const dir = sessionsDir()
-  if (!dir) return
-  fs.mkdirSync(dir, { recursive: true })
-  session.updatedAt = Date.now()
-  fs.writeFileSync(path.join(dir, `${session.id}.json`), JSON.stringify(session, null, 2))
-}
-
-function createSession(title) {
-  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
-  const session = { id, title: title || 'New Chat', messages: [], createdAt: Date.now(), updatedAt: Date.now() }
-  saveSession(session)
-  return session
-}
+function listSessions() { return sessionStore.listSessions(clawDir) }
+function loadSession(id) { return sessionStore.loadSession(clawDir, id) }
+function saveSession(session) { sessionStore.saveSession(clawDir, session) }
+function createSession(title) { return sessionStore.createSession(clawDir, title) }
+function deleteSessionById(id) { sessionStore.deleteSession(clawDir, id) }
 
 // ── Agent helpers ──
 function agentsDir() { return clawDir ? path.join(clawDir, 'agents') : null }
@@ -126,7 +104,63 @@ const TOOLS = [
     name: 'skill_exec', description: 'Execute a skill script from the workspace skills/ directory',
     input_schema: { type: 'object', properties: { skill: { type: 'string', description: 'Skill directory name' }, command: { type: 'string', description: 'Command to run inside the skill directory' } }, required: ['skill','command'] }
   },
+  {
+    name: 'memory_search', description: 'Semantically search MEMORY.md + memory/*.md. Use before answering questions about prior work, decisions, dates, people, preferences, or todos.',
+    input_schema: { type: 'object', properties: { query: { type: 'string' }, maxResults: { type: 'number' }, minScore: { type: 'number' } }, required: ['query'] }
+  },
+  {
+    name: 'memory_get', description: 'Read a snippet from MEMORY.md or memory/*.md with optional line range. Use after memory_search to pull needed lines.',
+    input_schema: { type: 'object', properties: { path: { type: 'string' }, from: { type: 'number', description: 'Start line (1-indexed)' }, lines: { type: 'number', description: 'Number of lines to read' } }, required: ['path'] }
+  },
 ]
+
+// ── Memory Search (keyword-based, upgradable to FTS) ──
+function searchMemoryFiles(dir, query, maxResults) {
+  const results = []
+  const keywords = query.split(/\s+/).filter(Boolean)
+  // Collect all .md files in memory/ + root MEMORY.md
+  const files = []
+  const memDir = path.join(dir, 'memory')
+  if (fs.existsSync(path.join(dir, 'MEMORY.md'))) files.push('MEMORY.md')
+  if (fs.existsSync(memDir)) {
+    const walk = (d, prefix) => {
+      for (const f of fs.readdirSync(d)) {
+        const full = path.join(d, f)
+        const rel = prefix ? `${prefix}/${f}` : f
+        if (fs.statSync(full).isDirectory()) walk(full, rel)
+        else if (f.endsWith('.md')) files.push(`memory/${rel}`)
+      }
+    }
+    walk(memDir, '')
+  }
+  // Search each file
+  for (const relPath of files) {
+    const content = fs.readFileSync(path.join(dir, relPath), 'utf8')
+    const lines = content.split('\n')
+    for (let i = 0; i < lines.length; i++) {
+      const lower = lines[i].toLowerCase()
+      const hits = keywords.filter(k => lower.includes(k)).length
+      if (hits === 0) continue
+      const score = hits / keywords.length
+      const start = Math.max(0, i - 1)
+      const end = Math.min(lines.length, i + 3)
+      const snippet = lines.slice(start, end).join('\n').slice(0, 500)
+      results.push({ path: relPath, startLine: start + 1, endLine: end, score, snippet })
+    }
+  }
+  results.sort((a, b) => b.score - a.score)
+  // Dedupe overlapping snippets
+  const seen = new Set()
+  const deduped = []
+  for (const r of results) {
+    const key = `${r.path}:${Math.floor(r.startLine / 4)}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    deduped.push(r)
+    if (deduped.length >= maxResults) break
+  }
+  return deduped
+}
 
 async function executeTool(name, input, config) {
   switch (name) {
@@ -198,6 +232,30 @@ async function executeTool(name, input, config) {
         return out.slice(0, 5000) || '(no output)'
       } catch (e) { return `Error: ${e.stderr || e.message}`.slice(0, 2000) }
     }
+    case 'memory_get': {
+      if (!clawDir) return 'Error: No claw directory'
+      const relPath = (input.path || '').trim()
+      if (!relPath) return 'Error: path required'
+      if (!relPath.endsWith('.md')) return 'Error: only .md files allowed'
+      const absPath = path.resolve(clawDir, relPath)
+      if (!absPath.startsWith(clawDir)) return 'Error: path outside workspace'
+      if (!fs.existsSync(absPath)) return `Error: file not found: ${relPath}`
+      const content = fs.readFileSync(absPath, 'utf8')
+      if (!input.from && !input.lines) return JSON.stringify({ text: content, path: relPath })
+      const allLines = content.split('\n')
+      const start = Math.max(1, input.from || 1)
+      const count = Math.max(1, input.lines || allLines.length)
+      const slice = allLines.slice(start - 1, start - 1 + count)
+      return JSON.stringify({ text: slice.join('\n'), path: relPath, from: start, lines: slice.length })
+    }
+    case 'memory_search': {
+      if (!clawDir) return 'Error: No claw directory'
+      const query = (input.query || '').trim().toLowerCase()
+      if (!query) return 'Error: query required'
+      const maxResults = input.maxResults || 5
+      const results = searchMemoryFiles(clawDir, query, maxResults)
+      return JSON.stringify({ results })
+    }
     default: return `Unknown tool: ${name}`
   }
 }
@@ -246,7 +304,10 @@ app.whenReady().then(() => {
     const prefs = loadPrefs()
     clawDir = prefs.clawDir || null
   }
-  if (clawDir) startMemoryWatch()
+  if (clawDir) {
+    startMemoryWatch()
+    sessionStore.migrateFromJson(clawDir)
+  }
 
   // App menu with New Window
   const template = [
@@ -279,6 +340,7 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
+app.on('will-quit', () => { sessionStore.closeDb() })
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 
 async function openNewWindow() {
@@ -319,6 +381,7 @@ ipcMain.handle('create-claw-dir', async () => {
 
   clawDir = dir
   savePrefs({ clawDir })
+  sessionStore.migrateFromJson(clawDir)
   startMemoryWatch()
   return dir
 })
@@ -337,6 +400,7 @@ ipcMain.handle('select-claw-dir', async () => {
       if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true })
     }
     startMemoryWatch()
+    sessionStore.migrateFromJson(clawDir)
     return clawDir
   }
   return null
@@ -363,8 +427,7 @@ ipcMain.handle('session-load', (_, id) => loadSession(id))
 ipcMain.handle('session-save', (_, session) => { saveSession(session); return true })
 ipcMain.handle('session-create', (_, title) => createSession(title))
 ipcMain.handle('session-delete', (_, id) => {
-  const p = path.join(sessionsDir(), `${id}.json`)
-  try { fs.unlinkSync(p); return true } catch { return false }
+  try { deleteSessionById(id); return true } catch { return false }
 })
 ipcMain.handle('session-export', (_, id) => {
   const s = loadSession(id)
@@ -483,11 +546,31 @@ ipcMain.handle('chat', async (_, { prompt, history, agentId, files }) => {
 async function buildSystemPrompt() {
   const parts = []
   if (!clawDir) return ''
-  // All files from single directory
-  for (const f of ['SOUL.md', 'MEMORY.md', 'AGENTS.md', 'NOW.md', 'USER.md', 'IDENTITY.md']) {
+  // Cold boot loading chain — aligned with OpenClaw AGENTS.md order
+  // 1. Core identity files (ordered)
+  for (const f of ['SOUL.md', 'USER.md', 'NOW.md', 'AGENTS.md', 'IDENTITY.md']) {
     const p = path.join(clawDir, f)
     if (fs.existsSync(p)) parts.push(`## ${f}\n${fs.readFileSync(p, 'utf8')}`)
   }
+  // 2. Memory navigation + shared state
+  const memDir = path.join(clawDir, 'memory')
+  if (fs.existsSync(memDir)) {
+    for (const f of ['INDEX.md', 'SHARED.md', 'SUBCONSCIOUS.md']) {
+      const p = path.join(memDir, f)
+      if (fs.existsSync(p)) parts.push(`## memory/${f}\n${fs.readFileSync(p, 'utf8').slice(0, 2000)}`)
+    }
+    // 3. Today + yesterday daily notes
+    const today = new Date().toISOString().slice(0, 10)
+    const yd = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+    for (const d of [today, yd]) {
+      const p = path.join(memDir, `${d}.md`)
+      if (fs.existsSync(p)) parts.push(`## memory/${d}.md\n${fs.readFileSync(p, 'utf8').slice(0, 2000)}`)
+    }
+  }
+  // 4. Long-term memory (last, biggest file)
+  const memoryMd = path.join(clawDir, 'MEMORY.md')
+  if (fs.existsSync(memoryMd)) parts.push(`## MEMORY.md\n${fs.readFileSync(memoryMd, 'utf8')}`)
+  // 5. Skills
   const skillsDir = path.join(clawDir, 'skills')
   if (fs.existsSync(skillsDir)) {
     const skills = fs.readdirSync(skillsDir).filter(d => fs.existsSync(path.join(skillsDir, d, 'SKILL.md')))
@@ -496,20 +579,8 @@ async function buildSystemPrompt() {
       parts.push(`## Skill: ${s}\n${content}`)
     }
   }
-  // Memory files (today + yesterday)
-  const memDir = path.join(clawDir, 'memory')
-  if (fs.existsSync(memDir)) {
-    const today = new Date().toISOString().slice(0, 10)
-    const yd = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
-    for (const d of [today, yd]) {
-      const p = path.join(memDir, `${d}.md`)
-      if (fs.existsSync(p)) parts.push(`## memory/${d}.md\n${fs.readFileSync(p, 'utf8').slice(0, 2000)}`)
-    }
-    // Shared memory for cross-session sync
-    const shared = path.join(memDir, 'SHARED.md')
-    if (fs.existsSync(shared)) parts.push(`## Shared Memory\n${fs.readFileSync(shared, 'utf8').slice(0, 2000)}`)
-  }
-  parts.push('## Memory Sync\nAll sessions share the same memory/ directory. Write important context to memory/ files (e.g. memory/SHARED.md) so other sessions can see it. Read memory/ at the start of each conversation to stay in sync.')
+  // 6. Memory sync instructions
+  parts.push('## Memory Sync\nAll sessions share the same memory/ directory. Write important context to memory/ files (e.g. memory/SHARED.md) so other sessions can see it. Use memory_search to recall prior context before answering questions about past work, decisions, or preferences.')
   parts.push(`## Tools & Capabilities
 You are running inside Paw, an AI-native desktop app with these tools:
 - **search**: Search the web (Tavily). Use for research, lookups, current info.
@@ -519,6 +590,8 @@ You are running inside Paw, an AI-native desktop app with these tools:
 - **code_exec**: Execute JavaScript locally.
 - **notify**: Send a desktop notification.
 - **skill_exec**: Run a skill script.
+- **memory_search**: Search MEMORY.md + memory/*.md by keywords. Use BEFORE answering questions about prior work, decisions, dates, people, preferences, or todos.
+- **memory_get**: Read a snippet from MEMORY.md or memory/*.md with optional line range. Use AFTER memory_search to pull only the needed lines.
 - **ui_status_set**: Update the sidebar status line (4-20 Chinese chars).
 
 ### Important Rules
@@ -526,6 +599,7 @@ You are running inside Paw, an AI-native desktop app with these tools:
 - After writing a file, tell the user the file path.
 - Use ui_status_set to keep the status updated: at start, before tools, when done.
 - You can chain multiple tools in sequence (up to 5 rounds). For example: search → search → file_write.
+- Before answering questions about past work, decisions, or preferences — call memory_search first.
 - Prefer Chinese for status text. Example: '在撰写报告' or '已保存文件'.`)
 
   return parts.join('\n\n---\n\n')
