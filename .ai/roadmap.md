@@ -1,4 +1,4 @@
-# Roadmap — OpenClaw Lite
+# Roadmap — [待命名]
 
 ## M1 — 骨架可用 ✅
 - Electron 壳 + 暗色主题
@@ -15,17 +15,23 @@
 - 代码执行工具（本地 eval）
 - 文件读写工具（Claw 目录内）
 
-## M3 — 体验打磨
-- 对话历史持久化（保存到 Claw 目录）
+## M3 — 多 Session + 体验
+- 多 session 支持（侧边栏 session 列表）
+- 对话历史持久化（兼容 OpenClaw 格式）
+- 冷启动记忆文件兼容 OpenClaw
 - 对话导出 markdown
-- Cmd+K 快捷键面板
-- 窗口位置/大小记忆
 - 代码高亮
-- hiddenInset 标题栏恢复
+- Cmd+K 快捷键面板
 
-## M4 — 生态兼容
-- 兼容 OpenClaw 目录结构（openclaw.json）
+## M4 — Multi-Agent 群聊
+- Sub-agent / multi-agent 基于 session
+- 群聊模式：session 内多 agent 参与
+- 群员列表（人 + agent，可添加/删除）
+- Agent 配置（每个 agent 独立 SOUL.md / 工具集）
+
+## M5 — 生态兼容 + 发布
+- 完整兼容 OpenClaw 数据格式（openclaw.json）
 - Skill 加载与执行
 - Memory graph 集成
-- 多会话支持
 - 打包分发（.dmg）
+- 产品命名 + 品牌
