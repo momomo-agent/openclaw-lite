@@ -262,20 +262,21 @@ async function send() {
   const card = document.createElement('div')
   card.className = 'msg-card assistant'
   const _t = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
-  card.innerHTML = `<div class="msg-avatar">🤖</div><div class="msg-body"><div class="msg-header"><span class="msg-name">${esc(targetAgentName)}</span><span class="msg-time">${_t}</span></div><div class="msg-content md-content"><span class="typing-indicator">思考中…</span></div><div class="tool-group-slot"></div></div>`
+  card.innerHTML = `<div class="msg-avatar">🤖</div><div class="msg-body"><div class="msg-header"><span class="msg-name">${esc(targetAgentName)}</span><span class="msg-time">${_t}</span></div><div class="msg-flow"></div></div>`
   messages.appendChild(card)
-  const contentEl = card.querySelector('.md-content')
-  const toolSlot = card.querySelector('.tool-group-slot')
+  const flowContainer = card.querySelector('.msg-flow')
+  // Current text segment
+  let currentTextEl = document.createElement('div')
+  currentTextEl.className = 'msg-content md-content'
+  currentTextEl.innerHTML = '<span class="typing-indicator">思考中…</span>'
+  flowContainer.appendChild(currentTextEl)
+  const contentEl = currentTextEl
   let fullText = ''
   let myToolSteps = []
-  // Get requestId synchronously BEFORE chat() so filtering is ready
+  let currentToolGroup = null // tracks the current inline tool group
   const myRequestId = await window.api.chatPrepare()
 
-  // Add per-card status line
-  const statusLine = document.createElement('div')
-  statusLine.className = 'card-status-line'
-  statusLine.innerHTML = '<span class="card-status-dot thinking"></span><span class="card-status-text">思考中…</span>'
-  card.querySelector('.msg-body').appendChild(statusLine)
+  // Status updates go to sidebar watson status (not per-card)
 
   // Register handlers in the event bus
   requestHandlers.set(myRequestId, {
@@ -283,20 +284,43 @@ async function send() {
       const t = typeof d === 'string' ? d : d.text
       if (!t) return
       fullText += t
-      contentEl.innerHTML = marked.parse(fullText)
+      // If there was a tool group before this text, start a new text segment
+      if (currentToolGroup) {
+        currentTextEl = document.createElement('div')
+        currentTextEl.className = 'msg-content md-content'
+        flowContainer.appendChild(currentTextEl)
+        currentToolGroup = null
+      }
+      currentTextEl.innerHTML = marked.parse(fullText)
       messages.scrollTop = messages.scrollHeight
     },
     onToolStep(d) {
       myToolSteps.push({ name: d.name, output: String(d.output).slice(0, 120) })
-      renderToolGroup(toolSlot, myToolSteps)
+      // Insert tool step inline in the flow (after current text)
+      if (!currentToolGroup) {
+        currentToolGroup = document.createElement('div')
+        currentToolGroup.className = 'tool-group-inline'
+        currentToolGroup.innerHTML = '<div class="tool-group-header">🔧 <span class="tool-count">0</span> 个工具调用 <span class="tool-expand">▼</span></div><div class="tool-group-body"></div>'
+        currentToolGroup.querySelector('.tool-group-header').onclick = () => {
+          const body = currentToolGroup.querySelector('.tool-group-body')
+          const arrow = currentToolGroup.querySelector('.tool-expand')
+          const show = body.style.display === 'none'
+          body.style.display = show ? 'block' : 'none'
+          arrow.textContent = show ? '▼' : '▶'
+        }
+        flowContainer.appendChild(currentToolGroup)
+      }
+      const body = currentToolGroup.querySelector('.tool-group-body')
+      const count = currentToolGroup.querySelector('.tool-count')
+      const item = document.createElement('div')
+      item.className = 'tool-step-item'
+      item.innerHTML = `<span class="tool-step-name">${esc(d.name)}</span> <span class="tool-step-output">${esc(String(d.output).slice(0, 80))}</span>`
+      body.appendChild(item)
+      count.textContent = body.children.length
+      messages.scrollTop = messages.scrollHeight
     },
     onStatus(level, text) {
-      const dot = statusLine.querySelector('.card-status-dot')
-      const txt = statusLine.querySelector('.card-status-text')
-      if (dot) dot.className = `card-status-dot ${level}`
-      if (txt) txt.textContent = text || ''
-      // Always keep status line visible — shows LLM's final status after completion
-      statusLine.style.display = ''
+      // Status now goes to sidebar watson status only, not per-card
     }
   })
 
@@ -311,15 +335,15 @@ async function send() {
     } else {
       contentEl.innerHTML = '<span style="color:#666;font-style:italic">（无文本回复）</span>'
     }
-    // Clean up event bus, collapse tool steps on completion
+    // Clean up event bus, collapse inline tool groups on completion
     requestHandlers.delete(myRequestId)
-    if (myToolSteps.length) renderToolGroup(toolSlot, myToolSteps, true)
-    // Mark card status as done
-    const sDot = statusLine.querySelector('.card-status-dot')
-    const sTxt = statusLine.querySelector('.card-status-text')
-    if (sDot) sDot.className = 'card-status-dot done'
-    if (sTxt) sTxt.textContent = '已完成'
-    // Keep status line visible — don't hide
+    // Collapse all inline tool groups
+    card.querySelectorAll('.tool-group-inline').forEach(g => {
+      const body = g.querySelector('.tool-group-body')
+      const arrow = g.querySelector('.tool-expand')
+      if (body) body.style.display = 'none'
+      if (arrow) arrow.textContent = '▶'
+    })
     history.push({ prompt: text, answer: finalText })
     // Persist to session
     if (currentSessionId) {

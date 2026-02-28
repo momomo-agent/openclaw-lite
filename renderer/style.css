@@ -257,7 +257,7 @@ button:hover { background: #2a2a2a; }
 @keyframes pulse { 0%,100% { opacity: .4 } 50% { opacity: 1 } }
 
 /* Tool group (live collapsed) */
-.tool-group-live {
+.tool-group-live, .tool-group-inline {
   margin: 8px 0 4px 0; border-radius: 8px;
   background: #141414; border: 1px solid #1e1e1e;
   overflow: hidden; font-size: 13px;
