@@ -47,6 +47,11 @@ Or download the signed DMG from [Releases](https://github.com/momomo-agent/paw/r
 └── skills/          # capabilities (inject + execute)
 ```
 
+## v0.12.1 Changelog
+
+- **Fix: crash on launch** — tray icon assets not included in build, causing immediate SIGTRAP crash
+- **Defensive tray init** — graceful fallback when tray icon file is missing
+
 ## v0.12.0 Changelog
 
 - **Event bus architecture** — requestId routing replaces removeAllListeners, fixes conversation cross-talk

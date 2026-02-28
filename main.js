@@ -264,8 +264,14 @@ app.whenReady().then(() => {
   createWindow()
 
   // Tray icon — AI Native menubar presence
-  const trayIcon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'trayTemplate.png'))
-  trayIcon.setTemplateImage(true)
+  const trayIconPath = path.join(__dirname, 'assets', 'trayTemplate.png')
+  let trayIcon
+  if (fs.existsSync(trayIconPath)) {
+    trayIcon = nativeImage.createFromPath(trayIconPath)
+    trayIcon.setTemplateImage(true)
+  } else {
+    trayIcon = nativeImage.createEmpty()
+  }
   tray = new Tray(trayIcon)
   tray.setToolTip('Paw — 空闲待命中')
   tray.on('click', () => { mainWindow?.show(); mainWindow?.focus() })
