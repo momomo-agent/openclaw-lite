@@ -35,6 +35,10 @@ contextBridge.exposeInMainWorld('api', {
   heartbeatStart: () => ipcRenderer.invoke('heartbeat-start'),
   heartbeatStop: () => ipcRenderer.invoke('heartbeat-stop'),
   onHeartbeat: (cb) => ipcRenderer.on('heartbeat-result', (_, r) => cb(r)),
+  onStatus: (cb) => { ipcRenderer.removeAllListeners('agent-status'); ipcRenderer.on('agent-status', (_, s) => cb(s)) },
+  // File operations
+  openFile: (p) => ipcRenderer.invoke('open-file', p),
+  readFile: (p) => ipcRenderer.invoke('read-file', p),
   // Notify
   notify: (title, body) => ipcRenderer.invoke('notify', { title, body }),
 })

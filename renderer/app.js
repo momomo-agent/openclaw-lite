@@ -1,11 +1,51 @@
 // Paw — Renderer App
 
+// Agent status listener
+window.api.onStatus(({ state, detail }) => {
+  const dot = document.querySelector('.status-dot')
+  const text = document.querySelector('.status-text')
+  if (dot) { dot.className = `status-dot ${state}` }
+  if (text) { text.textContent = detail || state }
+})
+
 marked.setOptions({
   breaks: true,
   highlight: (code, lang) => {
     if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value
     return hljs.highlightAuto(code).value
   },
+})
+
+// File click handler — detect file paths in rendered messages
+document.addEventListener('click', async (e) => {
+  const el = e.target.closest('.file-link')
+  if (!el) return
+  e.preventDefault()
+  const fp = el.dataset.path
+  const ext = fp.split('.').pop().toLowerCase()
+  const imgExts = ['png','jpg','jpeg','gif','webp','svg']
+  const mdExts = ['md','markdown']
+  if (imgExts.includes(ext)) {
+    // Inline image preview
+    const existing = el.parentElement.querySelector('.file-preview')
+    if (existing) { existing.remove(); return }
+    const preview = document.createElement('div')
+    preview.className = 'file-preview'
+    preview.innerHTML = `<img src="file://${fp}" style="max-width:100%;max-height:400px;border-radius:6px;margin-top:8px">`
+    el.parentElement.appendChild(preview)
+  } else if (mdExts.includes(ext)) {
+    const content = await window.api.readFile(fp)
+    if (!content) { window.api.openFile(fp); return }
+    const existing = el.parentElement.querySelector('.file-preview')
+    if (existing) { existing.remove(); return }
+    const preview = document.createElement('div')
+    preview.className = 'file-preview'
+    preview.style.cssText = 'background:#111;border-radius:8px;padding:12px;margin-top:8px;max-height:400px;overflow:auto'
+    preview.innerHTML = marked.parse(content)
+    el.parentElement.appendChild(preview)
+  } else {
+    window.api.openFile(fp)
+  }
 })
 
 let history = []
@@ -203,7 +243,7 @@ async function send() {
 
   try {
     const result = await window.api.chat({ prompt: text, history, agentId: targetAgentId, files })
-    contentEl.innerHTML = marked.parse(result.answer || fullText)
+    contentEl.innerHTML = linkifyPaths(marked.parse(result.answer || fullText))
     // Auto-collapse tool steps
     collapseToolSteps()
     history.push({ prompt: text, answer: result.answer || fullText })
@@ -257,6 +297,12 @@ function addToolCard(name, output) {
   card.innerHTML = `<div class="msg-avatar" style="width:24px;height:24px;font-size:12px">🔧</div><div class="msg-body"><div class="msg-name" style="font-size:12px;color:#555">${esc(name)}</div><div style="font-size:12px;color:#444">${esc(String(output).slice(0,200))}</div></div>`
   messages.appendChild(card)
   messages.scrollTop = messages.scrollHeight
+}
+
+function linkifyPaths(html) {
+  return html.replace(/(?<![="'])(\/([\w./-]+\/)+[\w.-]+\.\w+)/g, (m) => {
+    return `<a href="#" class="file-link" data-path="${m}" title="Click to open">${m}</a>`
+  })
 }
 
 function collapseToolSteps() {

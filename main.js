@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, shell, Notification } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell, Notification, Tray, nativeImage } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const vm = require('vm')
@@ -8,6 +8,7 @@ let mainWindow
 let clawDir = null
 let currentSessionId = null
 let heartbeatTimer = null
+let tray = null
 
 // ── Session helpers ──
 function sessionsDir() { return clawDir ? path.join(clawDir, 'sessions') : null }
@@ -209,6 +210,13 @@ app.whenReady().then(() => {
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
   createWindow()
+
+  // Tray icon
+  const icon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAADlJREFUOI1jYBhsgJGBgYGBgYHhPwMDA8N/BgYGRkZGRgYmJiYGFhYWBjY2NgZ2dnYGDg4OBi4uLgYAL0kECfrfCLIAAAAASUVORK5CYII=')
+  icon.setTemplateImage(true)
+  tray = new Tray(icon)
+  tray.setToolTip('Paw — Idle')
+  tray.on('click', () => { mainWindow?.show(); mainWindow?.focus() })
 })
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
@@ -335,7 +343,17 @@ ipcMain.handle('session-remove-member', (_, { sessionId, agentId }) => {
 ipcMain.handle('build-system-prompt', () => buildSystemPrompt())
 
 ipcMain.handle('open-claw-dir', () => {
-  if (clawDir) require('electron').shell.openPath(clawDir)
+  if (clawDir) shell.openPath(clawDir)
+})
+
+ipcMain.handle('open-file', (_, filePath) => {
+  const p = path.resolve(clawDir || '', filePath)
+  shell.openPath(p)
+})
+
+ipcMain.handle('read-file', (_, filePath) => {
+  const p = path.resolve(clawDir || '', filePath)
+  try { return fs.readFileSync(p, 'utf8') } catch { return null }
 })
 
 // ── IPC: Chat with LLM ──
@@ -429,6 +447,7 @@ async function streamAnthropic(messages, systemPrompt, config, win) {
   let fullText = '', msgs = [...messages]
 
   for (let round = 0; round < 5; round++) {
+    pushStatus(win, 'thinking', 'Thinking...')
     const body = {
       model: config.model || 'claude-sonnet-4-20250514',
       max_tokens: 4096, stream: true,
@@ -463,7 +482,7 @@ async function streamAnthropic(messages, systemPrompt, config, win) {
       }
     }
 
-    if (!toolCalls.length) return { answer: fullText }
+    if (!toolCalls.length) { pushStatus(win, 'done', 'Done'); return { answer: fullText } }
 
     // Execute tools and continue
     const assistantContent = []
@@ -474,6 +493,7 @@ async function streamAnthropic(messages, systemPrompt, config, win) {
     const toolResults = []
     for (const tc of toolCalls) {
       const input = JSON.parse(tc.json || '{}')
+      pushStatus(win, 'tool', `Running ${tc.name}...`)
       win.webContents.send('chat-token', `\n\n🔧 ${tc.name}...\n`)
       const result = await executeTool(tc.name, input, config)
       win.webContents.send('chat-token', `\`\`\`\n${String(result).slice(0, 500)}\n\`\`\`\n\n`)
@@ -482,6 +502,7 @@ async function streamAnthropic(messages, systemPrompt, config, win) {
     msgs.push({ role: 'user', content: toolResults })
     fullText += '\n'
   }
+  pushStatus(win, 'done', 'Done')
   return { answer: fullText }
 }
 
@@ -523,6 +544,7 @@ async function streamOpenAI(messages, systemPrompt, config, win) {
       } catch {}
     }
   }
+  pushStatus(win, 'done', 'Done')
   return { answer: fullText }
 }
 
@@ -555,6 +577,11 @@ ipcMain.handle('heartbeat-start', () => { startHeartbeat(); return true })
 ipcMain.handle('heartbeat-stop', () => { stopHeartbeat(); return true })
 
 // ── M8-04: Notification ──
+
+function pushStatus(win, state, detail) {
+  win?.webContents?.send('agent-status', { state, detail })
+  if (tray) tray.setToolTip(`Paw — ${detail || state}`)
+}
 
 function sendNotification(title, body) {
   if (Notification.isSupported()) new Notification({ title, body }).show()

@@ -140,6 +140,25 @@ button:hover { background: #2a2a2a; }
 .attach-chip .remove { cursor: pointer; color: #666; margin-left: 4px; }
 .attach-chip .remove:hover { color: #e44; }
 
+/* Agent status */
+.agent-status {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px; border-top: 1px solid #1a1a1a;
+  font-size: 12px; color: #888;
+}
+.status-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+}
+.status-dot.idle { background: #555; }
+.status-dot.thinking { background: #f59e0b; animation: pulse 1.2s infinite; }
+.status-dot.tool { background: #3b82f6; animation: pulse 1.2s infinite; }
+.status-dot.done { background: #22c55e; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* File links */
+.file-link { color: #60a5fa; text-decoration: underline; cursor: pointer; }
+.file-link:hover { color: #93c5fd; }
+
 .input-bar {
   display: flex; gap: 8px; padding: 12px 24px 16px; align-items: flex-end;
   border-top: 1px solid #ffffff08; flex-shrink: 0;
