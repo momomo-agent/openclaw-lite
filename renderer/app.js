@@ -53,21 +53,33 @@ async function send() {
   input.style.height = 'auto'
   sendBtn.disabled = true
 
-  // User message card
   addCard('user', text)
 
-  // Call LLM
+  // Create streaming assistant card
+  const card = document.createElement('div')
+  card.className = 'msg-card assistant'
+  card.innerHTML = '<div class="md-content"></div>'
+  messages.appendChild(card)
+  const contentEl = card.querySelector('.md-content')
+  let fullText = ''
+
+  const onToken = (t) => {
+    fullText += t
+    contentEl.innerHTML = marked.parse(fullText)
+    messages.scrollTop = messages.scrollHeight
+  }
+  window.api.onToken(onToken)
+
   try {
     const result = await window.api.chat({ prompt: text, history })
-    if (result.toolCalls?.length) {
-      for (const tc of result.toolCalls) {
-        addToolCard(tc.tool, tc.output)
-      }
-    }
-    addCard('assistant', result.answer)
-    history.push({ prompt: text, answer: result.answer })
+    // Final render with complete text
+    contentEl.innerHTML = marked.parse(result.answer || fullText)
+    history.push({ prompt: text, answer: result.answer || fullText })
   } catch (err) {
-    addCard('error', err.message || String(err))
+    if (!fullText) {
+      card.remove()
+      addCard('error', err.message || String(err))
+    }
   }
 
   sendBtn.disabled = false
@@ -102,9 +114,30 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
 }
 
-function openSettings() {
-  document.getElementById('chatScreen').style.display = 'none'
-  document.getElementById('setupScreen').style.display = 'flex'
+async function openSettings() {
+  const config = await window.api.getConfig() || {}
+  document.getElementById('cfgProvider').value = config.provider || 'anthropic'
+  document.getElementById('cfgApiKey').value = config.apiKey || ''
+  document.getElementById('cfgBaseUrl').value = config.baseUrl || ''
+  document.getElementById('cfgModel').value = config.model || ''
+  document.getElementById('cfgTavilyKey').value = config.tavilyKey || ''
+  document.getElementById('settingsOverlay').style.display = 'flex'
+}
+
+function closeSettings() {
+  document.getElementById('settingsOverlay').style.display = 'none'
+}
+
+async function saveSettings() {
+  const config = {
+    provider: document.getElementById('cfgProvider').value,
+    apiKey: document.getElementById('cfgApiKey').value,
+    baseUrl: document.getElementById('cfgBaseUrl').value || undefined,
+    model: document.getElementById('cfgModel').value || undefined,
+    tavilyKey: document.getElementById('cfgTavilyKey').value || undefined,
+  }
+  await window.api.saveConfig(config)
+  closeSettings()
 }
 
 // Init

@@ -42,6 +42,32 @@
     </div>
   </div>
 
+  <!-- Settings overlay -->
+  <div id="settingsOverlay" class="overlay" style="display:none">
+    <div class="settings-panel">
+      <div class="settings-header">
+        <span>Settings</span>
+        <button class="icon-btn" onclick="closeSettings()">✕</button>
+      </div>
+      <div class="settings-body">
+        <label>Provider</label>
+        <select id="cfgProvider">
+          <option value="anthropic">Anthropic</option>
+          <option value="openai">OpenAI</option>
+        </select>
+        <label>API Key</label>
+        <input id="cfgApiKey" type="password" placeholder="sk-...">
+        <label>Base URL <span class="hint">(optional)</span></label>
+        <input id="cfgBaseUrl" type="text" placeholder="https://api.anthropic.com">
+        <label>Model <span class="hint">(optional)</span></label>
+        <input id="cfgModel" type="text" placeholder="claude-sonnet-4-20250514">
+        <label>Tavily API Key <span class="hint">(for search tool)</span></label>
+        <input id="cfgTavilyKey" type="password" placeholder="tvly-...">
+        <button class="primary-btn" onclick="saveSettings()">Save</button>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

@@ -139,9 +139,9 @@ ipcMain.handle('chat', async (_, { prompt, history }) => {
   messages.push({ role: 'user', content: prompt })
 
   if (provider === 'anthropic') {
-    return await callAnthropic(messages, systemPrompt, { apiKey, baseUrl, model })
+    return await streamAnthropic(messages, systemPrompt, { apiKey, baseUrl, model }, mainWindow)
   } else {
-    return await callOpenAI(messages, systemPrompt, { apiKey, baseUrl, model })
+    return await streamOpenAI(messages, systemPrompt, { apiKey, baseUrl, model }, mainWindow)
   }
 })
 
@@ -162,9 +162,9 @@ async function buildSystemPrompt() {
   return parts.join('\n\n---\n\n')
 }
 
-// ── Anthropic API ──
+// ── Anthropic Streaming ──
 
-async function callAnthropic(messages, systemPrompt, config) {
+async function streamAnthropic(messages, systemPrompt, config, win) {
   const base = (config.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '')
   const endpoint = base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`
 
@@ -177,21 +177,40 @@ async function callAnthropic(messages, systemPrompt, config) {
     },
     body: JSON.stringify({
       model: config.model || 'claude-sonnet-4-20250514',
-      max_tokens: 4096,
+      max_tokens: 4096, stream: true,
       system: systemPrompt || undefined,
       messages,
     }),
   })
 
   if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${await res.text()}`)
-  const data = await res.json()
-  const text = data.content?.map(b => b.type === 'text' ? b.text : '').join('') || ''
-  return { answer: text }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = '', fullText = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    const lines = buf.split('\n'); buf = lines.pop()
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      try {
+        const evt = JSON.parse(line.slice(6))
+        if (evt.type === 'content_block_delta' && evt.delta?.text) {
+          fullText += evt.delta.text
+          win.webContents.send('chat-token', evt.delta.text)
+        }
+      } catch {}
+    }
+  }
+  return { answer: fullText }
 }
 
-// ── OpenAI API ──
+// ── OpenAI Streaming ──
 
-async function callOpenAI(messages, systemPrompt, config) {
+async function streamOpenAI(messages, systemPrompt, config, win) {
   const base = (config.baseUrl || 'https://api.openai.com').replace(/\/+$/, '')
   const endpoint = base.endsWith('/v1') ? `${base}/chat/completions` : `${base}/v1/chat/completions`
 
@@ -201,18 +220,31 @@ async function callOpenAI(messages, systemPrompt, config) {
 
   const res = await fetch(endpoint, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${config.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: config.model || 'gpt-4o',
-      messages: msgs,
-    }),
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` },
+    body: JSON.stringify({ model: config.model || 'gpt-4o', messages: msgs, stream: true }),
   })
 
   if (!res.ok) throw new Error(`OpenAI API ${res.status}: ${await res.text()}`)
-  const data = await res.json()
-  const text = data.choices?.[0]?.message?.content || ''
-  return { answer: text }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = '', fullText = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    const lines = buf.split('\n'); buf = lines.pop()
+    for (const line of lines) {
+      if (!line.startsWith('data: ') || line === 'data: [DONE]') continue
+      try {
+        const delta = JSON.parse(line.slice(6)).choices?.[0]?.delta
+        if (delta?.content) {
+          fullText += delta.content
+          win.webContents.send('chat-token', delta.content)
+        }
+      } catch {}
+    }
+  }
+  return { answer: fullText }
 }

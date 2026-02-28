@@ -104,3 +104,28 @@ button:hover { background: #2a2a2a; }
 .md-content li { margin-bottom: 3px; }
 .md-content blockquote { border-left: 3px solid #333; padding-left: 12px; color: #888; margin: 10px 0; }
 .md-content strong { color: #f0f0f0; }
+
+/* Settings overlay */
+.overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+  display: flex; justify-content: center; align-items: center; z-index: 200;
+}
+.settings-panel {
+  background: #111; border: 1px solid #222; border-radius: 12px;
+  width: 380px; max-height: 80vh; overflow-y: auto;
+}
+.settings-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 18px; border-bottom: 1px solid #1a1a1a; font-weight: 600;
+}
+.settings-body {
+  padding: 18px; display: flex; flex-direction: column; gap: 8px;
+}
+.settings-body label { font-size: 12px; color: #888; margin-top: 4px; }
+.settings-body input, .settings-body select {
+  background: #0a0a0a; border: 1px solid #222; border-radius: 6px;
+  color: #e0e0e0; padding: 8px 10px; font-size: 13px; font-family: inherit;
+  outline: none;
+}
+.settings-body input:focus, .settings-body select:focus { border-color: #fbbf24; }
+.settings-body .primary-btn { margin-top: 12px; }
