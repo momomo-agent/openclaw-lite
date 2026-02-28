@@ -50,7 +50,10 @@
         </div>
       </div>
       <div id="messages" class="messages"></div>
+      <div id="attachPreview" style="display:none"></div>
       <div class="input-bar">
+        <button class="icon-btn attach-btn" onclick="document.getElementById('fileInput').click()" title="Attach file">📎</button>
+        <input type="file" id="fileInput" style="display:none" multiple onchange="handleFiles(this.files)">
         <textarea id="input" placeholder="Ask anything... (@name to target)" rows="1"></textarea>
         <button id="sendBtn" onclick="send()">↑</button>
       </div>

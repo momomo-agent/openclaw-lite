@@ -290,7 +290,7 @@ ipcMain.handle('open-claw-dir', () => {
 
 // ── IPC: Chat with LLM ──
 
-ipcMain.handle('chat', async (_, { prompt, history, agentId }) => {
+ipcMain.handle('chat', async (_, { prompt, history, agentId, files }) => {
   const config = (() => {
     if (!clawDir) return {}
     const p = path.join(clawDir, 'config.json')
@@ -316,7 +316,18 @@ ipcMain.handle('chat', async (_, { prompt, history, agentId }) => {
       messages.push({ role: 'assistant', content: h.answer })
     }
   }
-  messages.push({ role: 'user', content: prompt })
+  // Build user content (text + image attachments)
+  const userContent = []
+  if (files?.length) {
+    for (const f of files) {
+      if (f.type.startsWith('image/')) {
+        const base64 = f.data.replace(/^data:[^;]+;base64,/, '')
+        userContent.push({ type: 'image', source: { type: 'base64', media_type: f.type, data: base64 } })
+      }
+    }
+  }
+  userContent.push({ type: 'text', text: prompt || '(attached files)' })
+  messages.push({ role: 'user', content: userContent })
 
   if (provider === 'anthropic') {
     return await streamAnthropic(messages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow)

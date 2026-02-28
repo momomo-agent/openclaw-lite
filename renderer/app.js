@@ -127,13 +127,43 @@ input.addEventListener('input', () => {
   input.style.height = Math.min(input.scrollHeight, 120) + 'px'
 })
 
+// File attachments
+let pendingFiles = []
+function handleFiles(fileList) {
+  for (const f of fileList) {
+    const reader = new FileReader()
+    reader.onload = () => {
+      pendingFiles.push({ name: f.name, type: f.type, data: reader.result })
+      renderAttachPreview()
+    }
+    reader.readAsDataURL(f)
+  }
+  document.getElementById('fileInput').value = ''
+}
+function renderAttachPreview() {
+  const el = document.getElementById('attachPreview')
+  el.style.display = pendingFiles.length ? 'flex' : 'none'
+  el.innerHTML = pendingFiles.map((f, i) => {
+    const isImg = f.type.startsWith('image/')
+    const preview = isImg ? `<img src="${f.data}">` : '📄'
+    return `<div class="attach-chip">${preview}<span>${esc(f.name)}</span><span class="remove" onclick="removeAttach(${i})">✕</span></div>`
+  }).join('')
+}
+function removeAttach(i) { pendingFiles.splice(i, 1); renderAttachPreview() }
+
+// Drag & drop
+document.addEventListener('dragover', e => e.preventDefault())
+document.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files) })
+
 async function send() {
   const text = input.value.trim()
-  if (!text) return
+  if (!text && !pendingFiles.length) return
 
   input.value = ''
   input.style.height = 'auto'
-  sendBtn.disabled = true
+  const files = [...pendingFiles]
+  pendingFiles = []
+  renderAttachPreview()
 
   // Detect @mention to pick agent
   let targetAgentId = null, targetAgentName = 'Assistant'
@@ -153,7 +183,9 @@ async function send() {
     }
   }
 
-  addCard('user', text, 'You')
+  // Show user message with attachments
+  const attachHtml = files.map(f => f.type.startsWith('image/') ? `<img src="${f.data}" style="max-height:120px;border-radius:6px;margin-top:4px">` : `<div class="attach-chip">📄 ${esc(f.name)}</div>`).join('')
+  addCard('user', text + (attachHtml ? `<div>${attachHtml}</div>` : ''), 'You', true)
 
   const card = document.createElement('div')
   card.className = 'msg-card assistant'
@@ -170,7 +202,7 @@ async function send() {
   })
 
   try {
-    const result = await window.api.chat({ prompt: text, history, agentId: targetAgentId })
+    const result = await window.api.chat({ prompt: text, history, agentId: targetAgentId, files })
     contentEl.innerHTML = marked.parse(result.answer || fullText)
     // Auto-collapse tool steps
     collapseToolSteps()
@@ -196,11 +228,10 @@ async function send() {
     }
   }
 
-  sendBtn.disabled = false
   input.focus()
 }
 
-function addCard(role, content, sender) {
+function addCard(role, content, sender, rawHtml) {
   const card = document.createElement('div')
   card.className = `msg-card ${role}`
   const avatar = role === 'user' ? '👤' : '🤖'
@@ -210,7 +241,8 @@ function addCard(role, content, sender) {
   if (role === 'error') {
     card.innerHTML = `<div class="msg-avatar">⚠️</div><div class="msg-body"><div class="msg-content" style="color:#ef4444">${esc(content)}</div></div>`
   } else if (role === 'user') {
-    card.innerHTML = `<div class="msg-avatar">${avatar}</div><div class="msg-body"><div class="msg-header"><span class="${nameClass}">${esc(sender||'You')}</span><span class="msg-time">${time}</span></div><div class="msg-content">${esc(content)}</div></div>`
+    const body = rawHtml ? content : esc(content)
+    card.innerHTML = `<div class="msg-avatar">${avatar}</div><div class="msg-body"><div class="msg-header"><span class="${nameClass}">${esc(sender||'You')}</span><span class="msg-time">${time}</span></div><div class="msg-content">${body}</div></div>`
   } else {
     card.innerHTML = `<div class="msg-avatar">${avatar}</div><div class="msg-body"><div class="msg-header"><span class="${nameClass}">${esc(sender||'Assistant')}</span><span class="msg-time">${time}</span></div><div class="msg-content md-content">${marked.parse(content||'')}</div></div>`
   }
