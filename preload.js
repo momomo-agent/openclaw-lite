@@ -12,6 +12,10 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.removeAllListeners('chat-token')
     ipcRenderer.on('chat-token', (_, t) => cb(t))
   },
+  onToolStep: (cb) => {
+    ipcRenderer.removeAllListeners('chat-tool-step')
+    ipcRenderer.on('chat-tool-step', (_, d) => cb(d))
+  },
   onChatDone: (cb) => ipcRenderer.on('chat-done', (_, r) => cb(r)),
   onChatError: (cb) => ipcRenderer.on('chat-error', (_, e) => cb(e)),
   // Sessions

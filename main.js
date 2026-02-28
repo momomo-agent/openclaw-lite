@@ -119,7 +119,7 @@ const TOOLS = [
     input_schema: { type: 'object', properties: { title: { type: 'string' }, body: { type: 'string' } }, required: ['body'] }
   },
   {
-    name: 'ui_status_set', description: 'Set Watson status (sidebar glanceable status line). Use 8-14 Chinese chars.',
+    name: 'ui_status_set', description: 'Set Watson status (sidebar glanceable status line). Use 4-20 Chinese chars.',
     input_schema: { type: 'object', properties: { level: { type: 'string', enum: ['idle','thinking','running','need_you','done'] }, text: { type: 'string' } }, required: ['level','text'] }
   },
   {
@@ -179,7 +179,7 @@ async function executeTool(name, input, config) {
     case 'ui_status_set': {
       const level = String(input.level || 'idle')
       const text = String(input.text || '').trim()
-      const minLen = 8, maxLen = 14
+      const minLen = 4, maxLen = 20
       if (!['idle','thinking','running','need_you','done'].includes(level)) return 'Error: invalid level'
       if (text.length < minLen || text.length > maxLen) {
         return `Error: text length must be ${minLen}-${maxLen} chars (got ${text.length}). Please rewrite shorter/longer.`
@@ -489,7 +489,7 @@ async function buildSystemPrompt() {
     if (fs.existsSync(shared)) parts.push(`## Shared Memory\n${fs.readFileSync(shared, 'utf8').slice(0, 2000)}`)
   }
   parts.push('## Memory Sync\nAll sessions share the same memory/ directory. Write important context to memory/ files (e.g. memory/SHARED.md) so other sessions can see it. Read memory/ at the start of each conversation to stay in sync.')
-  parts.push("## Watson Status Rule\nYou are running inside Paw, an AI-native desktop app.\nYou MUST keep the sidebar Watson status updated by calling the tool ui_status_set({level,text}).\nRules:\n- text must be 8-14 Chinese characters (no longer).\n- Use it at: start thinking, before running a tool, when you need user action, and when you finish.\n- Prefer concrete tasks over abstract states. Example: '在整理发布说明' or '缺少 API Key'.")
+  parts.push("## Watson Status Rule\nYou are running inside Paw, an AI-native desktop app.\nYou MUST keep the sidebar Watson status updated by calling the tool ui_status_set({level,text}).\nRules:\n- text must be 4-20 Chinese characters.\n- Use it at: start thinking, before running a tool, when you need user action, and when you finish.\n- Prefer concrete tasks over abstract states. Example: '在整理发布说明' or '缺少 API Key'.")
   return parts.join('\n\n---\n\n')
 }
 
@@ -547,14 +547,16 @@ async function streamAnthropic(messages, systemPrompt, config, win) {
     for (const tc of toolCalls) assistantContent.push({ type: 'tool_use', id: tc.id, name: tc.name, input: JSON.parse(tc.json || '{}') })
     msgs.push({ role: 'assistant', content: assistantContent })
 
+    const SILENT_TOOLS = ['ui_status_set', 'notify']
     const toolResults = []
     for (const tc of toolCalls) {
       const input = JSON.parse(tc.json || '{}')
-      pushStatus(win, 'tool', `Running ${tc.name}...`)
-      pushWatsonStatus('running', '正在执行工具中')
-      win.webContents.send('chat-token', `\n\n🔧 ${tc.name}...\n`)
+      const silent = SILENT_TOOLS.includes(tc.name)
+      if (!silent) pushStatus(win, 'tool', `Running ${tc.name}...`)
       const result = await executeTool(tc.name, input, config)
-      win.webContents.send('chat-token', `\`\`\`\n${String(result).slice(0, 500)}\n\`\`\`\n\n`)
+      if (!silent) {
+        win.webContents.send('chat-tool-step', { name: tc.name, output: String(result).slice(0, 500) })
+      }
       toolResults.push({ type: 'tool_result', tool_use_id: tc.id, content: String(result) })
     }
     msgs.push({ role: 'user', content: toolResults })
@@ -638,14 +640,16 @@ async function streamOpenAI(messages, systemPrompt, config, win) {
     msgs.push(assistantMsg)
 
     // Execute tools and add results
+    const SILENT_TOOLS_OAI = ['ui_status_set', 'notify']
     for (const tc of tcList) {
       let input = {}
       try { input = JSON.parse(tc.args || '{}') } catch {}
-      pushStatus(win, 'tool', `Running ${tc.name}...`)
-      pushWatsonStatus('running', '正在执行工具中')
-      win.webContents.send('chat-token', `\n\n🔧 ${tc.name}...\n`)
+      const silent = SILENT_TOOLS_OAI.includes(tc.name)
+      if (!silent) pushStatus(win, 'tool', `Running ${tc.name}...`)
       const result = await executeTool(tc.name, input, config)
-      win.webContents.send('chat-token', `\`\`\`\n${String(result).slice(0, 500)}\n\`\`\`\n\n`)
+      if (!silent) {
+        win.webContents.send('chat-tool-step', { name: tc.name, output: String(result).slice(0, 500) })
+      }
       msgs.push({ role: 'tool', tool_call_id: tc.id, content: String(result) })
     }
     fullText += '\n'

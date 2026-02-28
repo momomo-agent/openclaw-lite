@@ -250,6 +250,10 @@ async function send() {
     messages.scrollTop = messages.scrollHeight
   })
 
+  window.api.onToolStep(({ name, output }) => {
+    addToolCard(name, output)
+  })
+
   try {
     const result = await window.api.chat({ prompt: text, history, agentId: targetAgentId, files })
     contentEl.innerHTML = linkifyPaths(marked.parse(result.answer || fullText))
