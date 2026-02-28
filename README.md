@@ -1,4 +1,4 @@
-# OpenClaw Lite
+# Paw
 
 Portable local AI assistant, compatible with OpenClaw data format.
 

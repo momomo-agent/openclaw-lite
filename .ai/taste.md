@@ -1,4 +1,4 @@
-# Taste — OpenClaw Lite
+# Taste — Paw
 
 ## 参照物
 - **Cursor** — 暗色主题、左侧对话、右侧配置的分栏布局

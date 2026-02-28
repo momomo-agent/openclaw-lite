@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// DBB automated test for openclaw-lite
+// DBB automated test for Paw
 // Uses CDP (Chrome DevTools Protocol) for interaction + agent-control for screenshots
 
 const http = require('http')
@@ -10,7 +10,7 @@ const { execSync, spawn } = require('child_process')
 const SCREENSHOT_DIR = '/Users/kenefe/.openclaw/media/outbound'
 const AC = '/Users/kenefe/LOCAL/momo-agent/agent-control/cli.js'
 const APP_DIR = path.resolve(__dirname, '..')
-const PREFS_DIR = path.join(require('os').homedir(), 'Library/Application Support/openclaw-lite')
+const PREFS_DIR = path.join(require('os').homedir(), 'Library/Application Support/paw')
 
 let electronProc = null
 
@@ -59,7 +59,7 @@ function pass(name) { results.push({ name, status: 'PASS' }); console.log(`✅ $
 function fail(name, reason) { results.push({ name, status: 'FAIL', reason }); console.log(`❌ ${name}: ${reason}`) }
 
 async function main() {
-  console.log('=== OpenClaw Lite DBB Test ===\n')
+  console.log('=== Paw DBB Test ===\n')
 
   // T1: Setup screen renders
   console.log('T1: Setup screen...')

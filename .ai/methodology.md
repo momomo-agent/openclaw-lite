@@ -1,4 +1,4 @@
-# Methodology — OpenClaw Lite
+# Methodology — Paw
 
 ## 技术栈
 - **Electron** — 桌面壳，macOS 先行

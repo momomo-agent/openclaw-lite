@@ -1,4 +1,4 @@
-// OpenClaw Lite — Renderer App
+// Paw — Renderer App
 
 marked.setOptions({
   breaks: true,

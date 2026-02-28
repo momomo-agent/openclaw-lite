@@ -1,7 +1,7 @@
 {
-  "name": "openclaw-lite",
+  "name": "paw",
   "version": "0.5.0",
-  "description": "Portable local AI assistant, compatible with OpenClaw data format",
+  "description": "Portable local AI assistant with multi-agent chat",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -12,14 +12,14 @@
   "author": "momomo-agent",
   "license": "MIT",
   "build": {
-    "appId": "com.momomo.openclaw-lite",
-    "productName": "OpenClaw Lite",
+    "appId": "com.momomo.paw",
+    "productName": "Paw",
     "mac": {
       "category": "public.app-category.productivity",
       "target": "dmg"
     },
     "files": ["main.js", "preload.js", "renderer/**/*", "package.json"],
-    "dmg": { "title": "OpenClaw Lite" }
+    "dmg": { "title": "Paw" }
   },
   "devDependencies": {
     "electron": "^33.0.0",
