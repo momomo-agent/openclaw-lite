@@ -2,9 +2,9 @@
 
 // Watson status listener (AI-native)
 window.api.onWatsonStatus(({ level, text }) => {
-  const dot = document.querySelector('.status-dot')
-  const t = document.querySelector('.status-text')
-  if (dot) dot.className = `status-dot ${level}`
+  const dot = document.getElementById('watsonDot')
+  const t = document.getElementById('watsonText')
+  if (dot) dot.className = `watson-dot ${level}`
   if (t) t.textContent = text || ''
 })
 
