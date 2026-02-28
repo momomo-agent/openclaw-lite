@@ -108,13 +108,16 @@ function savePrefs(p) {
   fs.writeFileSync(PREFS_PATH, JSON.stringify(p, null, 2))
 }
 
-app.disableHardwareAcceleration()
+// app.disableHardwareAcceleration() — removed: conflicts with hiddenInset rendering
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 900, height: 700,
-    minWidth: 600, minHeight: 400,
+    width: 960, height: 700,
+    minWidth: 640, minHeight: 400,
     backgroundColor: '#0a0a0a',
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 14, y: 14 },
+    vibrancy: 'sidebar',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
