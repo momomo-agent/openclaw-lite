@@ -97,6 +97,10 @@ const TOOLS = [
     name: 'notify', description: 'Send a system notification to the user',
     input_schema: { type: 'object', properties: { title: { type: 'string' }, body: { type: 'string' } }, required: ['body'] }
   },
+  {
+    name: 'ui_status_set', description: 'Set Watson status (sidebar glanceable status line). Use 8-14 Chinese chars.',
+    input_schema: { type: 'object', properties: { level: { type: 'string', enum: ['idle','thinking','running','need_you','done'] }, text: { type: 'string' } }, required: ['level','text'] }
+  },
 ]
 
 async function executeTool(name, input, config) {
@@ -146,6 +150,17 @@ async function executeTool(name, input, config) {
     case 'notify': {
       sendNotification(input.title || 'Paw', input.body)
       return 'Notification sent'
+    }
+    case 'ui_status_set': {
+      const level = String(input.level || 'idle')
+      const text = String(input.text || '').trim()
+      const minLen = 8, maxLen = 14
+      if (!['idle','thinking','running','need_you','done'].includes(level)) return 'Error: invalid level'
+      if (text.length < minLen || text.length > maxLen) {
+        return `Error: text length must be ${minLen}-${maxLen} chars (got ${text.length}). Please rewrite shorter/longer.`
+      }
+      pushWatsonStatus(level, text)
+      return 'OK'
     }
     default: return `Unknown tool: ${name}`
   }
@@ -435,6 +450,7 @@ async function buildSystemPrompt() {
     if (fs.existsSync(shared)) parts.push(`## Shared Memory\n${fs.readFileSync(shared, 'utf8').slice(0, 2000)}`)
   }
   parts.push('## Memory Sync\nAll sessions share the same memory/ directory. Write important context to memory/ files (e.g. memory/SHARED.md) so other sessions can see it. Read memory/ at the start of each conversation to stay in sync.')
+  parts.push("## Watson Status Rule\nYou are running inside Paw, an AI-native desktop app.\nYou MUST keep the sidebar Watson status updated by calling the tool ui_status_set({level,text}).\nRules:\n- text must be 8-14 Chinese characters (no longer).\n- Use it at: start thinking, before running a tool, when you need user action, and when you finish.\n- Prefer concrete tasks over abstract states. Example: '在整理发布说明' or '缺少 API Key'.")
   return parts.join('\n\n---\n\n')
 }
 
@@ -448,6 +464,8 @@ async function streamAnthropic(messages, systemPrompt, config, win) {
 
   for (let round = 0; round < 5; round++) {
     pushStatus(win, 'thinking', 'Thinking...')
+    // Watson status is AI-authored; provide a default fallback when no call happens.
+    pushWatsonStatus('thinking', '正在思考问题中')
     const body = {
       model: config.model || 'claude-sonnet-4-20250514',
       max_tokens: 4096, stream: true,
@@ -482,7 +500,7 @@ async function streamAnthropic(messages, systemPrompt, config, win) {
       }
     }
 
-    if (!toolCalls.length) { pushStatus(win, 'done', 'Done'); return { answer: fullText } }
+    if (!toolCalls.length) { pushStatus(win, 'done', 'Done'); pushWatsonStatus('done', '已完成本次回复'); return { answer: fullText } }
 
     // Execute tools and continue
     const assistantContent = []
@@ -494,6 +512,7 @@ async function streamAnthropic(messages, systemPrompt, config, win) {
     for (const tc of toolCalls) {
       const input = JSON.parse(tc.json || '{}')
       pushStatus(win, 'tool', `Running ${tc.name}...`)
+      pushWatsonStatus('running', '正在执行工具中')
       win.webContents.send('chat-token', `\n\n🔧 ${tc.name}...\n`)
       const result = await executeTool(tc.name, input, config)
       win.webContents.send('chat-token', `\`\`\`\n${String(result).slice(0, 500)}\n\`\`\`\n\n`)
@@ -586,4 +605,13 @@ function pushStatus(win, state, detail) {
 function sendNotification(title, body) {
   if (Notification.isSupported()) new Notification({ title, body }).show()
 }
+
+function pushWatsonStatus(level, text) {
+  const payload = { level, text }
+  mainWindow?.webContents?.send('watson-status', payload)
+  // Keep tray tooltip in sync with human-readable status
+  if (tray) tray.setToolTip(`Paw — ${text}`)
+  if (level === 'done') setTimeout(() => pushWatsonStatus('idle', '空闲待命中'), 2000)
+}
+
 ipcMain.handle('notify', (_, { title, body }) => { sendNotification(title, body); return true })

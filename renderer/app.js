@@ -1,11 +1,11 @@
 // Paw — Renderer App
 
-// Agent status listener
-window.api.onStatus(({ state, detail }) => {
+// Watson status listener (AI-native)
+window.api.onWatsonStatus(({ level, text }) => {
   const dot = document.querySelector('.status-dot')
-  const text = document.querySelector('.status-text')
-  if (dot) { dot.className = `status-dot ${state}` }
-  if (text) { text.textContent = detail || state }
+  const t = document.querySelector('.status-text')
+  if (dot) dot.className = `status-dot ${level}`
+  if (t) t.textContent = text || ''
 })
 
 marked.setOptions({
