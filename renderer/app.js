@@ -368,8 +368,12 @@ async function send() {
     }
     // Clean up event bus, collapse inline tool groups on completion
     requestHandlers.delete(myRequestId)
-    setSessionStatus(currentSessionId, 'done', '已完成')
-    setTimeout(() => setSessionStatus(currentSessionId, 'idle', ''), 3000)
+    // Keep AI's last watson status if it wrote one; otherwise show fallback
+    const curStatus = sessionStatus.get(currentSessionId)
+    if (!curStatus?.aiAuthored) {
+      setSessionStatus(currentSessionId, 'done', '已完成回复')
+    }
+    // Don't clear to empty — keep showing what was done
     // Collapse all inline tool groups
     card.querySelectorAll('.tool-group-inline').forEach(g => {
       const body = g.querySelector('.tool-group-body')
@@ -393,7 +397,7 @@ async function send() {
       }
     }
   } catch (err) {
-    setSessionStatus(currentSessionId, 'idle', '')
+    setSessionStatus(currentSessionId, 'idle', '出错了')
     requestHandlers.delete(myRequestId)
     requestHandlers.delete(myRequestId)
     if (!fullText) {
