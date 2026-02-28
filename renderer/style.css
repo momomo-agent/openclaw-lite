@@ -13,7 +13,9 @@ body {
 .setup-container {
   max-width: 420px; margin: auto; padding: 40px 24px;
   display: flex; flex-direction: column; gap: 24px;
+  -webkit-app-region: no-drag;
 }
+#setupScreen { -webkit-app-region: drag; }
 .setup-container h1 { font-size: 28px; font-weight: 700; text-align: center; }
 .setup-container h1 span { color: #fbbf24; }
 .subtitle { color: #555; text-align: center; font-size: 14px; }
