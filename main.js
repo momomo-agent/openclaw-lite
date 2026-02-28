@@ -312,7 +312,7 @@ ipcMain.handle('create-claw-dir', async () => {
     const p = path.join(dir, name)
     if (!fs.existsSync(p)) fs.writeFileSync(p, content)
   }
-  for (const d of ['skills', 'memory']) {
+  for (const d of ['skills', 'memory', 'sessions', 'agents']) {
     const p = path.join(dir, d)
     if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true })
   }

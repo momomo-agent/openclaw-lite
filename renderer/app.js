@@ -1,5 +1,17 @@
 // Paw — Renderer App
 
+// ── Per-Session Status ──
+const sessionStatus = new Map() // sessionId -> { level, text }
+
+function setSessionStatus(sessionId, level, text) {
+  sessionStatus.set(sessionId, { level, text })
+  // Update the DOM element for this session in sidebar
+  const dot = document.querySelector(`.session-item[data-id="${sessionId}"] .session-status-dot`)
+  const t = document.querySelector(`.session-item[data-id="${sessionId}"] .session-status-text`)
+  if (dot) dot.className = `session-status-dot ${level}`
+  if (t) t.textContent = text || ''
+}
+
 // ── Request Event Bus ──
 // All chat requests register here; events are routed by requestId
 const requestHandlers = new Map() // requestId -> { onToken, onToolStep, onStatus }
@@ -14,27 +26,24 @@ window.api.onToolStep((d) => {
   if (h?.onToolStep) h.onToolStep(d)
 })
 
-// Watson status — update both global sidebar AND active request's card
+// Watson status — route to per-session status (no more global)
 window.api.onWatsonStatus(({ level, text, requestId }) => {
-  // Global sidebar (kept for idle/general status)
-  const dot = document.getElementById('watsonDot')
-  const t = document.getElementById('watsonText')
-  if (dot) dot.className = `watson-dot ${level}`
-  if (t) t.textContent = text || ''
-  // Per-card status if requestId provided
-  if (requestId) {
-    const h = requestHandlers.get(requestId)
-    if (h?.onStatus) h.onStatus(level, text)
+  // Update current session status from AI-authored watson updates
+  if (currentSessionId) {
+    setSessionStatus(currentSessionId, level, text || '')
   }
 })
 
 // Memory change listener
 window.api.onMemoryChanged(({ file }) => {
-  const el = document.getElementById('watsonText')
-  if (!el) return
-  const prev = el.textContent
-  el.textContent = `记忆已更新: ${file || ''}`
-  setTimeout(() => { if (el.textContent.startsWith('记忆已更新')) el.textContent = prev }, 3000)
+  if (currentSessionId) {
+    const prev = sessionStatus.get(currentSessionId)
+    setSessionStatus(currentSessionId, 'idle', `记忆更新: ${file || ''}`)
+    setTimeout(() => {
+      const cur = sessionStatus.get(currentSessionId)
+      if (cur?.text?.startsWith('记忆更新')) setSessionStatus(currentSessionId, prev?.level || 'idle', prev?.text || '')
+    }, 3000)
+  }
 })
 
 // Tray menu: new chat
@@ -120,7 +129,9 @@ async function refreshSessionList() {
   for (const s of sessions) {
     const el = document.createElement('div')
     el.className = 'session-item' + (s.id === currentSessionId ? ' active' : '')
-    el.innerHTML = `<span>${esc(s.title)}</span><span class="del-btn" onclick="event.stopPropagation();deleteSession('${s.id}')">✕</span>`
+    el.dataset.id = s.id
+    const st = sessionStatus.get(s.id) || { level: 'idle', text: '' }
+    el.innerHTML = `<div class="session-item-main"><span class="session-status-dot ${st.level}"></span><span class="session-title">${esc(s.title)}</span></div><div class="session-item-meta"><span class="session-status-text">${esc(st.text)}</span><span class="del-btn" onclick="event.stopPropagation();deleteSession('${s.id}')">✕</span></div>`
     el.onclick = () => switchSession(s.id)
     list.appendChild(el)
   }
@@ -272,11 +283,11 @@ async function send() {
   flowContainer.appendChild(currentTextEl)
   const contentEl = currentTextEl
   let fullText = ''
+  let segmentText = '' // text for current segment only
   let myToolSteps = []
-  let currentToolGroup = null // tracks the current inline tool group
+  let currentToolGroup = null
   const myRequestId = await window.api.chatPrepare()
-
-  // Status updates go to sidebar watson status (not per-card)
+  setSessionStatus(currentSessionId, 'thinking', '思考中…')
 
   // Register handlers in the event bus
   requestHandlers.set(myRequestId, {
@@ -284,18 +295,21 @@ async function send() {
       const t = typeof d === 'string' ? d : d.text
       if (!t) return
       fullText += t
+      segmentText += t
       // If there was a tool group before this text, start a new text segment
       if (currentToolGroup) {
         currentTextEl = document.createElement('div')
         currentTextEl.className = 'msg-content md-content'
         flowContainer.appendChild(currentTextEl)
         currentToolGroup = null
+        segmentText = t // new segment starts with this token
       }
-      currentTextEl.innerHTML = marked.parse(fullText)
+      currentTextEl.innerHTML = marked.parse(segmentText)
       messages.scrollTop = messages.scrollHeight
     },
     onToolStep(d) {
       myToolSteps.push({ name: d.name, output: String(d.output).slice(0, 120) })
+      setSessionStatus(currentSessionId, 'running', `执行 ${d.name}…`)
       // Insert tool step inline in the flow (after current text)
       if (!currentToolGroup) {
         currentToolGroup = document.createElement('div')
@@ -327,16 +341,19 @@ async function send() {
   try {
     const result = await window.api.chat({ prompt: text, history, agentId: targetAgentId, files })
     console.log('[Paw] chat result:', JSON.stringify({ answer: (result?.answer || '').slice(0, 100), fullText: fullText.slice(0, 100) }))
-    // Use streaming fullText (already rendered by onToken) — don't overwrite with result.answer
-    // which may contain intermediate round fragments
     const finalText = fullText || result?.answer || ''
+    // Apply linkifyPaths to all text segments (don't overwrite with fullText — segments are already rendered)
     if (finalText.trim()) {
-      contentEl.innerHTML = linkifyPaths(marked.parse(finalText))
+      card.querySelectorAll('.msg-content.md-content').forEach(el => {
+        el.innerHTML = linkifyPaths(el.innerHTML)
+      })
     } else {
       contentEl.innerHTML = '<span style="color:#666;font-style:italic">（无文本回复）</span>'
     }
     // Clean up event bus, collapse inline tool groups on completion
     requestHandlers.delete(myRequestId)
+    setSessionStatus(currentSessionId, 'done', '已完成')
+    setTimeout(() => setSessionStatus(currentSessionId, 'idle', ''), 3000)
     // Collapse all inline tool groups
     card.querySelectorAll('.tool-group-inline').forEach(g => {
       const body = g.querySelector('.tool-group-body')
@@ -360,6 +377,9 @@ async function send() {
       }
     }
   } catch (err) {
+    setSessionStatus(currentSessionId, 'idle', '')
+    requestHandlers.delete(myRequestId)
+    requestHandlers.delete(myRequestId)
     if (!fullText) {
       card.remove()
       addCard('error', err.message || String(err))
