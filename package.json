@@ -24,6 +24,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "session-store.js",
       "renderer/**/*",
       "assets/**/*",
       "package.json"
