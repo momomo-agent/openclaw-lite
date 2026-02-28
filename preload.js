@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld('api', {
   onHeartbeat: (cb) => ipcRenderer.on('heartbeat-result', (_, r) => cb(r)),
   onStatus: (cb) => { ipcRenderer.removeAllListeners('agent-status'); ipcRenderer.on('agent-status', (_, s) => cb(s)) },
   onWatsonStatus: (cb) => { ipcRenderer.on('watson-status', (_, s) => cb(s)) },
+  onTrayNewChat: (cb) => { ipcRenderer.on('tray-new-chat', () => cb()) },
   // File operations
   openFile: (p) => ipcRenderer.invoke('open-file', p),
   readFile: (p) => ipcRenderer.invoke('read-file', p),

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44">
+  <!-- Paw print - template image (black only, alpha channel) -->
+  <!-- Main pad -->
+  <ellipse cx="22" cy="28" rx="8" ry="7" fill="black"/>
+  <!-- Toe pads -->
+  <circle cx="12" cy="18" r="4" fill="black"/>
+  <circle cx="22" cy="14" r="4" fill="black"/>
+  <circle cx="32" cy="18" r="4" fill="black"/>
+</svg>

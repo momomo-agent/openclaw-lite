@@ -37,6 +37,9 @@ window.api.onMemoryChanged(({ file }) => {
   setTimeout(() => { if (el.textContent.startsWith('记忆已更新')) el.textContent = prev }, 3000)
 })
 
+// Tray menu: new chat
+window.api.onTrayNewChat(() => { newSession() })
+
 marked.setOptions({
   breaks: true,
   highlight: (code, lang) => {
@@ -311,8 +314,9 @@ async function send() {
     } else {
       contentEl.innerHTML = '<span style="color:#666;font-style:italic">（无文本回复）</span>'
     }
-    // Clean up event bus (keep tool steps visible, don't collapse)
+    // Clean up event bus, collapse tool steps on completion
     requestHandlers.delete(myRequestId)
+    if (myToolSteps.length) renderToolGroup(toolSlot, myToolSteps, true)
     // Mark card status as done
     const sDot = statusLine.querySelector('.card-status-dot')
     const sTxt = statusLine.querySelector('.card-status-text')
@@ -364,12 +368,14 @@ function addCard(role, content, sender, rawHtml) {
   messages.scrollTop = messages.scrollHeight
 }
 
-function renderToolGroup(slot, steps) {
+function renderToolGroup(slot, steps, forceCollapse) {
   if (!steps.length) return
   slot.innerHTML = ''
   const group = document.createElement('div')
   group.className = 'tool-group-live'
-  const expanded = slot.dataset.expanded === 'true'
+  // During streaming: expand so user sees progress. After done / forceCollapse: collapse.
+  const userToggled = slot.dataset.userToggled === 'true'
+  const expanded = forceCollapse ? false : (userToggled ? slot.dataset.expanded === 'true' : true)
   group.innerHTML = `<div class="tool-group-header">🔧 <span class="tool-count">${steps.length}</span> 个工具调用 <span class="tool-expand">${expanded ? '▼' : '▶'}</span></div><div class="tool-group-body" style="display:${expanded ? 'block' : 'none'}"></div>`
   group.querySelector('.tool-group-header').onclick = () => {
     const body = group.querySelector('.tool-group-body')
@@ -378,6 +384,7 @@ function renderToolGroup(slot, steps) {
     body.style.display = show ? 'block' : 'none'
     arrow.textContent = show ? '▼' : '▶'
     slot.dataset.expanded = show ? 'true' : 'false'
+    slot.dataset.userToggled = 'true'
   }
   const body = group.querySelector('.tool-group-body')
   for (const s of steps) {

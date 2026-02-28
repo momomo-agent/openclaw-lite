@@ -263,12 +263,13 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
   createWindow()
 
-  // Tray icon
-  const icon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAADlJREFUOI1jYBhsgJGBgYGBgYHhPwMDA8N/BgYGRkZGRgYmJiYGFhYWBjY2NgZ2dnYGDg4OBi4uLgYAL0kECfrfCLIAAAAASUVORK5CYII=')
-  icon.setTemplateImage(true)
-  tray = new Tray(icon)
-  tray.setToolTip('Paw — Idle')
+  // Tray icon — AI Native menubar presence
+  const trayIcon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'trayTemplate.png'))
+  trayIcon.setTemplateImage(true)
+  tray = new Tray(trayIcon)
+  tray.setToolTip('Paw — 空闲待命中')
   tray.on('click', () => { mainWindow?.show(); mainWindow?.focus() })
+  updateTrayMenu()
 })
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
@@ -721,13 +722,40 @@ function sendNotification(title, body) {
   if (Notification.isSupported()) new Notification({ title, body }).show()
 }
 
+// ── Tray Menu (AI Native) ──
+let _trayStatusText = '空闲待命中'
+let _trayStatusLevel = 'idle'
+
+function updateTrayMenu() {
+  if (!tray) return
+  const statusEmoji = { idle: '⚪', thinking: '🟡', running: '🔵', need_you: '🔴', done: '🟢' }
+  const emoji = statusEmoji[_trayStatusLevel] || '⚪'
+  const menu = Menu.buildFromTemplate([
+    { label: `${emoji}  ${_trayStatusText}`, enabled: false },
+    { type: 'separator' },
+    { label: '打开 Paw', click: () => { mainWindow?.show(); mainWindow?.focus() } },
+    { label: '新建对话', click: () => { mainWindow?.show(); mainWindow?.webContents?.send('tray-new-chat') } },
+    { type: 'separator' },
+    { label: '退出', click: () => app.quit() },
+  ])
+  tray.setContextMenu(menu)
+}
+
 // requestId is optional — when provided, renderer routes to per-card status
 let _activeRequestId = null
 function pushWatsonStatus(level, text, requestId) {
   const rid = requestId || _activeRequestId
   const payload = { level, text, requestId: rid }
   mainWindow?.webContents?.send('watson-status', payload)
-  if (tray) tray.setToolTip(`Paw — ${text}`)
+  // Update tray
+  _trayStatusText = text || '空闲待命中'
+  _trayStatusLevel = level || 'idle'
+  if (tray) {
+    tray.setToolTip(`Paw — ${_trayStatusText}`)
+    // macOS: set tray title to show status text next to icon
+    tray.setTitle(level === 'idle' ? '' : text)
+    updateTrayMenu()
+  }
   if (level === 'done') setTimeout(() => {
     pushWatsonStatus('idle', '空闲待命中', null)
   }, 2000)
