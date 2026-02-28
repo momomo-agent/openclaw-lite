@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell, Notification } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const vm = require('vm')
@@ -7,6 +7,7 @@ const { spawn } = require('child_process')
 let mainWindow
 let clawDir = null
 let currentSessionId = null
+let heartbeatTimer = null
 
 // ── Session helpers ──
 function sessionsDir() { return clawDir ? path.join(clawDir, 'sessions') : null }
@@ -87,6 +88,14 @@ const TOOLS = [
     name: 'file_write', description: 'Write content to a file in the Claw directory',
     input_schema: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] }
   },
+  {
+    name: 'shell_exec', description: 'Execute a shell command in the Claw directory',
+    input_schema: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] }
+  },
+  {
+    name: 'notify', description: 'Send a system notification to the user',
+    input_schema: { type: 'object', properties: { title: { type: 'string' }, body: { type: 'string' } }, required: ['body'] }
+  },
 ]
 
 async function executeTool(name, input, config) {
@@ -124,6 +133,18 @@ async function executeTool(name, input, config) {
       fs.mkdirSync(path.dirname(p), { recursive: true })
       fs.writeFileSync(p, input.content)
       return `Written ${input.content.length} bytes to ${input.path}`
+    }
+    case 'shell_exec': {
+      if (!clawDir) return 'Error: No claw directory'
+      const { execSync } = require('child_process')
+      try {
+        const out = execSync(input.command, { cwd: clawDir, timeout: 30000, maxBuffer: 1024 * 512, encoding: 'utf8' })
+        return out.slice(0, 5000) || '(no output)'
+      } catch (e) { return `Error: ${e.stderr || e.message}`.slice(0, 2000) }
+    }
+    case 'notify': {
+      sendNotification(input.title || 'Paw', input.body)
+      return 'Notification sent'
     }
     default: return `Unknown tool: ${name}`
   }
@@ -377,7 +398,10 @@ async function buildSystemPrompt() {
   const skillsDir = path.join(clawDir, 'skills')
   if (fs.existsSync(skillsDir)) {
     const skills = fs.readdirSync(skillsDir).filter(d => fs.existsSync(path.join(skillsDir, d, 'SKILL.md')))
-    if (skills.length) parts.push(`## Available Skills\n${skills.map(s => `- ${s}`).join('\n')}`)
+    for (const s of skills) {
+      const content = fs.readFileSync(path.join(skillsDir, s, 'SKILL.md'), 'utf8').slice(0, 3000)
+      parts.push(`## Skill: ${s}\n${content}`)
+    }
   }
   // Memory files (today + yesterday)
   const memDir = path.join(clawDir, 'memory')
@@ -388,7 +412,11 @@ async function buildSystemPrompt() {
       const p = path.join(memDir, `${d}.md`)
       if (fs.existsSync(p)) parts.push(`## memory/${d}.md\n${fs.readFileSync(p, 'utf8').slice(0, 2000)}`)
     }
+    // Shared memory for cross-session sync
+    const shared = path.join(memDir, 'SHARED.md')
+    if (fs.existsSync(shared)) parts.push(`## Shared Memory\n${fs.readFileSync(shared, 'utf8').slice(0, 2000)}`)
   }
+  parts.push('## Memory Sync\nAll sessions share the same memory/ directory. Write important context to memory/ files (e.g. memory/SHARED.md) so other sessions can see it. Read memory/ at the start of each conversation to stay in sync.')
   return parts.join('\n\n---\n\n')
 }
 
@@ -497,3 +525,38 @@ async function streamOpenAI(messages, systemPrompt, config, win) {
   }
   return { answer: fullText }
 }
+
+// ── M8-01: Heartbeat ──
+
+function startHeartbeat() {
+  stopHeartbeat()
+  if (!clawDir) return
+  let cfg; try { cfg = JSON.parse(fs.readFileSync(path.join(clawDir, 'config.json'), 'utf8')) } catch { return }
+  const hb = cfg.heartbeat; if (!hb?.enabled) return
+  const ms = (hb.intervalMinutes || 30) * 60000
+  const prompt = hb.prompt || 'Heartbeat: check if anything needs attention. Reply HEARTBEAT_OK if nothing.'
+  heartbeatTimer = setInterval(async () => {
+    try {
+      const c = JSON.parse(fs.readFileSync(path.join(clawDir, 'config.json'), 'utf8'))
+      if (!c.apiKey) return
+      const sp = await buildSystemPrompt()
+      const msgs = [{ role: 'user', content: prompt }]
+      const fn = (c.provider || 'anthropic') === 'anthropic' ? streamAnthropic : streamOpenAI
+      const r = await fn(msgs, sp, c, mainWindow)
+      if (r?.answer && !r.answer.includes('HEARTBEAT_OK')) {
+        sendNotification('Paw', r.answer.slice(0, 200))
+        mainWindow?.webContents.send('heartbeat-result', r.answer)
+      }
+    } catch (e) { console.error('Heartbeat error:', e.message) }
+  }, ms)
+}
+function stopHeartbeat() { if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null } }
+ipcMain.handle('heartbeat-start', () => { startHeartbeat(); return true })
+ipcMain.handle('heartbeat-stop', () => { stopHeartbeat(); return true })
+
+// ── M8-04: Notification ──
+
+function sendNotification(title, body) {
+  if (Notification.isSupported()) new Notification({ title, body }).show()
+}
+ipcMain.handle('notify', (_, { title, body }) => { sendNotification(title, body); return true })

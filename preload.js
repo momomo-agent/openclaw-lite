@@ -31,4 +31,10 @@ contextBridge.exposeInMainWorld('api', {
   // Session members
   addMember: (sessionId, agentId) => ipcRenderer.invoke('session-add-member', { sessionId, agentId }),
   removeMember: (sessionId, agentId) => ipcRenderer.invoke('session-remove-member', { sessionId, agentId }),
+  // Heartbeat
+  heartbeatStart: () => ipcRenderer.invoke('heartbeat-start'),
+  heartbeatStop: () => ipcRenderer.invoke('heartbeat-stop'),
+  onHeartbeat: (cb) => ipcRenderer.on('heartbeat-result', (_, r) => cb(r)),
+  // Notify
+  notify: (title, body) => ipcRenderer.invoke('notify', { title, body }),
 })

@@ -292,6 +292,8 @@ async function openSettings() {
   document.getElementById('cfgBaseUrl').value = config.baseUrl || ''
   document.getElementById('cfgModel').value = config.model || ''
   document.getElementById('cfgTavilyKey').value = config.tavilyKey || ''
+  document.getElementById('cfgHeartbeat').checked = config.heartbeat?.enabled || false
+  document.getElementById('cfgHeartbeatInterval').value = config.heartbeat?.intervalMinutes || 30
   document.getElementById('settingsOverlay').style.display = 'flex'
 }
 
@@ -306,8 +308,14 @@ async function saveSettings() {
     baseUrl: document.getElementById('cfgBaseUrl').value || undefined,
     model: document.getElementById('cfgModel').value || undefined,
     tavilyKey: document.getElementById('cfgTavilyKey').value || undefined,
+    heartbeat: {
+      enabled: document.getElementById('cfgHeartbeat').checked,
+      intervalMinutes: parseInt(document.getElementById('cfgHeartbeatInterval').value) || 30,
+    },
   }
   await window.api.saveConfig(config)
+  if (config.heartbeat.enabled) await window.api.heartbeatStart()
+  else await window.api.heartbeatStop()
   closeSettings()
 }
 

@@ -81,6 +81,13 @@
         <input id="cfgModel" type="text" placeholder="claude-sonnet-4-20250514">
         <label>Tavily API Key <span class="hint">(for search tool)</span></label>
         <input id="cfgTavilyKey" type="password" placeholder="tvly-...">
+        <hr style="border-color:#222;margin:12px 0">
+        <label style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="cfgHeartbeat"> Enable Heartbeat
+          <span class="hint">(agent checks in periodically)</span>
+        </label>
+        <label>Interval (minutes)</label>
+        <input id="cfgHeartbeatInterval" type="number" value="30" min="1" max="1440" style="width:80px">
         <button class="primary-btn" onclick="saveSettings()">Save</button>
         <button class="primary-btn" style="background:#1a1a1a;color:#ccc;margin-top:4px" onclick="window.api.openClawDir()">Open Workspace in Finder</button>
       </div>
