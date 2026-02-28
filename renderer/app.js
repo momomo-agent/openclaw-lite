@@ -295,11 +295,8 @@ async function send() {
       const txt = statusLine.querySelector('.card-status-text')
       if (dot) dot.className = `card-status-dot ${level}`
       if (txt) txt.textContent = text || ''
-      if (level === 'done') {
-        setTimeout(() => { statusLine.style.display = 'none' }, 2000)
-      } else {
-        statusLine.style.display = ''
-      }
+      // Always keep status line visible — shows LLM's final status after completion
+      statusLine.style.display = ''
     }
   })
 
@@ -322,7 +319,7 @@ async function send() {
     const sTxt = statusLine.querySelector('.card-status-text')
     if (sDot) sDot.className = 'card-status-dot done'
     if (sTxt) sTxt.textContent = '已完成'
-    setTimeout(() => { statusLine.style.display = 'none' }, 2000)
+    // Keep status line visible — don't hide
     history.push({ prompt: text, answer: finalText })
     // Persist to session
     if (currentSessionId) {
