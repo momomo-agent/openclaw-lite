@@ -38,6 +38,36 @@ function createSession(title) {
   return session
 }
 
+// ── Agent helpers ──
+function agentsDir() { return clawDir ? path.join(clawDir, 'agents') : null }
+
+function listAgents() {
+  const dir = agentsDir()
+  if (!dir || !fs.existsSync(dir)) return []
+  return fs.readdirSync(dir).filter(f => f.endsWith('.json')).map(f => {
+    try { return JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) } catch { return null }
+  }).filter(Boolean)
+}
+
+function loadAgent(id) {
+  const p = path.join(agentsDir(), `${id}.json`)
+  try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch { return null }
+}
+
+function saveAgent(agent) {
+  const dir = agentsDir()
+  if (!dir) return
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, `${agent.id}.json`), JSON.stringify(agent, null, 2))
+}
+
+function createAgent(name, soul, model) {
+  const id = 'agent-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 4)
+  const agent = { id, name: name || 'Assistant', soul: soul || '', model: model || '' }
+  saveAgent(agent)
+  return agent
+}
+
 // ── Tool definitions ──
 const TOOLS = [
   {
@@ -220,27 +250,59 @@ ipcMain.handle('session-export', (_, id) => {
   return md
 })
 
+// ── IPC: Agents ──
+
+ipcMain.handle('agents-list', () => listAgents())
+ipcMain.handle('agent-load', (_, id) => loadAgent(id))
+ipcMain.handle('agent-save', (_, agent) => { saveAgent(agent); return true })
+ipcMain.handle('agent-create', (_, { name, soul, model }) => createAgent(name, soul, model))
+ipcMain.handle('agent-delete', (_, id) => {
+  const p = path.join(agentsDir(), `${id}.json`)
+  try { fs.unlinkSync(p); return true } catch { return false }
+})
+
+// ── IPC: Session members ──
+
+ipcMain.handle('session-add-member', (_, { sessionId, agentId }) => {
+  const s = loadSession(sessionId)
+  if (!s) return false
+  if (!s.members) s.members = ['user']
+  if (!s.members.includes(agentId)) s.members.push(agentId)
+  saveSession(s)
+  return true
+})
+
+ipcMain.handle('session-remove-member', (_, { sessionId, agentId }) => {
+  const s = loadSession(sessionId)
+  if (!s || !s.members) return false
+  s.members = s.members.filter(m => m !== agentId)
+  saveSession(s)
+  return true
+})
+
 // ── IPC: Build system prompt from directories ──
 
 ipcMain.handle('build-system-prompt', () => buildSystemPrompt())
 
 // ── IPC: Chat with LLM ──
 
-ipcMain.handle('chat', async (_, { prompt, history }) => {
+ipcMain.handle('chat', async (_, { prompt, history, agentId }) => {
   const config = (() => {
     if (!clawDir) return {}
     const p = path.join(clawDir, 'config.json')
     try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch { return {} }
   })()
 
+  const agent = agentId ? loadAgent(agentId) : null
   const provider = config.provider || 'anthropic'
   const apiKey = config.apiKey
   const baseUrl = config.baseUrl
-  const model = config.model
+  const model = agent?.model || config.model
   if (!apiKey) throw new Error('No API key configured. Click ⚙️ to set up.')
 
-  // Build system prompt
-  const systemPrompt = await buildSystemPrompt()
+  // Build system prompt — agent soul takes priority
+  let systemPrompt = await buildSystemPrompt()
+  if (agent?.soul) systemPrompt = agent.soul + '\n\n---\n\n' + systemPrompt
 
   // Build messages
   const messages = []

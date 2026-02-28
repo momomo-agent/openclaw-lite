@@ -57,8 +57,10 @@ async function switchSession(id) {
   history = []
   messages.innerHTML = ''
   document.getElementById('sessionTitle').textContent = session.title
+  const agents = await window.api.listAgents()
   for (const m of session.messages) {
-    addCard(m.role, m.content)
+    const sender = m.sender || (m.role === 'user' ? 'You' : 'Assistant')
+    addCard(m.role, m.content, sender)
     if (m.role === 'user') history.push({ prompt: m.content, answer: '' })
     if (m.role === 'assistant' && history.length) history[history.length - 1].answer = m.content
   }
@@ -124,25 +126,41 @@ async function send() {
   input.style.height = 'auto'
   sendBtn.disabled = true
 
-  addCard('user', text)
+  // Detect @mention to pick agent
+  let targetAgentId = null, targetAgentName = 'Assistant'
+  const mention = text.match(/^@(\S+)\s/)
+  if (mention && currentSessionId) {
+    const agents = await window.api.listAgents()
+    const found = agents.find(a => a.name.toLowerCase() === mention[1].toLowerCase())
+    if (found) { targetAgentId = found.id; targetAgentName = found.name }
+  }
+  // Fallback: first agent member in session
+  if (!targetAgentId && currentSessionId) {
+    const s = await window.api.loadSession(currentSessionId)
+    if (s?.members) {
+      const agents = await window.api.listAgents()
+      const first = s.members.find(m => m !== 'user')
+      if (first) { const a = agents.find(x => x.id === first); if (a) { targetAgentId = a.id; targetAgentName = a.name } }
+    }
+  }
 
-  // Create streaming assistant card
+  addCard('user', text, 'You')
+
   const card = document.createElement('div')
   card.className = 'msg-card assistant'
-  card.innerHTML = '<div class="md-content"></div>'
+  card.innerHTML = `<div class="msg-label">${esc(targetAgentName)}</div><div class="md-content"></div>`
   messages.appendChild(card)
   const contentEl = card.querySelector('.md-content')
   let fullText = ''
 
-  const onToken = (t) => {
+  window.api.onToken((t) => {
     fullText += t
     contentEl.innerHTML = marked.parse(fullText)
     messages.scrollTop = messages.scrollHeight
-  }
-  window.api.onToken(onToken)
+  })
 
   try {
-    const result = await window.api.chat({ prompt: text, history })
+    const result = await window.api.chat({ prompt: text, history, agentId: targetAgentId })
     // Final render with complete text
     contentEl.innerHTML = marked.parse(result.answer || fullText)
     history.push({ prompt: text, answer: result.answer || fullText })
@@ -150,7 +168,10 @@ async function send() {
     if (currentSessionId) {
       const s = await window.api.loadSession(currentSessionId)
       if (s) {
-        s.messages.push({ role: 'user', content: text }, { role: 'assistant', content: result.answer || fullText })
+        s.messages.push(
+          { role: 'user', content: text, sender: 'You' },
+          { role: 'assistant', content: result.answer || fullText, sender: targetAgentName }
+        )
         if (s.messages.length === 2) s.title = text.slice(0, 40)
         await window.api.saveSession(s)
         document.getElementById('sessionTitle').textContent = s.title
@@ -168,14 +189,14 @@ async function send() {
   input.focus()
 }
 
-function addCard(role, content) {
+function addCard(role, content, sender) {
   const card = document.createElement('div')
   card.className = `msg-card ${role}`
 
   if (role === 'user') {
-    card.innerHTML = `<div class="msg-label user-label">You</div><div>${esc(content)}</div>`
+    card.innerHTML = `<div class="msg-label user-label">${esc(sender || 'You')}</div><div>${esc(content)}</div>`
   } else if (role === 'assistant') {
-    card.innerHTML = `<div class="md-content">${marked.parse(content || '(no answer)')}</div>`
+    card.innerHTML = `<div class="msg-label">${esc(sender || 'Assistant')}</div><div class="md-content">${marked.parse(content || '(no answer)')}</div>`
   } else if (role === 'error') {
     card.innerHTML = `<div style="color:#ef4444">${esc(content)}</div>`
   }
@@ -220,6 +241,87 @@ async function saveSettings() {
   }
   await window.api.saveConfig(config)
   closeSettings()
+}
+
+// ── Members panel ──
+
+async function toggleMembers() {
+  document.getElementById('membersOverlay').style.display = 'flex'
+  await refreshMemberList()
+}
+function closeMembers() { document.getElementById('membersOverlay').style.display = 'none' }
+
+async function refreshMemberList() {
+  if (!currentSessionId) return
+  const session = await window.api.loadSession(currentSessionId)
+  const agents = await window.api.listAgents()
+  const members = session?.members || ['user']
+  const list = document.getElementById('memberList')
+  list.innerHTML = ''
+  for (const m of members) {
+    const el = document.createElement('div')
+    el.className = 'member-item'
+    if (m === 'user') {
+      el.innerHTML = '<span>👤 You</span>'
+    } else {
+      const agent = agents.find(a => a.id === m)
+      el.innerHTML = `<span>🤖 ${esc(agent?.name || m)}</span><span class="del-btn" onclick="removeMember('${m}')">✕</span>`
+    }
+    list.appendChild(el)
+  }
+  // Populate add dropdown with agents not in session
+  const select = document.getElementById('addAgentSelect')
+  select.innerHTML = '<option value="">Select agent...</option>'
+  for (const a of agents) {
+    if (!members.includes(a.id)) select.innerHTML += `<option value="${a.id}">${esc(a.name)}</option>`
+  }
+}
+
+async function addAgentToSession() {
+  const id = document.getElementById('addAgentSelect').value
+  if (!id || !currentSessionId) return
+  await window.api.addMember(currentSessionId, id)
+  await refreshMemberList()
+}
+
+async function removeMember(agentId) {
+  if (!currentSessionId) return
+  await window.api.removeMember(currentSessionId, agentId)
+  await refreshMemberList()
+}
+
+// ── Agent manager ──
+
+function openAgentManager() { closeMembers(); document.getElementById('agentManagerOverlay').style.display = 'flex'; refreshAgentList() }
+function closeAgentManager() { document.getElementById('agentManagerOverlay').style.display = 'none' }
+
+async function refreshAgentList() {
+  const agents = await window.api.listAgents()
+  const list = document.getElementById('agentList')
+  list.innerHTML = ''
+  for (const a of agents) {
+    const el = document.createElement('div')
+    el.className = 'agent-item'
+    el.innerHTML = `<span>🤖 ${esc(a.name)}</span><span class="del-btn" onclick="deleteAgent('${a.id}')">✕</span>`
+    list.appendChild(el)
+  }
+}
+
+async function createNewAgent() {
+  const name = document.getElementById('newAgentName').value.trim()
+  if (!name) return
+  const soul = document.getElementById('newAgentSoul').value
+  const model = document.getElementById('newAgentModel').value.trim()
+  await window.api.createAgent({ name, soul, model })
+  document.getElementById('newAgentName').value = ''
+  document.getElementById('newAgentSoul').value = ''
+  document.getElementById('newAgentModel').value = ''
+  await refreshAgentList()
+}
+
+async function deleteAgent(id) {
+  await window.api.deleteAgent(id)
+  await refreshAgentList()
 }
 
 // Init

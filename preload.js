@@ -21,4 +21,13 @@ contextBridge.exposeInMainWorld('api', {
   createSession: (t) => ipcRenderer.invoke('session-create', t),
   deleteSession: (id) => ipcRenderer.invoke('session-delete', id),
   exportSession: (id) => ipcRenderer.invoke('session-export', id),
+  // Agents
+  listAgents: () => ipcRenderer.invoke('agents-list'),
+  loadAgent: (id) => ipcRenderer.invoke('agent-load', id),
+  saveAgent: (a) => ipcRenderer.invoke('agent-save', a),
+  createAgent: (opts) => ipcRenderer.invoke('agent-create', opts),
+  deleteAgent: (id) => ipcRenderer.invoke('agent-delete', id),
+  // Session members
+  addMember: (sessionId, agentId) => ipcRenderer.invoke('session-add-member', { sessionId, agentId }),
+  removeMember: (sessionId, agentId) => ipcRenderer.invoke('session-remove-member', { sessionId, agentId }),
 })

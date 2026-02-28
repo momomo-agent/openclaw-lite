@@ -42,13 +42,14 @@
       <div class="chat-header">
         <span id="sessionTitle">New Chat</span>
         <div class="header-actions">
+          <button class="icon-btn" onclick="toggleMembers()">👥</button>
           <button class="icon-btn" onclick="exportChat()">📥</button>
           <button class="icon-btn" onclick="openSettings()">⚙️</button>
         </div>
       </div>
       <div id="messages" class="messages"></div>
       <div class="input-bar">
-        <textarea id="input" placeholder="Ask anything..." rows="1"></textarea>
+        <textarea id="input" placeholder="Ask anything... (@name to target)" rows="1"></textarea>
         <button id="sendBtn" onclick="send()">↑</button>
       </div>
     </div>
@@ -76,6 +77,46 @@
         <label>Tavily API Key <span class="hint">(for search tool)</span></label>
         <input id="cfgTavilyKey" type="password" placeholder="tvly-...">
         <button class="primary-btn" onclick="saveSettings()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Members panel -->
+  <div id="membersOverlay" class="overlay" style="display:none" onclick="if(event.target===this)closeMembers()">
+    <div class="settings-panel">
+      <div class="settings-header">
+        <span>Members</span>
+        <button class="icon-btn" onclick="closeMembers()">✕</button>
+      </div>
+      <div class="settings-body">
+        <div id="memberList"></div>
+        <div class="member-add">
+          <select id="addAgentSelect"></select>
+          <button onclick="addAgentToSession()">Add</button>
+        </div>
+        <hr style="border-color:#1a1a1a;margin:8px 0">
+        <button class="primary-btn" onclick="openAgentManager()">Manage Agents</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Agent manager -->
+  <div id="agentManagerOverlay" class="overlay" style="display:none" onclick="if(event.target===this)closeAgentManager()">
+    <div class="settings-panel">
+      <div class="settings-header">
+        <span>Agents</span>
+        <button class="icon-btn" onclick="closeAgentManager()">✕</button>
+      </div>
+      <div class="settings-body">
+        <div id="agentList"></div>
+        <hr style="border-color:#1a1a1a;margin:8px 0">
+        <label>Name</label>
+        <input id="newAgentName" type="text" placeholder="Agent name">
+        <label>Soul (system prompt)</label>
+        <textarea id="newAgentSoul" rows="3" style="background:#0a0a0a;border:1px solid #222;border-radius:6px;color:#e0e0e0;padding:8px;font-size:13px;font-family:inherit;resize:vertical"></textarea>
+        <label>Model <span class="hint">(optional override)</span></label>
+        <input id="newAgentModel" type="text" placeholder="claude-sonnet-4-20250514">
+        <button class="primary-btn" onclick="createNewAgent()">Create Agent</button>
       </div>
     </div>
   </div>
