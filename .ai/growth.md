@@ -67,3 +67,11 @@
 4. commit 前 `node --check main.js`
 5. growth.md 实时写不攒
 6. DBB 必须截图 + taste.md 对照
+
+## M16 — Agent Team (v0.16.0)
+- F045: 共享 Task List（SQLite tasks 表 + task_create/task_update/task_list 工具 + prompt 注入 + 侧边栏 UI）
+- F046: Agent 间可见（注入其他 agent 近期消息到 system prompt）
+- F047: Agent 间直接通信（send_message 工具 + 防循环 + agent-to-agent 消息样式）
+- F048: 自动轮转（task 完成后自动触发 unblocked agent）
+- 对标 Claude Code Agent Teams 设计
+- Gate: 语法检查 ✅，E2E + DBB 待验证
