@@ -932,6 +932,23 @@ You are running inside Paw, an AI-native desktop app with these tools:
     } catch {}
   }
 
+  // Inject task list summary if any
+  if (currentSessionId && clawDir) {
+    try {
+      const tasks = sessionStore.listTasks(clawDir, currentSessionId)
+      if (tasks.length) {
+        const icons = { pending: '⏳', 'in-progress': '🔄', done: '✅' }
+        const lines = tasks.map(t => {
+          let s = `[${t.id}] ${icons[t.status] || '?'} ${t.status}: ${t.title}`
+          if (t.assignee) s += ` (${t.assignee})`
+          if (t.dependsOn?.length) s += ` [depends: ${t.dependsOn.join(',')}]`
+          return s
+        })
+        parts.push(`## Shared Task List\n${lines.join('\n')}\n\nUse task_create/task_update/task_list to manage tasks. Claim a task before working on it. Complete when done.`)
+      }
+    } catch {}
+  }
+
   return parts.join('\n\n---\n\n')
 }
 

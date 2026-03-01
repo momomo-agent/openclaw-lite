@@ -21,6 +21,7 @@
 - [x] 状态颜色：pending 灰、in-progress 黄、done 绿
 
 ### Step 5: 验证
-- [ ] 手动测试：agent 创建 3 个有依赖的任务，按序 claim 和完成
-- [ ] node --check main.js
+- [x] node --check main.js ✅
+- [x] session-store.js require ✅
+- [ ] 手动 E2E 测试（打包后验证）
 - [ ] DBB 截图确认 UI
