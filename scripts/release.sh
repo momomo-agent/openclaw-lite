@@ -43,39 +43,65 @@ if [ ! -d "$APP" ]; then
   exit 1
 fi
 
-# 5. Sign with Developer ID (must sign all native binaries individually)
+# 5. Sign with Developer ID (must sign all native binaries individually with entitlements)
 IDENTITY="Developer ID Application: Kenefe Li (P2GN9QW8E5)"
+ENT="scripts/entitlements.plist"
+ENTC="scripts/entitlements-child.plist"
 
 echo "🔏 Signing native binaries in app.asar.unpacked..."
-find "$APP/Contents/Resources/app.asar.unpacked" -type f \( -name "*.node" -o -name "*.dylib" -o -name "*.so" \) | while read f; do
-  codesign --force --options runtime --timestamp --sign "$IDENTITY" "$f"
-done
+find "$APP/Contents/Resources/app.asar.unpacked" -type f \( -name "*.node" -o -name "*.dylib" -o -name "*.so" \) -exec \
+  codesign --force --options runtime --timestamp --entitlements "$ENTC" --sign "$IDENTITY" {} \;
 
 echo "🔏 Signing Electron Framework Libraries..."
-find "$APP/Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries" -type f -name "*.dylib" | while read f; do
-  codesign --force --options runtime --timestamp --sign "$IDENTITY" "$f"
-done
+find "$APP/Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries" -type f -name "*.dylib" -exec \
+  codesign --force --options runtime --timestamp --entitlements "$ENTC" --sign "$IDENTITY" {} \;
+
+echo "🔏 Signing Squirrel dependencies (Mantle, ReactiveObjC)..."
+codesign --force --options runtime --timestamp --entitlements "$ENTC" --sign "$IDENTITY" \
+  "$APP/Contents/Frameworks/Mantle.framework/Versions/A/Mantle"
+codesign --force --options runtime --timestamp --entitlements "$ENTC" --sign "$IDENTITY" \
+  "$APP/Contents/Frameworks/Mantle.framework"
+codesign --force --options runtime --timestamp --entitlements "$ENTC" --sign "$IDENTITY" \
+  "$APP/Contents/Frameworks/ReactiveObjC.framework/Versions/A/ReactiveObjC"
+codesign --force --options runtime --timestamp --entitlements "$ENTC" --sign "$IDENTITY" \
+  "$APP/Contents/Frameworks/ReactiveObjC.framework"
 
 echo "🔏 Signing Squirrel ShipIt..."
-codesign --force --options runtime --timestamp --sign "$IDENTITY" \
+codesign --force --options runtime --timestamp --entitlements "$ENTC" --sign "$IDENTITY" \
   "$APP/Contents/Frameworks/Squirrel.framework/Versions/A/Resources/ShipIt"
 
-echo "🔏 Signing Electron Framework..."
-codesign --force --options runtime --timestamp --sign "$IDENTITY" \
+echo "🔏 Signing Electron Framework + crashpad..."
+codesign --force --options runtime --timestamp --entitlements "$ENTC" --sign "$IDENTITY" \
+  "$APP/Contents/Frameworks/Electron Framework.framework/Versions/A/Helpers/chrome_crashpad_handler"
+codesign --force --options runtime --timestamp --entitlements "$ENT" --sign "$IDENTITY" \
+  "$APP/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework"
+codesign --force --options runtime --timestamp --entitlements "$ENT" --sign "$IDENTITY" \
   "$APP/Contents/Frameworks/Electron Framework.framework"
-codesign --force --options runtime --timestamp --sign "$IDENTITY" \
+codesign --force --options runtime --timestamp --entitlements "$ENTC" --sign "$IDENTITY" \
   "$APP/Contents/Frameworks/Squirrel.framework"
 
 echo "🔏 Signing Helpers..."
 for helper in "$APP/Contents/Frameworks/"*Helper*.app; do
-  codesign --force --options runtime --timestamp --sign "$IDENTITY" "$helper"
+  codesign --force --options runtime --timestamp --entitlements "$ENTC" --sign "$IDENTITY" "$helper"
 done
 
 echo "🔏 Signing Main App..."
-codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
+codesign --force --options runtime --timestamp --entitlements "$ENT" --sign "$IDENTITY" "$APP"
 
 echo "✅ Verifying signature..."
 codesign --verify --deep --strict --verbose=1 "$APP"
+
+echo "🧪 Testing launch..."
+"$APP/Contents/MacOS/Paw" &
+TEST_PID=$!
+sleep 5
+if kill -0 $TEST_PID 2>/dev/null; then
+  echo "✅ App launches successfully"
+  kill $TEST_PID
+else
+  echo "❌ App failed to launch"
+  exit 1
+fi
 
 # 6. Create DMG
 DMG="dist/Paw-${NEW_VERSION}-arm64.dmg"
@@ -86,8 +112,31 @@ hdiutil create -volname "Paw" -srcfolder "$APP" -ov -format UDZO "$DMG"
 # 7. Notarize + staple
 echo "🍎 Notarizing..."
 xcrun notarytool submit "$DMG" --keychain-profile "notarytool" --wait
+if [ $? -ne 0 ]; then
+  echo "❌ Notarization failed"
+  exit 1
+fi
+
 echo "📎 Stapling..."
 xcrun stapler staple "$DMG"
+xcrun stapler validate "$DMG"
+
+echo "🧪 Testing DMG install..."
+hdiutil attach "$DMG" -nobrowse -mountpoint /tmp/paw-release-test
+cp -R /tmp/paw-release-test/Paw.app /tmp/Paw-release-test.app
+hdiutil detach /tmp/paw-release-test
+/tmp/Paw-release-test.app/Contents/MacOS/Paw &
+DMG_TEST_PID=$!
+sleep 5
+if kill -0 $DMG_TEST_PID 2>/dev/null; then
+  echo "✅ DMG install + launch OK"
+  kill $DMG_TEST_PID
+  rm -rf /tmp/Paw-release-test.app
+else
+  echo "❌ DMG launch failed"
+  rm -rf /tmp/Paw-release-test.app
+  exit 1
+fi
 
 # 8. Push to GitHub
 echo "🚀 Pushing..."
