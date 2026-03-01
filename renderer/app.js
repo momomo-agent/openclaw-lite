@@ -152,6 +152,7 @@ async function switchSession(id) {
     if (m.role === 'assistant' && history.length) history[history.length - 1].answer = m.content
   }
   await refreshSessionList()
+  await refreshTaskBar()
 }
 
 async function newSession() {
@@ -654,6 +655,43 @@ async function deleteAgent(id) {
   await window.api.deleteAgent(id)
   await refreshAgentList()
 }
+
+// ── Task Bar ──
+
+let taskBarCollapsed = false
+
+async function refreshTaskBar() {
+  if (!currentSessionId) return
+  const tasks = await window.api.listTasks(currentSessionId)
+  const bar = document.getElementById('taskBar')
+  if (!tasks?.length) { bar.style.display = 'none'; return }
+  bar.style.display = ''
+  const count = document.getElementById('taskCount')
+  const done = tasks.filter(t => t.status === 'done').length
+  count.textContent = `(${done}/${tasks.length})`
+  const list = document.getElementById('taskListUI')
+  list.className = taskBarCollapsed ? 'task-list-ui collapsed' : 'task-list-ui'
+  const icon = { pending: '⏳', 'in-progress': '🔄', done: '✅' }
+  list.innerHTML = tasks.map(t => {
+    const cls = t.status === 'done' ? 'task-item done' : t.status === 'in-progress' ? 'task-item in-progress' : 'task-item'
+    return `<div class="${cls}">
+      <span class="task-id">${t.id.slice(0,8)}</span>
+      <span class="task-status">${icon[t.status] || '?'}</span>
+      <span class="task-title">${esc(t.title)}</span>
+      ${t.assignee ? `<span class="task-assignee">${esc(t.assignee)}</span>` : ''}
+    </div>`
+  }).join('')
+}
+
+function toggleTaskBar() {
+  taskBarCollapsed = !taskBarCollapsed
+  document.getElementById('taskToggle').textContent = taskBarCollapsed ? '▸' : '▾'
+  document.getElementById('taskListUI').className = taskBarCollapsed ? 'task-list-ui collapsed' : 'task-list-ui'
+}
+
+window.api.onTasksChanged((sid) => {
+  if (sid === currentSessionId) refreshTaskBar()
+})
 
 // Init
 init()

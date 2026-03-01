@@ -8,6 +8,7 @@ const memoryIndex = require('./memory-index')
 let mainWindow
 let clawDir = null
 let currentSessionId = null
+let currentAgentName = null
 let heartbeatTimer = null
 let tray = null
 let memoryWatcher = null
@@ -254,6 +255,18 @@ const TOOLS = [
     name: 'web_fetch', description: 'Fetch and extract readable content from a URL (HTML → markdown). Use for lightweight page access.',
     input_schema: { type: 'object', properties: { url: { type: 'string', description: 'HTTP or HTTPS URL to fetch' }, maxChars: { type: 'number', description: 'Max characters to return (default 50000)' } }, required: ['url'] }
   },
+  {
+    name: 'task_create', description: 'Create a task in the shared task list. Use for coordinating multi-agent work.',
+    input_schema: { type: 'object', properties: { title: { type: 'string' }, dependsOn: { type: 'array', items: { type: 'string' }, description: 'Task IDs this depends on' } }, required: ['title'] }
+  },
+  {
+    name: 'task_update', description: 'Update a task status: claim (pending→in-progress) or complete (in-progress→done).',
+    input_schema: { type: 'object', properties: { taskId: { type: 'string' }, status: { type: 'string', enum: ['in-progress','done'] }, assignee: { type: 'string', description: 'Agent name claiming the task' } }, required: ['taskId','status'] }
+  },
+  {
+    name: 'task_list', description: 'List all tasks in the current session.',
+    input_schema: { type: 'object', properties: {} }
+  },
 ]
 
 // ── Memory Search (keyword-based, upgradable to FTS) ──
@@ -466,6 +479,32 @@ async function executeTool(name, input, config) {
         const results = searchMemoryFiles(clawDir, query.toLowerCase(), maxResults)
         return JSON.stringify({ results })
       }
+    }
+    case 'task_create': {
+      if (!clawDir || !currentSessionId) return 'Error: No active session'
+      const title = (input.title || '').trim()
+      if (!title) return 'Error: title required'
+      const tasks = sessionStore.listTasks(clawDir, currentSessionId)
+      if (tasks.length >= 50) return 'Error: Task limit reached (50)'
+      const task = sessionStore.createTask(clawDir, currentSessionId, {
+        title, dependsOn: input.dependsOn, createdBy: currentAgentName || 'user'
+      })
+      if (mainWindow) mainWindow.webContents.send('tasks-changed', currentSessionId)
+      return JSON.stringify(task)
+    }
+    case 'task_update': {
+      if (!clawDir || !currentSessionId) return 'Error: No active session'
+      const result = sessionStore.updateTask(clawDir, input.taskId, {
+        status: input.status, assignee: input.assignee || currentAgentName
+      })
+      if (result?.error) return `Error: ${result.error}`
+      if (mainWindow) mainWindow.webContents.send('tasks-changed', currentSessionId)
+      return JSON.stringify(result)
+    }
+    case 'task_list': {
+      if (!clawDir || !currentSessionId) return 'Error: No active session'
+      const tasks = sessionStore.listTasks(clawDir, currentSessionId)
+      return JSON.stringify({ tasks, total: tasks.length })
     }
     default: return `Unknown tool: ${name}`
   }
@@ -689,6 +728,12 @@ ipcMain.handle('session-remove-member', (_, { sessionId, agentId }) => {
   return true
 })
 
+// ── IPC: Tasks ──
+ipcMain.handle('session-tasks', (_, sessionId) => {
+  if (!clawDir) return []
+  return sessionStore.listTasks(clawDir, sessionId)
+})
+
 // ── IPC: Build system prompt from directories ──
 
 ipcMain.handle('build-system-prompt', () => buildSystemPrompt())
@@ -757,6 +802,7 @@ ipcMain.handle('chat', async (_, { prompt, history, agentId, files }) => {
   })()
 
   const agent = agentId ? loadAgent(agentId) : null
+  currentAgentName = agent?.name || null
   const provider = config.provider || 'anthropic'
   const apiKey = config.apiKey
   const baseUrl = config.baseUrl
@@ -868,6 +914,23 @@ You are running inside Paw, an AI-native desktop app with these tools:
 - You can chain multiple tools in sequence (up to 5 rounds). For example: search → search → file_write.
 - Before answering questions about past work, decisions, or preferences — call memory_search first.
 - Prefer Chinese for status text. Example: '在撰写报告' or '已保存文件'.`)
+
+  // Inject task list summary if any tasks exist
+  if (currentSessionId && clawDir) {
+    try {
+      const tasks = sessionStore.listTasks(clawDir, currentSessionId)
+      if (tasks.length) {
+        const statusIcon = { pending: '⏳', 'in-progress': '🔄', done: '✅' }
+        const lines = tasks.map(t => {
+          let line = `[${t.id}] ${statusIcon[t.status] || '?'} ${t.status}: ${t.title}`
+          if (t.assignee) line += ` (${t.assignee})`
+          if (t.dependsOn?.length) line += ` [depends: ${t.dependsOn.join(',')}]`
+          return line
+        })
+        parts.push(`## Shared Task List\n${lines.join('\n')}\n\nUse task_create/task_update/task_list to manage tasks. Claim a task before working on it. Complete when done.`)
+      }
+    } catch {}
+  }
 
   return parts.join('\n\n---\n\n')
 }

@@ -49,6 +49,13 @@
           <button class="icon-btn" onclick="openSettings()">⚙️</button>
         </div>
       </div>
+      <div id="taskBar" class="task-bar" style="display:none">
+        <div class="task-bar-header" onclick="toggleTaskBar()">
+          <span>📋 Tasks <span id="taskCount"></span></span>
+          <span id="taskToggle">▾</span>
+        </div>
+        <div id="taskListUI" class="task-list-ui"></div>
+      </div>
       <div id="messages" class="messages"></div>
       <div id="attachPreview" style="display:none"></div>
       <div class="input-bar">

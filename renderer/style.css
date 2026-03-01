@@ -346,3 +346,28 @@ button:hover { background: #2a2a2a; }
 .agent-create-section { color: #888; font-size: 13px; }
 .agent-create-section summary { cursor: pointer; padding: 4px 0; }
 .agent-create-section summary:hover { color: #ccc; }
+
+/* Task Bar */
+.task-bar {
+  border-bottom: 1px solid #1a1a1a;
+  background: #0e0e0e;
+  font-size: 13px;
+}
+.task-bar-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 6px 16px; cursor: pointer; color: #888;
+  user-select: none;
+}
+.task-bar-header:hover { color: #ccc; }
+.task-list-ui { padding: 0 16px 8px; }
+.task-list-ui.collapsed { display: none; }
+.task-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 0; color: #aaa; font-size: 12px;
+}
+.task-item .task-id { color: #555; font-family: monospace; min-width: 60px; }
+.task-item .task-status { min-width: 16px; text-align: center; }
+.task-item .task-title { flex: 1; }
+.task-item .task-assignee { color: #666; font-size: 11px; }
+.task-item.done { color: #555; text-decoration: line-through; }
+.task-item.in-progress { color: #fbbf24; }

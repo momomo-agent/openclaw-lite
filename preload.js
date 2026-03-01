@@ -37,6 +37,9 @@ contextBridge.exposeInMainWorld('api', {
   // Session members
   addMember: (sessionId, agentId) => ipcRenderer.invoke('session-add-member', { sessionId, agentId }),
   removeMember: (sessionId, agentId) => ipcRenderer.invoke('session-remove-member', { sessionId, agentId }),
+  // Tasks
+  listTasks: (sessionId) => ipcRenderer.invoke('session-tasks', sessionId),
+  onTasksChanged: (cb) => { ipcRenderer.removeAllListeners('tasks-changed'); ipcRenderer.on('tasks-changed', (_, sid) => cb(sid)) },
   // Heartbeat
   heartbeatStart: () => ipcRenderer.invoke('heartbeat-start'),
   heartbeatStop: () => ipcRenderer.invoke('heartbeat-stop'),
