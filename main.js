@@ -14,6 +14,16 @@ let memoryWatcher = null
 
 // ── Config path helper ──
 function configPath() {
+  if (!clawDir) return null
+  const newPath = path.join(clawDir, '.paw', 'config.json')
+  // Migrate from old location if needed
+  const oldPath = path.join(clawDir, 'config.json')
+  if (!fs.existsSync(newPath) && fs.existsSync(oldPath)) {
+    fs.mkdirSync(path.join(clawDir, '.paw'), { recursive: true })
+    fs.renameSync(oldPath, newPath)
+  }
+  return newPath
+}
 
 // ── Link Understanding ──
 const BARE_URL_RE = /https?:\/\/\S+/gi
@@ -40,18 +50,6 @@ async function extractLinkContext(text, maxLinks = 3, timeoutMs = 5000) {
     return `[Link: ${title}] ${summary}`
   }))
   return results.filter(r => r.status === 'fulfilled' && r.value).map(r => r.value).join('\n\n')
-}
-
-
-  if (!clawDir) return null
-  const newPath = path.join(clawDir, '.paw', 'config.json')
-  // Migrate from old location if needed
-  const oldPath = path.join(clawDir, 'config.json')
-  if (!fs.existsSync(newPath) && fs.existsSync(oldPath)) {
-    fs.mkdirSync(path.join(clawDir, '.paw'), { recursive: true })
-    fs.renameSync(oldPath, newPath)
-  }
-  return newPath
 }
 
 // ── Memory watcher ──
@@ -161,7 +159,7 @@ const TOOLS = [
     input_schema: { type: 'object', properties: { level: { type: 'string', enum: ['idle','thinking','running','need_you','done'] }, text: { type: 'string' } }, required: ['level','text'] }
   },
   {
-    name: 'skill_exec', description: 'Execute a skill script from the workspace skills/ directory',
+    name: 'skill_exec', description: 'Execute a skill script from the skills/ directory',
     input_schema: { type: 'object', properties: { skill: { type: 'string', description: 'Skill directory name' }, command: { type: 'string', description: 'Command to run inside the skill directory' } }, required: ['skill','command'] }
   },
   {
@@ -330,7 +328,7 @@ async function executeTool(name, input, config) {
       if (!relPath) return 'Error: path required'
       if (!relPath.endsWith('.md')) return 'Error: only .md files allowed'
       const absPath = path.resolve(clawDir, relPath)
-      if (!absPath.startsWith(clawDir)) return 'Error: path outside workspace'
+      if (!absPath.startsWith(clawDir)) return 'Error: path outside claw directory'
       if (!fs.existsSync(absPath)) return `Error: file not found: ${relPath}`
       const content = fs.readFileSync(absPath, 'utf8')
       if (!input.from && !input.lines) return JSON.stringify({ text: content, path: relPath })
@@ -442,7 +440,7 @@ app.on('will-quit', () => { sessionStore.closeDb(); memoryIndex.closeDb() })
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 
 async function openNewWindow() {
-  const result = await dialog.showOpenDialog({ properties: ['openDirectory'], title: 'Choose workspace folder' })
+  const result = await dialog.showOpenDialog({ properties: ['openDirectory'], title: 'Choose claw directory' })
   if (result.canceled || !result.filePaths[0]) return
   const electronPath = process.argv[0]
   const appPath = app.getAppPath()
