@@ -1,18 +1,33 @@
-# Taste — Paw
+# Paw — Taste
 
 ## 参照物
-- **Cursor** — 暗色主题、左侧对话、右侧配置的分栏布局
-- **Warp** — 终端级的快速响应感，输入即反馈
-- **agentic-lite web demo** — 现有的卡片式结果展示，直接演进
+
+| 产品 | 学什么 |
+|------|--------|
+| Linear | 深色主题层次感、极简侧边栏、状态指示器 |
+| Raycast | 快速启动体验、键盘优先、tray 交互 |
+| Cursor | AI 对话 UI、tool call 展示、streaming 体验 |
+| Bear | 侧边栏列表交互、markdown 渲染质感 |
 
 ## 视觉标准
-- 暗色主题（#0a0a0a 背景），与 agentic-lite 一致
-- 黄色强调色 #fbbf24
-- -apple-system 字体栈
-- 卡片圆角 10px，边框 #1a1a1a
+
+- 背景不用纯黑 `#000`，用 `#0a0a0a`（已做到）
+- 卡片/面板用亮度递增分层（#0a → #14 → #1e），不用阴影
+- 文字不用纯白 `#fff`，主文字 `#e0e0e0`，次要 `#888`，禁用 `#444`
+- 强调色克制，只在交互反馈时出现（链接 `#fbbf24`）
+- 边框极细（1px `#ffffff08`），若有若无
 
 ## 交互标准
-- 输入框始终在底部，Cmd+Enter 发送
-- 回复实时 streaming，逐字出现
-- tool call 过程独立卡片，不混入回答
-- 窗口可拖拽调整大小，记住位置
+
+- 所有操作响应 < 100ms（本地操作）
+- Streaming 首 token 到屏幕 < 500ms（网络延迟除外）
+- 动画只用 opacity + background transition，不用位移
+- 键盘快捷键：Cmd+K 聚焦输入、Cmd+Enter 发送、Cmd+Shift+N 新窗口
+
+## 品味红线（不能出现的东西）
+
+- 花哨的渐变背景或粒子效果
+- 过大的 emoji 或图标
+- 多余的 loading spinner（用 typing indicator 代替）
+- 弹窗确认框（用 inline 操作代替）
+- 任何"AI 味"的装饰（机器人图标除外）

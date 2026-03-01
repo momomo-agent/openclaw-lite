@@ -1,20 +1,29 @@
-# M12 体验修复 — DBB 测试用例
+# Paw — DBB Scenarios
 
-## 测试范围
-requestId 绑定 + 工具折叠 + scrollbar 美化 + 水平溢出修复
+## S1: 首次启动
+1. 用户第一次打开 Paw
+2. 看到 Setup 界面，选择"Create New"或"Open Existing"
+3. 选择文件夹后进入聊天界面
+4. 侧边栏显示一个默认 session
 
-## 正常路径
-- TC01: 纯文本对话 — 发送"hi"，assistant 正常回复，无工具调用
-- TC02: 带工具调用的对话 — 发送搜索类问题，触发 search 工具，工具步骤折叠显示，最终回复正常渲染
-- TC03: 多轮工具调用 — 触发多个工具（search + ui_status_set），ui_status_set 静默，search 折叠
-- TC04: 连续发送两条消息 — 快速发两条，每条回复各自独立，token 不串
+## S2: 日常对话
+1. 用户输入问题，按 Cmd+Enter 发送
+2. 看到 typing indicator → streaming 文字 → 工具调用展开 → 完成折叠
+3. Watson 状态实时更新（侧边栏 + 卡片 + tray）
+4. 对话自动保存到 session
 
-## 边界场景
-- TC05: 空回复 — LLM 返回空文本时显示"（无文本回复）"
-- TC06: 超长回复 — 长文本正确换行，无水平滚动
-- TC07: 代码块 — 含代码的回复，pre 块有水平滚动但不影响外层
+## S3: 多 Agent 协作
+1. 用户创建两个 agent（不同 soul/model）
+2. 在 session 里添加 agent 成员
+3. 用 @name 指定对话对象
+4. 不同 agent 的回复有区分
 
-## 视觉验证
-- TC08: scrollbar 样式 — 侧边栏和消息区域 scrollbar 细、半透明
-- TC09: 工具折叠区 — 默认收起，显示"🔧 N 个工具调用"，点击展开
-- TC10: 深色模式整体和谐 — 无突兀元素，配色统一
+## S4: 工作区切换
+1. 用户 Cmd+Shift+N 打开新窗口
+2. 选择不同的工作区文件夹
+3. 两个窗口独立运行，互不干扰
+
+## S5: 错误恢复
+1. API key 未配置 → 友好提示引导设置
+2. 网络断开 → 错误卡片显示原因
+3. 工具执行超时 → 不卡 UI，显示超时信息

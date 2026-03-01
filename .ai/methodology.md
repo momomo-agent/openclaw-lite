@@ -1,66 +1,57 @@
-# Methodology — Paw
+# Paw — Methodology
 
 ## 技术栈
-- **Electron** — 桌面壳，macOS 先行
-- **前端** — 纯 HTML/CSS/JS，不引入框架
-- **LLM** — Anthropic/OpenAI streaming，直接 fetch
-- **工具** — search(Tavily)/code_exec(vm sandbox)/file_read/file_write/shell_exec/notify
 
-## 架构（v0.9.0 现状）
+- **桌面框架**: Electron 33（为什么：跨平台、快速迭代、Web 技术栈门槛低；代价是包体大，但对桌面 AI 工具可接受）
+- **前端**: 纯 HTML/CSS/JS，无框架（为什么：代码量小、零构建步骤、启动快；当复杂度超过 ~2000 行 JS 时考虑引入 Preact）
+- **后端**: Node.js 单文件 main.js（为什么：Electron 主进程天然是 Node，不需要额外后端服务）
+- **存储**: 纯文件系统 JSON（为什么：兼容 OpenClaw 格式，用户可直接编辑，git 友好）
+- **LLM**: Anthropic + OpenAI 双 provider，streaming
 
-```
-Electron Main
-├── Config/Workspace Loader
-├── System Prompt Builder（SOUL.md + MEMORY.md + skills/ + memory/）
-├── Streaming Engine（Anthropic SSE / OpenAI SSE）
-├── Tool Loop（最多 5 轮）
-├── Heartbeat Timer（可配置间隔）
-├── Tray Icon（状态同步）
-└── Notification（Electron Notification API）
-    ↕ IPC
-Electron Renderer
-├── Chat UI（消息/streaming/工具步骤折叠）
-├── Sidebar（sessions + agent status）
-├── Settings Overlay（provider/key/heartbeat）
-├── Members Panel（multi-agent）
-└── File Link Handler（图片预览/md渲染/系统打开）
-```
-
-## 开发流程（铁律）
-
-遵循 `docs/dev-methodology.md`，以下是 Paw 项目的具体补充：
-
-### 每个 feature 必须走的流程
+## 架构
 
 ```
-1. PLAN  — 写 .ai/roadmap.md（checkbox 步骤）+ 意图确认 5 步
-2. DO    — 按 roadmap 逐步执行，每步打勾
-3. REVIEW — Layer 1 自审 + Layer 2 DBB + Layer 3 Review
-4. GATE  — 全过才 commit
+Electron Main Process (main.js)
+├── Workspace Manager    — clawDir 选择/scaffold/prefs
+├── Session Manager      — CRUD + 持久化 (sessions/*.json)
+├── Agent Manager        — CRUD + soul/model (agents/*.json)
+├── LLM Streaming        — Anthropic/OpenAI 双 provider，requestId 路由
+├── Tool Executor        — 8 内置工具，sandbox 执行
+├── Heartbeat Timer      — 定时 check-in
+├── Memory Watcher       — fs.watch memory/ 目录
+└── Tray Manager         — 系统托盘 + Watson status
+
+Preload (preload.js)
+└── IPC Bridge           — contextBridge 暴露 window.api
+
+Renderer (renderer/)
+├── Setup Screen         — 首次启动选目录
+├── Chat UI              — 消息卡片 + markdown 渲染
+├── Event Bus            — requestId 路由 token/tool/status
+├── Settings/Members/Agents — overlay 面板
+└── Watson Status        — 侧边栏 + per-card 状态行
 ```
 
-### commit 前必做（自审 checklist）
+## 架构决策
 
+1. **单文件 main.js 而非分模块** — MVP 阶段代码量 <500 行，拆模块是过度工程。当超过 800 行时拆分
+2. **requestId Event Bus** — 解决多轮对话串扰，每次 chat 生成唯一 ID，所有事件按 ID 路由
+3. **手动签名而非 electron-builder 内置签名** — electron-builder 签名在 CI 外不稳定，手动 codesign + notarytool 更可控
+4. **Watson Status 是 LLM 工具** — 状态不是前端硬编码，而是 LLM 通过 ui_status_set 工具主动更新，AI-native
+
+## 构建与发布
+
+```bash
+# 开发
+npm start
+
+# 构建 + 签名 + 公证 + 发布（一键）
+scripts/release.sh [patch|minor|major] "release notes"
 ```
-□ node --check main.js（语法校验，M9 教训）
-□ node .ai/dbb/dbb-test.js（DBB 6/6）
-□ E2E 对话验证（CDP 9224）
-□ agent-control --pid 截图 + 目视确认
-□ features.json 更新 passes
-□ state.json 更新
-□ growth.md 写本轮记录
-```
 
-### M8/M9 教训（已发生，不可再犯）
+## 分支规范
 
-1. **一次只做一个 feature** — M8 塞了 5 个 feature 一起做，跳过了 PLAN，没有逐个验证
-2. **Edit 匹配唯一性** — main.js 有两处 `return { answer: fullText }`，Edit 报错。用更长上下文或先 Read 确认行号
-3. **插入代码破坏相邻函数** — pushStatus 插入时把 sendNotification 的函数体切断，导致语法错误。插入前后必须 Read 确认上下文完整
-4. **node --check 是最后防线** — 语法错误应该在 commit 前被拦住，不是等 E2E 启动失败才发现
-5. **growth.md 实时写** — 做完就记，不攒着事后补
-6. **DBB 不能只跑脚本** — 必须截图 + taste.md 对照，自动化测试只验功能不验体验
-
-## 约束（已解除）
-- ~~MVP 不做：cron/heartbeat~~ → M8 已实现
-- ~~MVP 不做：多窗口~~ → M7 已实现
-- ~~MVP 不做：sub-agent~~ → 暂未实现，backlog B013
+- `main`: 稳定主线，只接收通过验证的变更
+- `feat/*`: 功能分支
+- `fix/*`: 修复分支
+- 禁止提交: `dist/`, `node_modules/`, `.DS_Store`

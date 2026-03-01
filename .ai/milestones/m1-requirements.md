@@ -1,13 +1,10 @@
 # M1 Requirements
 
-| REQ | 描述 | 优先级 | DoD |
-|-----|------|--------|-----|
-| REQ-M1-01 | Electron 壳 + 基础窗口 | P0 | 能启动，显示空白窗口，暗色主题 |
-| REQ-M1-02 | 首次启动引导 | P0 | 选数据目录 + 工作区目录，路径持久化 |
-| REQ-M1-03 | config.json 读写 | P0 | 从数据目录读 config.json，UI 可编辑 provider/apiKey/model |
-| REQ-M1-04 | System prompt 构建 | P0 | 读 SOUL.md/MEMORY.md/AGENTS.md/skills/ 拼 system prompt |
-| REQ-M1-05 | 单轮对话 | P0 | 输入问题，streaming 回显，markdown 渲染 |
-| REQ-M1-06 | 多轮对话 | P0 | 带历史追问，上下文连贯 |
-| REQ-M1-07 | 工具调用 | P1 | 搜索 + 代码执行，tool call 独立卡片 |
-| REQ-M1-08 | 文件工具 | P2 | 读写工作区文件 |
-| REQ-M1-09 | 对话导出 | P2 | 保存为 markdown |
+| REQ | 描述 | 优先级 | DoD | 状态 |
+|-----|------|--------|-----|------|
+| REQ-M1-01 | release.sh 稳定发版 | P0 | 一键跑通 build→sign→dmg→notarize→verify→push→release，spctl 验证通过 | 🔴 |
+| REQ-M1-02 | main.js 模块拆分 | P1 | 拆成 ≤5 个文件，每个 <200 行，职责单一 | 🔴 |
+| REQ-M1-03 | 基础测试 | P1 | vitest 覆盖工具执行 + session CRUD，CI 可跑 | 🔴 |
+| REQ-M1-04 | 空状态 + 错误提示 | P1 | 无 session/无消息有引导，API 错误有友好提示 | 🔴 |
+| REQ-M1-05 | Markdown 渲染提升 | P2 | 代码块有复制按钮，表格可读，链接可点击 | 🔴 |
+| REQ-M1-06 | Session 标题生成 | P2 | 首条消息自动摘要为标题（≤30字） | 🔴 |

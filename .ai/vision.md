@@ -1,33 +1,22 @@
-# Vision — [待命名]
+# Paw — Vision
 
-## 一句话
-便携式本地 AI 助手桌面客户端，一个文件夹就是一个 Claw。
+> Portable AI Workspace. One folder, one assistant. Local-first, multi-agent, AI-native.
 
-## 核心理念
-- **一个文件夹，一个 Claw** — config、skills、memory、项目文件全在一个目录，换台电脑拷过去就能用
-- **兼容 OpenClaw** — 数据格式和存储逻辑完全兼容 OpenClaw，可以直接读写 OpenClaw 的数据目录，冷启动的记忆文件也兼容
-- **完全独立** — 不依赖 OpenClaw 也能独立使用，但能无缝读取和使用 OpenClaw 的数据
-- **本地优先** — API key 存本地，对话在本地，不经过第三方服务器
-- **轻量** — 不需要 Gateway、不需要消息通道、不需要后端常驻
+## WHY
 
-## 多对话体验
-- **对标 OpenClaw 在 Discord 上的体验** — 多 session、多频道感
-- **Sub-agent / Multi-agent** — 基于 session 的，用户视角就是"群聊"
-- **群聊模式** — 用户或 agent 都可以添加/删除成员，群员列表里显示所有参与者（人 + agent）
-- **Session 即群聊** — 每个 session 是一个对话空间，可以有多个 agent 参与
+桌面端缺一个"拿来就用"的本地 AI 工作区。现有方案要么太重（需要搭后端、装依赖），要么太轻（纯 CLI 没有 GUI）。
 
-## 目标用户
-- 想要本地 AI 助手但觉得 OpenClaw 太重的用户
-- 已有 OpenClaw 的用户，想要一个桌面 GUI
-- 想要便携式 AI 工作环境的用户
+Paw 的定位：**零配置的本地 AI 桌面客户端**。指向一个文件夹就是一个 workspace，兼容 OpenClaw 数据格式，开箱即用。
 
-## 成功标准
-- 选一个文件夹，配好 API key，就能对话
-- 多 session + multi-agent 群聊体验
-- 支持工具调用（搜索/代码/文件）
-- 能读写 SOUL.md / MEMORY.md / skills/
-- 数据格式与 OpenClaw 完全兼容
-- macOS 原生体验（后续可扩展 Windows/Linux）
+## 核心信条
 
-## 待定
-- 产品名称和项目名称待定
+1. **一个文件夹 = 一个工作区** — config、skills、memory、sessions 全在一个目录里，可复制、可备份、可版本控制
+2. **本地优先** — 数据不离开你的机器，API key 存本地，对话历史存本地
+3. **AI-Native 桌面体验** — 不是网页套壳，是真正的桌面公民（tray icon、多窗口、系统通知、文件 watch）
+4. **兼容 OpenClaw** — 直接指向 `~/clawd/` 或 `~/.openclaw/` 就能用，不造新格式
+
+## 不做什么
+
+- 不做云端同步（用户自己用 git/iCloud）
+- 不做用户系统（单机单用户）
+- 不做插件市场（skills 就是文件夹，手动放进去）
