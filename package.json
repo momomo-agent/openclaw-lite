@@ -1,6 +1,6 @@
 {
   "name": "paw",
-  "version": "0.18.0",
+  "version": "0.18.1",
   "description": "Portable local AI assistant with multi-agent chat",
   "main": "main.js",
   "scripts": {
@@ -28,6 +28,8 @@
       "memory-index.js",
       "renderer/**/*",
       "assets/**/*",
+      "tools/**/*",
+      "skills/**/*",
       "package.json"
     ],
     "dmg": {
