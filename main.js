@@ -110,29 +110,85 @@ async function compactHistory(messages, config) {
 }
 
 // Raw API calls for compaction (no streaming to UI)
+// ── API Key Rotation ──
+let currentKeyIndex = 0;
+let keyStats = {}; // { keyIndex: { uses: 0, failures: 0 } }
+
+function getApiKey(config) {
+  // Support both single key (string) and multiple keys (array)
+  if (Array.isArray(config.apiKeys) && config.apiKeys.length > 0) {
+    return config.apiKeys[currentKeyIndex % config.apiKeys.length];
+  }
+  return config.apiKey;
+}
+
+function rotateApiKey(config) {
+  if (Array.isArray(config.apiKeys) && config.apiKeys.length > 1) {
+    currentKeyIndex = (currentKeyIndex + 1) % config.apiKeys.length;
+    console.log(`[API] Rotated to key ${currentKeyIndex + 1}/${config.apiKeys.length}`);
+    return true;
+  }
+  return false;
+}
+
+function recordKeyUsage(success) {
+  if (!keyStats[currentKeyIndex]) {
+    keyStats[currentKeyIndex] = { uses: 0, failures: 0 };
+  }
+  keyStats[currentKeyIndex].uses++;
+  if (!success) {
+    keyStats[currentKeyIndex].failures++;
+  }
+}
+
 async function streamAnthropicRaw(messages, system, config) {
   const base = (config.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '')
   const endpoint = base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`
+  const apiKey = getApiKey(config);
+  
   const res = await fetch(endpoint, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': config.apiKey, 'anthropic-version': '2023-06-01' },
+    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({ model: config.model || 'claude-sonnet-4-20250514', max_tokens: 2048, system, messages }),
     signal: AbortSignal.timeout(30000),
   })
-  if (!res.ok) throw new Error(`API ${res.status}`)
+  
+  if (!res.ok) {
+    recordKeyUsage(false);
+    // Retry with next key on 429 (rate limit)
+    if (res.status === 429 && rotateApiKey(config)) {
+      console.log('[API] Retrying with next key...');
+      return streamAnthropicRaw(messages, system, config);
+    }
+    throw new Error(`API ${res.status}`)
+  }
+  
+  recordKeyUsage(true);
   const data = await res.json()
   return (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('')
 }
 
 async function streamOpenAIRaw(messages, system, config) {
   const base = (config.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '')
+  const apiKey = getApiKey(config);
+  
   const res = await fetch(`${base}/chat/completions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` },
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
     body: JSON.stringify({ model: config.model || 'gpt-4o', max_tokens: 2048, messages: [{ role: 'system', content: system }, ...messages] }),
     signal: AbortSignal.timeout(30000),
   })
-  if (!res.ok) throw new Error(`API ${res.status}`)
+  
+  if (!res.ok) {
+    recordKeyUsage(false);
+    if (res.status === 429 && rotateApiKey(config)) {
+      console.log('[API] Retrying with next key...');
+      return streamOpenAIRaw(messages, system, config);
+    }
+    throw new Error(`API ${res.status}`)
+  }
+  
+  recordKeyUsage(true);
   const data = await res.json()
   return data.choices?.[0]?.message?.content || ''
 }
@@ -937,7 +993,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId) {
   _activeRequestId = requestId
   const base = (config.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '')
   const endpoint = base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`
-  const headers = { 'Content-Type': 'application/json', 'x-api-key': config.apiKey, 'anthropic-version': '2023-06-01' }
+  const headers = { 'Content-Type': 'application/json', 'x-api-key': getApiKey(config), 'anthropic-version': '2023-06-01' }
   let fullText = '', roundText = '', msgs = [...messages]
 
   for (let round = 0; round < 5; round++) {
@@ -1036,7 +1092,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId) {
 
     const res = await fetch(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getApiKey(config)}` },
       body: JSON.stringify({ model: config.model || 'gpt-4o', messages: msgs, stream: true, tools: oaiTools }),
     })
     if (!res.ok) throw new Error(`OpenAI API ${res.status}: ${await res.text()}`)
