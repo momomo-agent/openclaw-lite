@@ -360,7 +360,7 @@
     "id": "F052",
     "category": "ecosystem",
     "description": "Skill 安装管理（brew/npm/go/uv）",
-    "passes": false,
+    "passes": true,
     "milestone": "M17"
   },
   {
@@ -374,7 +374,7 @@
     "id": "F054",
     "category": "core",
     "description": "API key rotation",
-    "passes": false,
+    "passes": true,
     "milestone": "M17"
   }
 ]
