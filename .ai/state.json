@@ -1,7 +1,7 @@
 {
-  "currentMilestone": "M16",
-  "currentFeature": null,
-  "phase": "review",
+  "currentMilestone": "M17",
+  "currentFeature": "F049",
+  "phase": "plan",
   "version": "0.15.0",
   "lastUpdate": "2026-03-01",
   "completedMilestones": [

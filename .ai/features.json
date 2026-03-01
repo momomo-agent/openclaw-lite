@@ -334,5 +334,47 @@
     "description": "自动轮转 — task 完成后自动触发下一个 unblocked agent",
     "passes": true,
     "milestone": "M16"
+  },
+  {
+    "id": "F049",
+    "category": "ecosystem",
+    "description": "Skill Frontmatter 解析（always/requires/os/primaryEnv）",
+    "passes": false,
+    "milestone": "M17"
+  },
+  {
+    "id": "F050",
+    "category": "ecosystem",
+    "description": "Skill 环境变量自动注入",
+    "passes": false,
+    "milestone": "M17"
+  },
+  {
+    "id": "F051",
+    "category": "ecosystem",
+    "description": "Skill prompt 路径压缩（省 token）",
+    "passes": false,
+    "milestone": "M17"
+  },
+  {
+    "id": "F052",
+    "category": "ecosystem",
+    "description": "Skill 安装管理（brew/npm/go/uv）",
+    "passes": false,
+    "milestone": "M17"
+  },
+  {
+    "id": "F053",
+    "category": "core",
+    "description": "工具注册插件化",
+    "passes": false,
+    "milestone": "M17"
+  },
+  {
+    "id": "F054",
+    "category": "core",
+    "description": "API key rotation",
+    "passes": false,
+    "milestone": "M17"
   }
 ]
