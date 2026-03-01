@@ -43,10 +43,39 @@ if [ ! -d "$APP" ]; then
   exit 1
 fi
 
-# 5. Sign with Developer ID
-echo "🔏 Signing..."
-codesign --force --deep --options runtime \
-  --sign "Developer ID Application: Kenefe Li (P2GN9QW8E5)" "$APP"
+# 5. Sign with Developer ID (must sign all native binaries individually)
+IDENTITY="Developer ID Application: Kenefe Li (P2GN9QW8E5)"
+
+echo "🔏 Signing native binaries in app.asar.unpacked..."
+find "$APP/Contents/Resources/app.asar.unpacked" -type f \( -name "*.node" -o -name "*.dylib" -o -name "*.so" \) | while read f; do
+  codesign --force --options runtime --timestamp --sign "$IDENTITY" "$f"
+done
+
+echo "🔏 Signing Electron Framework Libraries..."
+find "$APP/Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries" -type f -name "*.dylib" | while read f; do
+  codesign --force --options runtime --timestamp --sign "$IDENTITY" "$f"
+done
+
+echo "🔏 Signing Squirrel ShipIt..."
+codesign --force --options runtime --timestamp --sign "$IDENTITY" \
+  "$APP/Contents/Frameworks/Squirrel.framework/Versions/A/Resources/ShipIt"
+
+echo "🔏 Signing Electron Framework..."
+codesign --force --options runtime --timestamp --sign "$IDENTITY" \
+  "$APP/Contents/Frameworks/Electron Framework.framework"
+codesign --force --options runtime --timestamp --sign "$IDENTITY" \
+  "$APP/Contents/Frameworks/Squirrel.framework"
+
+echo "🔏 Signing Helpers..."
+for helper in "$APP/Contents/Frameworks/"*Helper*.app; do
+  codesign --force --options runtime --timestamp --sign "$IDENTITY" "$helper"
+done
+
+echo "🔏 Signing Main App..."
+codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
+
+echo "✅ Verifying signature..."
+codesign --verify --deep --strict --verbose=1 "$APP"
 
 # 6. Create DMG
 DMG="dist/Paw-${NEW_VERSION}-arm64.dmg"
