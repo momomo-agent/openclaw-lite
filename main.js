@@ -5,6 +5,7 @@ const vm = require('vm')
 const { spawn } = require('child_process')
 const memoryIndex = require('./memory-index')
 const { getTool, getAnthropicTools, getToolsPrompt } = require('./tools')
+const { loadAllSkills } = require('./skills/frontmatter')
 
 let mainWindow
 let clawDir = null
@@ -836,13 +837,34 @@ async function buildSystemPrompt() {
   // 4. Long-term memory (last, biggest file)
   const memoryMd = path.join(clawDir, 'MEMORY.md')
   if (fs.existsSync(memoryMd)) parts.push(`## MEMORY.md\n${fs.readFileSync(memoryMd, 'utf8')}`)
-  // 5. Skills
+  // 5. Skills (with frontmatter support + path compression)
   const skillsDir = path.join(clawDir, 'skills')
   if (fs.existsSync(skillsDir)) {
-    const skills = fs.readdirSync(skillsDir).filter(d => fs.existsSync(path.join(skillsDir, d, 'SKILL.md')))
-    for (const s of skills) {
-      const content = fs.readFileSync(path.join(skillsDir, s, 'SKILL.md'), 'utf8').slice(0, 3000)
-      parts.push(`## Skill: ${s}\n${content}`)
+    const skills = loadAllSkills(skillsDir)
+    const os = require('os')
+    const homeDir = os.homedir()
+    
+    // Always inject skills with `always: true`
+    const alwaysSkills = skills.filter(s => s.always)
+    for (const skill of alwaysSkills) {
+      const content = skill.body.slice(0, 3000)
+      const emoji = skill.emoji ? `${skill.emoji} ` : ''
+      // Compress path: /Users/kenefe/... → ~/...
+      const compressedPath = skill.path.startsWith(homeDir) 
+        ? '~' + skill.path.slice(homeDir.length) 
+        : skill.path
+      parts.push(`## Skill: ${emoji}${skill.name}\nPath: ${compressedPath}/SKILL.md\n\n${content}`)
+    }
+    
+    // Inject all other skills (for now, later we can filter by context)
+    const otherSkills = skills.filter(s => !s.always)
+    for (const skill of otherSkills) {
+      const content = skill.body.slice(0, 3000)
+      const emoji = skill.emoji ? `${skill.emoji} ` : ''
+      const compressedPath = skill.path.startsWith(homeDir) 
+        ? '~' + skill.path.slice(homeDir.length) 
+        : skill.path
+      parts.push(`## Skill: ${emoji}${skill.name}\nPath: ${compressedPath}/SKILL.md\n\n${content}`)
     }
   }
   // 6. Memory sync instructions
