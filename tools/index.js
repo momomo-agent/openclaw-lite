@@ -4,6 +4,7 @@ require('./file-ops');
 require('./exec');
 require('./search');
 require('./skill');
+require('./skill-install');
 
 const { getAllTools, getTool, getAnthropicTools, getToolsPrompt } = require('./registry');
 
