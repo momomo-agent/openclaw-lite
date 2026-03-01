@@ -3,6 +3,7 @@ const path = require('path')
 const fs = require('fs')
 const vm = require('vm')
 const { spawn } = require('child_process')
+const memoryIndex = require('./memory-index')
 
 let mainWindow
 let clawDir = null
@@ -11,8 +12,67 @@ let heartbeatTimer = null
 let tray = null
 let memoryWatcher = null
 
+// ── Config path helper ──
+function configPath() {
+
+// ── Link Understanding ──
+const BARE_URL_RE = /https?:\/\/\S+/gi
+async function extractLinkContext(text, maxLinks = 3, timeoutMs = 5000) {
+  if (!text) return ''
+  const urls = [...new Set((text.match(BARE_URL_RE) || []).slice(0, maxLinks))]
+  if (!urls.length) return ''
+  const results = await Promise.allSettled(urls.map(async (url) => {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36' },
+      signal: AbortSignal.timeout(timeoutMs), redirect: 'follow',
+    })
+    if (!res.ok) return null
+    const ct = res.headers.get('content-type') || ''
+    if (!ct.includes('html')) return null
+    const html = await res.text()
+    const { Readability } = require('@mozilla/readability')
+    const { parseHTML } = require('linkedom')
+    const { document } = parseHTML(html.slice(0, 500000))
+    const article = new Readability(document).parse()
+    if (!article?.textContent) return null
+    const title = article.title || url
+    const summary = article.textContent.replace(/\s+/g, ' ').trim().slice(0, 500)
+    return `[Link: ${title}] ${summary}`
+  }))
+  return results.filter(r => r.status === 'fulfilled' && r.value).map(r => r.value).join('\n\n')
+}
+
+
+  if (!clawDir) return null
+  const newPath = path.join(clawDir, '.paw', 'config.json')
+  // Migrate from old location if needed
+  const oldPath = path.join(clawDir, 'config.json')
+  if (!fs.existsSync(newPath) && fs.existsSync(oldPath)) {
+    fs.mkdirSync(path.join(clawDir, '.paw'), { recursive: true })
+    fs.renameSync(oldPath, newPath)
+  }
+  return newPath
+}
+
 // ── Memory watcher ──
 let memoryDebounce = null
+// ── Background memory indexing ──
+async function buildMemoryIndex() {
+  if (!clawDir) return
+  try {
+    const p = configPath()
+    const config = p ? JSON.parse(fs.readFileSync(p, 'utf8')) : {}
+    await memoryIndex.buildIndex(clawDir, config, (file, done, total) => {
+      if (mainWindow && done && total) {
+        mainWindow.webContents.send('memory-index-progress', { file, done, total })
+      }
+    })
+    console.log('[main] Memory index built')
+  } catch (e) {
+    console.warn('[main] Memory index build error:', e.message)
+  }
+}
+
 function startMemoryWatch() {
   stopMemoryWatch()
   if (!clawDir) return
@@ -112,6 +172,10 @@ const TOOLS = [
     name: 'memory_get', description: 'Read a snippet from MEMORY.md or memory/*.md with optional line range. Use after memory_search to pull needed lines.',
     input_schema: { type: 'object', properties: { path: { type: 'string' }, from: { type: 'number', description: 'Start line (1-indexed)' }, lines: { type: 'number', description: 'Number of lines to read' } }, required: ['path'] }
   },
+  {
+    name: 'web_fetch', description: 'Fetch and extract readable content from a URL (HTML → markdown). Use for lightweight page access.',
+    input_schema: { type: 'object', properties: { url: { type: 'string', description: 'HTTP or HTTPS URL to fetch' }, maxChars: { type: 'number', description: 'Max characters to return (default 50000)' } }, required: ['url'] }
+  },
 ]
 
 // ── Memory Search (keyword-based, upgradable to FTS) ──
@@ -186,28 +250,23 @@ async function executeTool(name, input, config) {
     }
     case 'file_read': {
       if (!clawDir) return 'Error: No claw directory'
-      const wsDir = path.join(clawDir, 'workspace')
-      fs.mkdirSync(wsDir, { recursive: true })
-      const p = path.resolve(wsDir, input.path)
+      const p = path.resolve(clawDir, input.path)
       if (!p.startsWith(clawDir)) return 'Error: Path outside claw directory'
       try { return fs.readFileSync(p, 'utf8') } catch (e) { return `Error: ${e.message}` }
     }
     case 'file_write': {
       if (!clawDir) return 'Error: No claw directory'
-      const wsDir = path.join(clawDir, 'workspace')
-      const p = path.resolve(wsDir, input.path)
+      const p = path.resolve(clawDir, input.path)
       if (!p.startsWith(clawDir)) return 'Error: Path outside claw directory'
       fs.mkdirSync(path.dirname(p), { recursive: true })
       fs.writeFileSync(p, input.content)
-      return `Written ${input.content.length} bytes to workspace/${input.path}`
+      return `Written ${input.content.length} bytes to ${input.path}`
     }
     case 'shell_exec': {
       if (!clawDir) return 'Error: No claw directory'
-      const wsDir = path.join(clawDir, 'workspace')
-      fs.mkdirSync(wsDir, { recursive: true })
       const { execSync } = require('child_process')
       try {
-        const out = execSync(input.command, { cwd: wsDir, timeout: 30000, maxBuffer: 1024 * 512, encoding: 'utf8' })
+        const out = execSync(input.command, { cwd: clawDir, timeout: 30000, maxBuffer: 1024 * 512, encoding: 'utf8' })
         return out.slice(0, 5000) || '(no output)'
       } catch (e) { return `Error: ${e.stderr || e.message}`.slice(0, 2000) }
     }
@@ -225,6 +284,34 @@ async function executeTool(name, input, config) {
       }
       pushWatsonStatus(level, text)
       return 'OK'
+    }
+    case 'web_fetch': {
+      const url = (input.url || '').trim()
+      if (!url) return 'Error: url is required'
+      try { const u = new URL(url); if (!['http:', 'https:'].includes(u.protocol)) return 'Error: only http/https allowed' } catch { return 'Error: invalid URL' }
+      const maxChars = input.maxChars || 50000
+      try {
+        const res = await fetch(url, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36' },
+          signal: AbortSignal.timeout(15000),
+          redirect: 'follow',
+        })
+        if (!res.ok) return `Error: HTTP ${res.status} ${res.statusText}`
+        const ct = res.headers.get('content-type') || ''
+        const html = await res.text()
+        if (!ct.includes('html')) return html.slice(0, maxChars)
+        // Extract readable content
+        const { Readability } = require('@mozilla/readability')
+        const { parseHTML } = require('linkedom')
+        const { document } = parseHTML(html.slice(0, 1000000))
+        const reader = new Readability(document)
+        const article = reader.parse()
+        if (article?.textContent) {
+          const title = article.title ? `# ${article.title}\n\n` : ''
+          return (title + article.textContent).slice(0, maxChars)
+        }
+        return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxChars)
+      } catch (e) { return `Error: ${e.message}` }
     }
     case 'skill_exec': {
       if (!clawDir) return 'Error: No claw directory'
@@ -255,11 +342,17 @@ async function executeTool(name, input, config) {
     }
     case 'memory_search': {
       if (!clawDir) return 'Error: No claw directory'
-      const query = (input.query || '').trim().toLowerCase()
+      const query = (input.query || '').trim()
       if (!query) return 'Error: query required'
       const maxResults = input.maxResults || 5
-      const results = searchMemoryFiles(clawDir, query, maxResults)
-      return JSON.stringify({ results })
+      try {
+        const results = await memoryIndex.search(clawDir, query, maxResults)
+        return JSON.stringify({ results })
+      } catch (e) {
+        // Fallback to keyword search
+        const results = searchMemoryFiles(clawDir, query.toLowerCase(), maxResults)
+        return JSON.stringify({ results })
+      }
     }
     default: return `Unknown tool: ${name}`
   }
@@ -345,7 +438,7 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
-app.on('will-quit', () => { sessionStore.closeDb() })
+app.on('will-quit', () => { sessionStore.closeDb(); memoryIndex.closeDb() })
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 
 async function openNewWindow() {
@@ -370,16 +463,22 @@ ipcMain.handle('create-claw-dir', async () => {
 
   // Scaffold initial files
   const scaffold = {
-    'config.json': JSON.stringify({ provider: 'anthropic', apiKey: '', model: '' }, null, 2),
     'SOUL.md': '# Soul\n\nDescribe who your AI assistant is.\n',
     'AGENTS.md': '# Agents\n\nWorkspace instructions and conventions.\n',
     'USER.md': '# User\n\nAbout you.\n',
+  }
+  // Config goes in .paw/
+  const pawDir = path.join(dir, '.paw')
+  fs.mkdirSync(pawDir, { recursive: true })
+  const configPath = path.join(pawDir, 'config.json')
+  if (!fs.existsSync(configPath)) {
+    fs.writeFileSync(configPath, JSON.stringify({ provider: 'anthropic', apiKey: '', model: '' }, null, 2))
   }
   for (const [name, content] of Object.entries(scaffold)) {
     const p = path.join(dir, name)
     if (!fs.existsSync(p)) fs.writeFileSync(p, content)
   }
-  for (const d of ['skills', 'memory', 'sessions', 'agents', 'workspace']) {
+  for (const d of ['skills', 'memory', 'sessions', 'agents']) {
     const p = path.join(dir, d)
     if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true })
   }
@@ -388,6 +487,8 @@ ipcMain.handle('create-claw-dir', async () => {
   savePrefs({ clawDir })
   sessionStore.migrateFromJson(clawDir)
   startMemoryWatch()
+  // Background memory indexing
+  buildMemoryIndex()
   return dir
 })
 
@@ -400,12 +501,13 @@ ipcMain.handle('select-claw-dir', async () => {
     clawDir = result.filePaths[0]
     savePrefs({ clawDir })
     // Ensure essential subdirectories exist
-    for (const sub of ['memory', 'sessions', 'agents', 'skills', 'workspace']) {
+    for (const sub of ['memory', 'sessions', 'agents', 'skills']) {
       const d = path.join(clawDir, sub)
       if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true })
     }
     startMemoryWatch()
     sessionStore.migrateFromJson(clawDir)
+    buildMemoryIndex()
     return clawDir
   }
   return null
@@ -414,14 +516,16 @@ ipcMain.handle('select-claw-dir', async () => {
 // ── IPC: Read config.json from data dir ──
 
 ipcMain.handle('get-config', () => {
-  if (!clawDir) return null
-  const p = path.join(clawDir, 'config.json')
+  const p = configPath()
+  if (!p) return null
   try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch { return {} }
 })
 
 ipcMain.handle('save-config', (_, config) => {
-  if (!clawDir) return false
-  fs.writeFileSync(path.join(clawDir, 'config.json'), JSON.stringify(config, null, 2))
+  const p = configPath()
+  if (!p) return false
+  fs.mkdirSync(path.dirname(p), { recursive: true })
+  fs.writeFileSync(p, JSON.stringify(config, null, 2))
   return true
 })
 
@@ -485,6 +589,31 @@ ipcMain.handle('open-file', (_, filePath) => {
   shell.openPath(p)
 })
 
+// Open image/video/markdown in a new Electron window
+ipcMain.handle('open-file-preview', (_, filePath) => {
+  const p = path.resolve(clawDir || '', filePath)
+  if (!fs.existsSync(p)) return
+  const ext = path.extname(p).toLowerCase().slice(1)
+  const imgExts = ['png','jpg','jpeg','gif','webp','svg']
+  const vidExts = ['mp4','mov','webm','mkv','avi']
+  const mdExts = ['md','markdown']
+
+  const win = new BrowserWindow({
+    width: 800, height: 600,
+    title: path.basename(p),
+    webPreferences: { nodeIntegration: false, contextIsolation: true },
+  })
+
+  if (imgExts.includes(ext)) {
+    win.loadURL(`data:text/html,<html><body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;height:100vh"><img src="file://${encodeURI(p)}" style="max-width:100%;max-height:100%;object-fit:contain"></body></html>`)
+  } else if (vidExts.includes(ext)) {
+    win.loadURL(`data:text/html,<html><body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;height:100vh"><video src="file://${encodeURI(p)}" controls autoplay style="max-width:100%;max-height:100%"></video></body></html>`)
+  } else if (mdExts.includes(ext)) {
+    const content = fs.readFileSync(p, 'utf8').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    win.loadURL(`data:text/html,<html><head><style>body{margin:20px;background:#1a1a1a;color:#e0e0e0;font-family:system-ui;line-height:1.6;max-width:800px;margin:20px auto}pre{background:#111;padding:12px;border-radius:6px;overflow-x:auto}code{background:#222;padding:2px 4px;border-radius:3px}</style></head><body><pre>${content}</pre></body></html>`)
+  }
+})
+
 ipcMain.handle('open-external', (_, url) => {
   if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
     shell.openExternal(url)
@@ -509,8 +638,8 @@ ipcMain.handle('chat', async (_, { prompt, history, agentId, files }) => {
   const requestId = _nextRequestId || Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
   _nextRequestId = null
   const config = (() => {
-    if (!clawDir) return {}
-    const p = path.join(clawDir, 'config.json')
+    const p = configPath()
+    if (!p) return {}
     try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch { return {} }
   })()
 
@@ -543,7 +672,11 @@ ipcMain.handle('chat', async (_, { prompt, history, agentId, files }) => {
       }
     }
   }
-  userContent.push({ type: 'text', text: prompt || '(attached files)' })
+  // Link understanding — async fetch link summaries (non-blocking)
+  let linkContext = ''
+  try { linkContext = await extractLinkContext(prompt) } catch {}
+  const textWithContext = linkContext ? `${prompt}\n\n---\n[Auto-fetched link context]\n${linkContext}` : prompt
+  userContent.push({ type: 'text', text: textWithContext || '(attached files)' })
   messages.push({ role: 'user', content: userContent })
 
   if (provider === 'anthropic') {
@@ -595,14 +728,15 @@ async function buildSystemPrompt() {
   parts.push(`## Tools & Capabilities
 You are running inside Paw, an AI-native desktop app with these tools:
 - **search**: Search the web (Tavily). Use for research, lookups, current info.
-- **file_read**: Read files from the workspace directory.
-- **file_write**: Write/create files in the workspace. USE THIS when the user asks you to create reports, save content, write markdown, etc. Always write the actual file, don't just output text.
-- **shell_exec**: Run shell commands in the workspace.
+- **file_read**: Read files from the claw directory.
+- **file_write**: Write/create files in the claw directory. USE THIS when the user asks you to create reports, save content, write markdown, etc. Always write the actual file, don't just output text.
+- **shell_exec**: Run shell commands in the claw directory.
 - **code_exec**: Execute JavaScript locally.
 - **notify**: Send a desktop notification.
 - **skill_exec**: Run a skill script.
 - **memory_search**: Search MEMORY.md + memory/*.md by keywords. Use BEFORE answering questions about prior work, decisions, dates, people, preferences, or todos.
 - **memory_get**: Read a snippet from MEMORY.md or memory/*.md with optional line range. Use AFTER memory_search to pull only the needed lines.
+- **web_fetch**: Fetch and extract readable content from a URL (HTML → markdown). Use when you need to read a web page.
 - **ui_status_set**: Update the sidebar status line (4-20 Chinese chars).
 
 ### Important Rules
@@ -796,13 +930,13 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId) {
 function startHeartbeat() {
   stopHeartbeat()
   if (!clawDir) return
-  let cfg; try { cfg = JSON.parse(fs.readFileSync(path.join(clawDir, 'config.json'), 'utf8')) } catch { return }
+  let cfg; try { cfg = JSON.parse(fs.readFileSync(configPath(), 'utf8')) } catch { return }
   const hb = cfg.heartbeat; if (!hb?.enabled) return
   const ms = (hb.intervalMinutes || 30) * 60000
   const prompt = hb.prompt || 'Heartbeat: check if anything needs attention. Reply HEARTBEAT_OK if nothing.'
   heartbeatTimer = setInterval(async () => {
     try {
-      const c = JSON.parse(fs.readFileSync(path.join(clawDir, 'config.json'), 'utf8'))
+      const c = JSON.parse(fs.readFileSync(configPath(), 'utf8'))
       if (!c.apiKey) return
       const sp = await buildSystemPrompt()
       const msgs = [{ role: 'user', content: prompt }]

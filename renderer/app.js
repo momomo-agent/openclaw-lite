@@ -80,26 +80,9 @@ document.addEventListener('click', async (e) => {
   e.preventDefault()
   const fp = el.dataset.path
   const ext = fp.split('.').pop().toLowerCase()
-  const imgExts = ['png','jpg','jpeg','gif','webp','svg']
-  const mdExts = ['md','markdown']
-  if (imgExts.includes(ext)) {
-    // Inline image preview
-    const existing = el.parentElement.querySelector('.file-preview')
-    if (existing) { existing.remove(); return }
-    const preview = document.createElement('div')
-    preview.className = 'file-preview'
-    preview.innerHTML = `<img src="file://${fp}" style="max-width:100%;max-height:400px;border-radius:6px;margin-top:8px">`
-    el.parentElement.appendChild(preview)
-  } else if (mdExts.includes(ext)) {
-    const content = await window.api.readFile(fp)
-    if (!content) { window.api.openFile(fp); return }
-    const existing = el.parentElement.querySelector('.file-preview')
-    if (existing) { existing.remove(); return }
-    const preview = document.createElement('div')
-    preview.className = 'file-preview'
-    preview.style.cssText = 'background:#111;border-radius:8px;padding:12px;margin-top:8px;max-height:400px;overflow:auto'
-    preview.innerHTML = marked.parse(content)
-    el.parentElement.appendChild(preview)
+  const previewExts = ['png','jpg','jpeg','gif','webp','svg','mp4','mov','webm','mkv','avi','md','markdown']
+  if (previewExts.includes(ext)) {
+    window.api.openFilePreview(fp)
   } else {
     window.api.openFile(fp)
   }
@@ -504,7 +487,11 @@ function renderToolGroup(slot, steps, forceCollapse) {
 // addToolCard removed — tool steps now render inline via renderToolGroup
 
 function linkifyPaths(html) {
-  return html.replace(/(?<![="'])(\/([\w./-]+\/)+[\w.-]+\.\w+)/g, (m) => {
+  // Match absolute paths (/...), home paths (~/...), and relative paths with extension
+  // Negative lookbehind avoids matching inside href="..." or src="..."
+  return html.replace(/(?<![="'`])(?:~?\/[\w.@:+-]+(?:\/[\w.@:+-]+)*\.\w+|~?\/[\w.@:+-]+(?:\/[\w.@:+-]+)+)/g, (m) => {
+    // Skip if it looks like a URL path fragment (no leading /)
+    if (m.startsWith('http')) return m
     return `<a href="#" class="file-link" data-path="${m}" title="Click to open">${m}</a>`
   })
 }

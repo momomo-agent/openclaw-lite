@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('api', {
   onTrayNewChat: (cb) => { ipcRenderer.on('tray-new-chat', () => cb()) },
   // File operations
   openFile: (p) => ipcRenderer.invoke('open-file', p),
+  openFilePreview: (p) => ipcRenderer.invoke('open-file-preview', p),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   readFile: (p) => ipcRenderer.invoke('read-file', p),
   // Memory watch

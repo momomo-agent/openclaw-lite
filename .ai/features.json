@@ -29,5 +29,14 @@
   {"id":"F028","category":"ux","description":"工具步骤内联显示（按对话顺序，连续折叠）","passes":true,"milestone":"M12"},
   {"id":"F029","category":"ux","description":"侧边栏per-session状态（去掉全局watson）","passes":true,"milestone":"M12"},
   {"id":"F030","category":"core","description":"system prompt 工具引导（file_write 等）","passes":true,"milestone":"M12"},
-  {"id":"F031","category":"core","description":"选目录后自动创建子目录","passes":true,"milestone":"M12"}
+  {"id":"F031","category":"core","description":"选目录后自动创建子目录","passes":true,"milestone":"M12"},
+  {"id":"F032","category":"ecosystem","description":"memory_get 工具（按行读取 .md）","passes":true,"milestone":"M13"},
+  {"id":"F033","category":"ecosystem","description":"memory_search 工具（FTS 关键词搜索）","passes":true,"milestone":"M13"},
+  {"id":"F034","category":"ecosystem","description":"冷启动加载链对齐 OpenClaw","passes":true,"milestone":"M13"},
+  {"id":"F035","category":"core","description":"Session SQLite（better-sqlite3 + WAL + 自动迁移）","passes":true,"milestone":"M13"},
+  {"id":"F036","category":"core","description":"去掉 workspace/ 子目录，file ops cwd 改回 clawDir","passes":false,"milestone":"M14"},
+  {"id":"F037","category":"core","description":"内部状态统一到 .paw/（config.json 迁移）","passes":false,"milestone":"M14"},
+  {"id":"F038","category":"ecosystem","description":"Embedding memory search（node-llama-cpp + FTS5 hybrid + sqlite-vec）","passes":false,"milestone":"M14"},
+  {"id":"F039","category":"core","description":"web_fetch 工具（URL→markdown）","passes":false,"milestone":"M14"},
+  {"id":"F040","category":"ux","description":"link-understanding 消息预处理（自动抓取链接摘要）","passes":false,"milestone":"M14"}
 ]
