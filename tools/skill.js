@@ -3,6 +3,7 @@ const { registerTool } = require('./registry');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs').promises;
+const { loadSkillMetadata } = require('../skills/frontmatter');
 
 registerTool({
   name: 'skill_exec',
@@ -23,7 +24,7 @@ registerTool({
     required: ['skillName']
   },
   handler: async (args, context) => {
-    const { clawDir } = context;
+    const { clawDir, skillEnv = {} } = context;
     const { skillName, args: skillArgs = [] } = args;
     
     const skillDir = path.join(clawDir, 'skills', skillName);
@@ -35,11 +36,20 @@ registerTool({
       return `Error: Skill '${skillName}' not found or missing run.sh`;
     }
     
+    // Load skill metadata to get primaryEnv
+    const metadata = loadSkillMetadata(skillDir);
+    const env = { ...process.env, SKILL_DIR: skillDir };
+    
+    // Inject environment variables from skillEnv
+    if (metadata?.primaryEnv && skillEnv[metadata.primaryEnv]) {
+      env[metadata.primaryEnv] = skillEnv[metadata.primaryEnv];
+    }
+    
     return new Promise((resolve) => {
       const proc = spawn('bash', [scriptPath, ...skillArgs], {
         cwd: skillDir,
         timeout: 60000,
-        env: { ...process.env, SKILL_DIR: skillDir }
+        env
       });
       
       let stdout = '';

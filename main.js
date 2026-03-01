@@ -309,6 +309,7 @@ async function executeTool(name, input, config) {
     const context = {
       clawDir,
       tavilyKey: config?.tavilyKey,
+      skillEnv: config?.skillEnv || {},
       approvalCallback: async (request) => {
         if (!mainWindow) return false;
         const { dialog } = require('electron');
