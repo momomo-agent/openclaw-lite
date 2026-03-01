@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld('api', {
   // Tasks
   listTasks: (sessionId) => ipcRenderer.invoke('session-tasks', sessionId),
   onTasksChanged: (cb) => { ipcRenderer.removeAllListeners('tasks-changed'); ipcRenderer.on('tasks-changed', (_, sid) => cb(sid)) },
+  onAgentMessage: (cb) => { ipcRenderer.removeAllListeners('agent-message'); ipcRenderer.on('agent-message', (_, d) => cb(d)) },
   // Heartbeat
   heartbeatStart: () => ipcRenderer.invoke('heartbeat-start'),
   heartbeatStop: () => ipcRenderer.invoke('heartbeat-stop'),

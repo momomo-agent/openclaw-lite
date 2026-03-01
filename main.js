@@ -267,6 +267,10 @@ const TOOLS = [
     name: 'task_list', description: 'List all tasks in the current session.',
     input_schema: { type: 'object', properties: {} }
   },
+  {
+    name: 'send_message', description: 'Send a message to another agent in this session. Only available in multi-agent sessions.',
+    input_schema: { type: 'object', properties: { targetAgent: { type: 'string', description: 'Name of the target agent' }, message: { type: 'string' } }, required: ['targetAgent','message'] }
+  },
 ]
 
 // ── Memory Search (keyword-based, upgradable to FTS) ──
@@ -505,6 +509,30 @@ async function executeTool(name, input, config) {
       if (!clawDir || !currentSessionId) return 'Error: No active session'
       const tasks = sessionStore.listTasks(clawDir, currentSessionId)
       return JSON.stringify({ tasks, total: tasks.length })
+    }
+    case 'send_message': {
+      if (!clawDir || !currentSessionId) return 'Error: No active session'
+      const targetName = (input.targetAgent || '').trim()
+      const msg = (input.message || '').trim()
+      if (!targetName || !msg) return 'Error: targetAgent and message required'
+      // Find target agent
+      const allAgents = listAgents()
+      const target = allAgents.find(a => a.name === targetName)
+      if (!target) return `Error: Agent "${targetName}" not found`
+      // Anti-loop: check recent agent-to-agent messages
+      const session = sessionStore.loadSession(clawDir, currentSessionId)
+      if (session?.messages) {
+        const recent = session.messages.slice(-10)
+        const a2aCount = recent.filter(m => m.role === 'assistant' && m.sender && m.sender !== 'You').length
+        if (a2aCount >= 5) return 'Error: Too many consecutive agent messages. Waiting for user input.'
+      }
+      // Emit to renderer as agent-to-agent message
+      if (mainWindow) {
+        mainWindow.webContents.send('agent-message', {
+          from: currentAgentName, to: targetName, message: msg, sessionId: currentSessionId
+        })
+      }
+      return `Message sent to ${targetName}`
     }
     default: return `Unknown tool: ${name}`
   }
@@ -812,6 +840,22 @@ ipcMain.handle('chat', async (_, { prompt, history, agentId, files }) => {
   // Build system prompt — agent soul takes priority
   let systemPrompt = await buildSystemPrompt()
   if (agent?.soul) systemPrompt = agent.soul + '\n\n---\n\n' + systemPrompt
+
+  // F046: Inject other agents' recent messages for visibility
+  if (agent && currentSessionId && clawDir) {
+    try {
+      const session = sessionStore.loadSession(clawDir, currentSessionId)
+      if (session?.messages?.length) {
+        const otherMsgs = session.messages
+          .filter(m => m.role === 'assistant' && m.sender && m.sender !== agent.name)
+          .slice(-10)
+          .map(m => `[Teammate ${m.sender}]: ${(m.content || '').slice(0, 200)}`)
+        if (otherMsgs.length) {
+          systemPrompt += '\n\n---\n\n## Teammate Context\n' + otherMsgs.join('\n')
+        }
+      }
+    } catch {}
+  }
 
   // Build messages
   const messages = []

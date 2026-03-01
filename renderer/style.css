@@ -371,3 +371,8 @@ button:hover { background: #2a2a2a; }
 .task-item .task-assignee { color: #666; font-size: 11px; }
 .task-item.done { color: #555; text-decoration: line-through; }
 .task-item.in-progress { color: #fbbf24; }
+
+/* Agent-to-agent messages */
+.msg-card.agent-to-agent { opacity: 0.85; border-left: 2px solid #555; margin-left: 16px; }
+.a2a-name { color: #888; font-style: italic; }
+.a2a-content { color: #aaa; }

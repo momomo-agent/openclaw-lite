@@ -445,6 +445,8 @@ function addCard(role, content, sender, rawHtml) {
 
   if (role === 'error') {
     card.innerHTML = `<div class="msg-avatar">⚠️</div><div class="msg-body"><div class="msg-content" style="color:#ef4444">${esc(content)}</div></div>`
+  } else if (role === 'agent-to-agent') {
+    card.innerHTML = `<div class="msg-avatar">💬</div><div class="msg-body"><div class="msg-header"><span class="msg-name a2a-name">${esc(sender||'Agent')}</span><span class="msg-time">${time}</span></div><div class="msg-content md-content a2a-content">${marked.parse(content||'')}</div></div>`
   } else if (role === 'user') {
     const body = rawHtml ? content : esc(content)
     card.innerHTML = `<div class="msg-avatar">${avatar}</div><div class="msg-body"><div class="msg-header"><span class="${nameClass}">${esc(sender||'You')}</span><span class="msg-time">${time}</span></div><div class="msg-content">${body}</div></div>`
@@ -691,6 +693,12 @@ function toggleTaskBar() {
 
 window.api.onTasksChanged((sid) => {
   if (sid === currentSessionId) refreshTaskBar()
+})
+
+window.api.onAgentMessage(({ from, to, message, sessionId }) => {
+  if (sessionId === currentSessionId) {
+    addCard('agent-to-agent', message, `${from} → ${to}`)
+  }
 })
 
 // Init
