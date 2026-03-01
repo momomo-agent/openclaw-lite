@@ -43,6 +43,7 @@ Electron Renderer
 
 ```
 □ node --check main.js（语法校验，M9 教训）
+□ 新增目录/文件 → 检查 package.json build.files 是否包含（M17 教训：tools/ skills/ 漏打包导致 v0.18.0 crash）
 □ node .ai/dbb/dbb-test.js（DBB 6/6）
 □ E2E 对话验证（CDP 9224）
 □ agent-control --pid 截图 + 目视确认
@@ -51,7 +52,7 @@ Electron Renderer
 □ growth.md 写本轮记录
 ```
 
-### M8/M9 教训（已发生，不可再犯）
+### M8/M9/M17 教训（已发生，不可再犯）
 
 1. **一次只做一个 feature** — M8 塞了 5 个 feature 一起做，跳过了 PLAN，没有逐个验证
 2. **Edit 匹配唯一性** — main.js 有两处 `return { answer: fullText }`，Edit 报错。用更长上下文或先 Read 确认行号
@@ -59,6 +60,8 @@ Electron Renderer
 4. **node --check 是最后防线** — 语法错误应该在 commit 前被拦住，不是等 E2E 启动失败才发现
 5. **growth.md 实时写** — 做完就记，不攒着事后补
 6. **DBB 不能只跑脚本** — 必须截图 + taste.md 对照，自动化测试只验功能不验体验
+7. **新增目录必须加 build.files** — v0.18.0 加了 tools/ 和 skills/ 但没加到 package.json build.files，asar 打包不包含，导致生产环境 crash（Cannot find module './tools'）。node --check 在源码目录能过，但打包后找不到模块
+8. **发布前必须启动测试打包产物** — 不是测试源码 `npm start`，是测试 `dist/` 里的 .app，两者区别是 asar 打包
 
 ## 约束（已解除）
 - ~~MVP 不做：cron/heartbeat~~ → M8 已实现
