@@ -503,6 +503,23 @@ async function executeTool(name, input, config) {
       })
       if (result?.error) return `Error: ${result.error}`
       if (mainWindow) mainWindow.webContents.send('tasks-changed', currentSessionId)
+      // F048: Auto-rotation — when a task is done, check for unblocked tasks
+      if (input.status === 'done' && mainWindow) {
+        const allTasks = sessionStore.listTasks(clawDir, currentSessionId)
+        const justDoneId = input.taskId
+        const unblocked = allTasks.find(t =>
+          t.status === 'pending' && t.dependsOn?.includes(justDoneId) &&
+          t.dependsOn.every(dep => allTasks.find(d => d.id === dep)?.status === 'done')
+        )
+        if (unblocked) {
+          mainWindow.webContents.send('auto-rotate', {
+            sessionId: currentSessionId,
+            completedTask: justDoneId,
+            completedBy: currentAgentName,
+            nextTask: unblocked
+          })
+        }
+      }
       return JSON.stringify(result)
     }
     case 'task_list': {

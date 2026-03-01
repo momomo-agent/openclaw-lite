@@ -701,5 +701,26 @@ window.api.onAgentMessage(({ from, to, message, sessionId }) => {
   }
 })
 
+window.api.onAutoRotate(async ({ sessionId, completedBy, nextTask }) => {
+  if (sessionId !== currentSessionId) return
+  const agents = await window.api.listAgents()
+  // Find agent assigned to next task, or first available
+  const targetAgent = nextTask.assignee
+    ? agents.find(a => a.name === nextTask.assignee)
+    : agents[0]
+  if (!targetAgent) return
+  const sysMsg = `Task "${nextTask.title}" is now unblocked (completed by ${completedBy}). Please claim and work on it.`
+  addCard('agent-to-agent', sysMsg, `System → ${targetAgent.name}`)
+  // Auto-trigger the agent
+  const history = []
+  const s = await window.api.loadSession(currentSessionId)
+  if (s?.messages) {
+    for (let i = 0; i < s.messages.length - 1; i += 2) {
+      if (s.messages[i+1]) history.push({ prompt: s.messages[i].content, answer: s.messages[i+1].content })
+    }
+  }
+  await window.api.chat({ prompt: sysMsg, history, agentId: targetAgent.id, files: [] })
+})
+
 // Init
 init()
