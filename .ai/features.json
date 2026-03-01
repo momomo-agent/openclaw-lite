@@ -306,5 +306,33 @@
     "description": "Agent 管理面板 — 卡片化+创建编辑优化",
     "passes": true,
     "milestone": "M15"
+  },
+  {
+    "id": "F045",
+    "category": "multi",
+    "description": "共享 Task List — session 级任务清单，pending/in-progress/done + 依赖",
+    "passes": false,
+    "milestone": "M16"
+  },
+  {
+    "id": "F046",
+    "category": "multi",
+    "description": "Agent 间可见 — 注入其他 agent 近期消息作为上下文",
+    "passes": false,
+    "milestone": "M16"
+  },
+  {
+    "id": "F047",
+    "category": "multi",
+    "description": "Agent 间直接通信 — send_message 工具 + 防循环",
+    "passes": false,
+    "milestone": "M16"
+  },
+  {
+    "id": "F048",
+    "category": "multi",
+    "description": "自动轮转 — task 完成后自动触发下一个 unblocked agent",
+    "passes": false,
+    "milestone": "M16"
   }
 ]
