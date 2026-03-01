@@ -1,10 +1,8 @@
 {
-  "currentFeature": "F016",
-  "phase": "blocked — release.sh 签名流程待修复",
-  "lastCommit": "edc8080 fix: include tray assets in build (v0.12.1)",
-  "version": "0.12.1",
-  "blockers": [
-    "release.sh 的 codesign --deep 不够稳，DMG 结构需修正，缺验证步骤"
-  ],
-  "nextUp": "F016 签名流程修好 → F017-F021 体验打磨 → F022 架构拆分"
+  "currentMilestone": "M15",
+  "currentFeature": "F041",
+  "phase": "do",
+  "version": "0.15.0",
+  "lastUpdate": "2026-03-01",
+  "completedMilestones": ["M1","M2","M3","M5","M6","M7","M8","M9","M10","M11","M12","M13","M14"]
 }

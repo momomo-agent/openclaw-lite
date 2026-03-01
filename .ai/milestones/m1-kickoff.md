@@ -1,29 +1,22 @@
-# M1 Kickoff — 工程基础 + 发布流程
+# M1 Kickoff — 骨架可用
 
 ## 一句话目标
-
-Paw 能稳定构建、签名、公证、发布，开发流程有门禁，代码可维护。
+选两个目录，配好 API key，能对话，能用工具。
 
 ## 核心需求（不能砍）
-
-- REQ-M1-01: release.sh 一键发版流程稳定可重复（签名 + 公证 + 验证 + GitHub Release）
-- REQ-M1-02: main.js 拆分模块，职责清晰
-- REQ-M1-03: 基础测试覆盖（工具执行 + session CRUD）
-- REQ-M1-04: 体验打磨（空状态、错误提示、键盘快捷键）
+- REQ-M1-01: Electron 壳 + 基础窗口
+- REQ-M1-02: 首次启动引导（选数据目录 + 工作区目录）
+- REQ-M1-03: config.json 读写（provider/apiKey/model/baseUrl）
+- REQ-M1-04: System prompt 从两个目录构建
+- REQ-M1-05: 单轮对话（调 LLM，streaming 回显）
+- REQ-M1-06: 多轮对话（带历史）
+- REQ-M1-07: 工具调用（搜索 + 代码执行）
 
 ## 可延后需求
-
-- REQ-M1-05: Markdown 渲染质感提升
-- REQ-M1-06: Session 标题智能生成
+- REQ-M1-08: 文件工具（读写工作区文件）
+- REQ-M1-09: 对话导出 markdown
 
 ## 红线
-
-- 不引入新框架（React/Vue），保持纯 JS
-- 不加云端功能
-- 每次发版必须签名 + 公证，不发未签名的 DMG
-
-## 追求标准
-
-- 好体验：打开不崩、操作流畅、错误有提示
-- 好品位：深色主题层次分明，交互克制
-- 好技术：模块清晰、有测试、发布自动化
+- 不引入前端框架（React/Vue），纯 HTML/CSS/JS
+- 不做服务端，所有逻辑在 Electron main process
+- 兼容 OpenClaw 目录结构，不发明新格式
