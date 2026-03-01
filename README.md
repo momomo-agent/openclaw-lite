@@ -10,14 +10,18 @@ A desktop app that turns any folder into an AI workspace. Compatible with OpenCl
 
 - **One Folder = One Workspace** — config, skills, memory, sessions, all in one directory
 - **Multi-Agent Chat** — create agents with custom personalities, @mention to target
-- **8 Built-in Tools** — search, code exec, file I/O, shell, notifications, skill exec, Watson status
+- **Agent Team Collaboration** — shared task list, inter-agent messaging, auto-rotation
+- **Pluggable Tool System** — unified registry, easy to add new tools
+- **Smart Skills** — frontmatter metadata (always/requires/os/primaryEnv), auto-install dependencies
+- **8+ Built-in Tools** — search, code exec, file I/O, shell, notifications, skill exec, skill install
+- **API Key Rotation** — auto-switch on rate limits, multi-key support
 - **AI-Native Menubar** — tray icon with real-time status, right-click menu for quick actions
 - **Per-Card Status** — each response has its own status line, updated by the LLM in real-time
 - **Event Bus Architecture** — requestId-based routing, no cross-talk between conversations
 - **Tool Steps** — live tool execution view, auto-collapse on completion, manual toggle
 - **Heartbeat** — configurable periodic check-ins, background agent work
-- **Memory Sync** — shared memory/ directory with real-time file watching
-- **Skills & OpenClaw** — SKILL.md injection + script execution
+- **Memory Sync** — shared memory/ directory with real-time file watching + semantic search
+- **Skills & OpenClaw** — SKILL.md injection + script execution + dependency management
 - **Multi-Window** — Cmd+Shift+N for independent workspaces
 - **Multi-Provider** — Anthropic + OpenAI compatible
 
@@ -47,7 +51,17 @@ Or download the signed DMG from [Releases](https://github.com/momomo-agent/paw/r
 └── skills/          # capabilities (inject + execute)
 ```
 
-## v0.12.1 Changelog
+## v0.18.0 Changelog
+
+**M17: Skill Enhancement**
+- Tool registration system — unified registry for pluggable tools
+- Skill frontmatter parsing — YAML metadata (always/requires/os/primaryEnv/emoji)
+- Skill path compression — save ~500 tokens with ~/... paths
+- Environment variable injection — auto-inject from config.skillEnv
+- Skill installation management — brew/npm/go/uv support with approval
+- API key rotation — auto-switch on 429 rate limits
+
+**Previous:**
 
 - **Fix: crash on launch** — tray icon assets not included in build, causing immediate SIGTRAP crash
 - **Defensive tray init** — graceful fallback when tray icon file is missing

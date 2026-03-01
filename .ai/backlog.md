@@ -4,14 +4,7 @@
 
 ## 待分配（Backlog）
 
-| # | 需求 | 来源 | 优先级 | 状态 |
-|---|------|------|--------|------|
-| B026 | 工具注册插件化 | kenefe | P1 | ⏳ 待做 |
-| B027 | API key rotation | kenefe | P1 | ⏳ 待做 |
-| B028 | Skill 环境变量注入 | kenefe | P1 | ⏳ 待做 |
-| B029 | Skill frontmatter 解析 | kenefe | P1 | ⏳ 待做 |
-| B030 | Skill 一键安装 | kenefe | P2 | ⏳ 待做 |
-| B031 | Skill prompt 路径压缩 | kenefe | P2 | ⏳ 待做 |
+*(所有 backlog 项目已完成)*
 
 ## 已完成（✅ 已分配到里程碑）
 
@@ -41,6 +34,12 @@
 | B023 | cron 工具 | kenefe | P1 | M15 |
 | B024 | context compaction | kenefe | P0 | M15 |
 | B025 | exec approval | kenefe | P0 | M15 |
+| B026 | 工具注册插件化 | kenefe | P1 | M17 |
+| B027 | API key rotation | kenefe | P1 | M17 |
+| B028 | Skill 环境变量注入 | kenefe | P1 | M17 |
+| B029 | Skill frontmatter 解析 | kenefe | P1 | M17 |
+| B030 | Skill 一键安装 | kenefe | P2 | M17 |
+| B031 | Skill prompt 路径压缩 | kenefe | P2 | M17 |
 | B032 | 真正的 Multi-Agent（Agent Team） | kenefe | P0 | M16 |
 | B033 | 设置面板重构 | kenefe | P1 | M15 |
 | B034 | Agent 管理面板重构 | kenefe | P1 | M15 |
