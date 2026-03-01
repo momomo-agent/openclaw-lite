@@ -54,6 +54,86 @@ async function extractLinkContext(text, maxLinks = 3, timeoutMs = 5000) {
 
 // ── Memory watcher ──
 let memoryDebounce = null
+
+// ── Context Compaction ──
+const COMPACT_THRESHOLD = 80000 // ~80k tokens trigger compaction
+const COMPACT_KEEP_RECENT = 4  // keep last N message pairs intact
+
+function estimateTokens(text) {
+  if (!text) return 0
+  if (typeof text === 'string') return Math.ceil(text.length / 3.5)
+  if (Array.isArray(text)) return text.reduce((s, c) => s + estimateTokens(c.text || ''), 0)
+  return 0
+}
+
+function estimateMessagesTokens(messages) {
+  return messages.reduce((s, m) => s + estimateTokens(m.content) + 10, 0)
+}
+
+async function compactHistory(messages, config) {
+  // Split: old messages to summarize, recent to keep
+  const keepCount = COMPACT_KEEP_RECENT * 2 // pairs
+  if (messages.length <= keepCount + 2) return messages // too short to compact
+
+  const toSummarize = messages.slice(0, messages.length - keepCount)
+  const toKeep = messages.slice(messages.length - keepCount)
+
+  // Build summary prompt
+  const transcript = toSummarize.map(m => `[${m.role}]: ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`).join('\n').slice(0, 30000)
+
+  const summaryPrompt = `Summarize this conversation concisely. Preserve: key decisions, TODOs, open questions, user preferences, file paths mentioned, and current task context. Output in the same language as the conversation.\n\n${transcript}`
+
+  try {
+    const provider = config.provider || 'anthropic'
+    const fn = provider === 'anthropic' ? streamAnthropicRaw : streamOpenAIRaw
+    const summary = await fn([{ role: 'user', content: summaryPrompt }], 'You are a conversation summarizer. Be concise but preserve all important context.', config)
+
+    const compactedMessages = [
+      { role: 'user', content: '[Previous conversation summary]' },
+      { role: 'assistant', content: summary || 'No prior context.' },
+      ...toKeep
+    ]
+    console.log(`[compaction] ${messages.length} msgs → ${compactedMessages.length} msgs (summarized ${toSummarize.length} msgs)`)
+    return compactedMessages
+  } catch (e) {
+    console.warn('[compaction] Failed, using truncation fallback:', e.message)
+    // Fallback: just keep recent messages
+    return [
+      { role: 'user', content: '[Earlier conversation was truncated due to length]' },
+      { role: 'assistant', content: 'Understood. I\'ll continue from the recent context.' },
+      ...toKeep
+    ]
+  }
+}
+
+// Raw API calls for compaction (no streaming to UI)
+async function streamAnthropicRaw(messages, system, config) {
+  const base = (config.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '')
+  const endpoint = base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': config.apiKey, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({ model: config.model || 'claude-sonnet-4-20250514', max_tokens: 2048, system, messages }),
+    signal: AbortSignal.timeout(30000),
+  })
+  if (!res.ok) throw new Error(`API ${res.status}`)
+  const data = await res.json()
+  return (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('')
+}
+
+async function streamOpenAIRaw(messages, system, config) {
+  const base = (config.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '')
+  const res = await fetch(`${base}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` },
+    body: JSON.stringify({ model: config.model || 'gpt-4o', max_tokens: 2048, messages: [{ role: 'system', content: system }, ...messages] }),
+    signal: AbortSignal.timeout(30000),
+  })
+  if (!res.ok) throw new Error(`API ${res.status}`)
+  const data = await res.json()
+  return data.choices?.[0]?.message?.content || ''
+}
+
 // ── Background memory indexing ──
 async function buildMemoryIndex() {
   if (!clawDir) return
@@ -262,9 +342,44 @@ async function executeTool(name, input, config) {
     }
     case 'shell_exec': {
       if (!clawDir) return 'Error: No claw directory'
+      const cmd = (input.command || '').trim()
+      // Dangerous command detection
+      const DANGEROUS_PATTERNS = [
+        /\brm\s+(-[a-zA-Z]*f|-[a-zA-Z]*r|--force|--recursive)/i,
+        /\brm\s+-rf\b/i,
+        /\bsudo\b/i,
+        /\bkill\s+-9\b/i,
+        /\bkillall\b/i,
+        /\bmkfs\b/i,
+        /\bdd\s+if=/i,
+        /\bchmod\s+777\b/i,
+        /\b>\s*\/dev\//i,
+        /\bcurl\b.*\|\s*(ba)?sh/i,
+        /\bwget\b.*\|\s*(ba)?sh/i,
+      ]
+      const SAFE_COMMANDS = /^(ls|cat|echo|pwd|whoami|date|head|tail|wc|grep|find|which|file|stat|du|df|uname|env|printenv|git\s+(status|log|diff|branch|remote|show))\b/
+      const isDangerous = !SAFE_COMMANDS.test(cmd) && DANGEROUS_PATTERNS.some(p => p.test(cmd))
+      // Check config for exec approval setting
+      let execApprovalEnabled = true
+      try { const cfg = JSON.parse(fs.readFileSync(configPath(), 'utf8')); execApprovalEnabled = cfg.execApproval !== false } catch {}
+      if (isDangerous && execApprovalEnabled && mainWindow) {
+        const approved = await new Promise(resolve => {
+          const { dialog } = require('electron')
+          dialog.showMessageBox(mainWindow, {
+            type: 'warning',
+            title: 'Exec Approval',
+            message: `AI wants to run a potentially dangerous command:`,
+            detail: cmd,
+            buttons: ['Deny', 'Allow'],
+            defaultId: 0,
+            cancelId: 0,
+          }).then(r => resolve(r.response === 1))
+        })
+        if (!approved) return 'Error: Command denied by user'
+      }
       const { execSync } = require('child_process')
       try {
-        const out = execSync(input.command, { cwd: clawDir, timeout: 30000, maxBuffer: 1024 * 512, encoding: 'utf8' })
+        const out = execSync(cmd, { cwd: clawDir, timeout: 30000, maxBuffer: 1024 * 512, encoding: 'utf8' })
         return out.slice(0, 5000) || '(no output)'
       } catch (e) { return `Error: ${e.stderr || e.message}`.slice(0, 2000) }
     }
@@ -677,10 +792,19 @@ ipcMain.handle('chat', async (_, { prompt, history, agentId, files }) => {
   userContent.push({ type: 'text', text: textWithContext || '(attached files)' })
   messages.push({ role: 'user', content: userContent })
 
+  // Context compaction — auto-compress if history too long
+  const totalTokens = estimateMessagesTokens(messages)
+  let finalMessages = messages
+  if (totalTokens > COMPACT_THRESHOLD && messages.length > COMPACT_KEEP_RECENT * 2 + 2) {
+    console.log(`[compaction] ${totalTokens} tokens exceeds threshold ${COMPACT_THRESHOLD}, compacting...`)
+    mainWindow?.webContents.send('chat-status', { text: '压缩历史对话...', requestId })
+    finalMessages = await compactHistory(messages, { apiKey, baseUrl, model, provider })
+  }
+
   if (provider === 'anthropic') {
-    return await streamAnthropic(messages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow, requestId)
+    return await streamAnthropic(finalMessages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow, requestId)
   } else {
-    return await streamOpenAI(messages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow, requestId)
+    return await streamOpenAI(finalMessages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow, requestId)
   }
 })
 

@@ -62,34 +62,56 @@
 
   <!-- Settings overlay -->
   <div id="settingsOverlay" class="overlay" style="display:none" onclick="if(event.target===this)closeSettings()">
-    <div class="settings-panel">
+    <div class="settings-panel settings-wide">
       <div class="settings-header">
         <span>Settings</span>
         <button class="icon-btn" onclick="closeSettings()">✕</button>
       </div>
-      <div class="settings-body">
-        <label>Provider</label>
-        <select id="cfgProvider">
-          <option value="anthropic">Anthropic</option>
-          <option value="openai">OpenAI</option>
-        </select>
-        <label>API Key</label>
-        <input id="cfgApiKey" type="password" placeholder="sk-...">
-        <label>Base URL <span class="hint">(optional)</span></label>
-        <input id="cfgBaseUrl" type="text" placeholder="https://api.anthropic.com">
-        <label>Model <span class="hint">(optional)</span></label>
-        <input id="cfgModel" type="text" placeholder="claude-sonnet-4-20250514">
-        <label>Tavily API Key <span class="hint">(for search tool)</span></label>
-        <input id="cfgTavilyKey" type="password" placeholder="tvly-...">
-        <hr style="border-color:#222;margin:12px 0">
-        <label style="display:flex;align-items:center;gap:8px">
-          <input type="checkbox" id="cfgHeartbeat"> Enable Heartbeat
-          <span class="hint">(agent checks in periodically)</span>
-        </label>
-        <label>Interval (minutes)</label>
-        <input id="cfgHeartbeatInterval" type="number" value="30" min="1" max="1440" style="width:80px">
-        <button class="primary-btn" onclick="saveSettings()">Save</button>
-        <button class="primary-btn" style="background:#1a1a1a;color:#ccc;margin-top:4px" onclick="window.api.openClawDir()">Open Workspace in Finder</button>
+      <div class="settings-body settings-tabbed">
+        <div class="settings-tabs">
+          <button class="settings-tab active" data-tab="general" onclick="switchSettingsTab('general')">General</button>
+          <button class="settings-tab" data-tab="model" onclick="switchSettingsTab('model')">Model</button>
+          <button class="settings-tab" data-tab="tools" onclick="switchSettingsTab('tools')">Tools</button>
+          <button class="settings-tab" data-tab="heartbeat" onclick="switchSettingsTab('heartbeat')">Heartbeat</button>
+        </div>
+        <div class="settings-content">
+          <!-- General tab -->
+          <div class="settings-tab-content active" id="tab-general">
+            <label>Provider</label>
+            <select id="cfgProvider">
+              <option value="anthropic">Anthropic</option>
+              <option value="openai">OpenAI</option>
+            </select>
+            <label>API Key</label>
+            <input id="cfgApiKey" type="password" placeholder="sk-...">
+            <label>Base URL <span class="hint">(optional)</span></label>
+            <input id="cfgBaseUrl" type="text" placeholder="https://api.anthropic.com">
+            <button class="secondary-btn" onclick="window.api.openClawDir()">Open Workspace in Finder</button>
+          </div>
+          <!-- Model tab -->
+          <div class="settings-tab-content" id="tab-model">
+            <label>Model</label>
+            <input id="cfgModel" type="text" placeholder="claude-sonnet-4-20250514">
+            <p class="hint" style="margin:8px 0">Leave empty to use provider default.</p>
+          </div>
+          <!-- Tools tab -->
+          <div class="settings-tab-content" id="tab-tools">
+            <label>Tavily API Key <span class="hint">(for web search)</span></label>
+            <input id="cfgTavilyKey" type="password" placeholder="tvly-...">
+            <label style="margin-top:12px">Exec Approval</label>
+            <label class="toggle-label"><input type="checkbox" id="cfgExecApproval" checked> Require approval for dangerous commands</label>
+          </div>
+          <!-- Heartbeat tab -->
+          <div class="settings-tab-content" id="tab-heartbeat">
+            <label class="toggle-label"><input type="checkbox" id="cfgHeartbeat"> Enable Heartbeat</label>
+            <p class="hint" style="margin:4px 0 12px">Agent checks in periodically to do background work.</p>
+            <label>Interval (minutes)</label>
+            <input id="cfgHeartbeatInterval" type="number" value="30" min="1" max="1440" style="width:100px">
+          </div>
+        </div>
+        <div class="settings-footer">
+          <button class="primary-btn" onclick="saveSettings()">Save</button>
+        </div>
       </div>
     </div>
   </div>
@@ -115,21 +137,26 @@
 
   <!-- Agent manager -->
   <div id="agentManagerOverlay" class="overlay" style="display:none" onclick="if(event.target===this)closeAgentManager()">
-    <div class="settings-panel">
+    <div class="settings-panel settings-wide">
       <div class="settings-header">
         <span>Agents</span>
         <button class="icon-btn" onclick="closeAgentManager()">✕</button>
       </div>
       <div class="settings-body">
-        <div id="agentList"></div>
-        <hr style="border-color:#1a1a1a;margin:8px 0">
-        <label>Name</label>
-        <input id="newAgentName" type="text" placeholder="Agent name">
-        <label>Soul (system prompt)</label>
-        <textarea id="newAgentSoul" rows="3" style="background:#0a0a0a;border:1px solid #222;border-radius:6px;color:#e0e0e0;padding:8px;font-size:13px;font-family:inherit;resize:vertical"></textarea>
-        <label>Model <span class="hint">(optional override)</span></label>
-        <input id="newAgentModel" type="text" placeholder="claude-sonnet-4-20250514">
-        <button class="primary-btn" onclick="createNewAgent()">Create Agent</button>
+        <div id="agentList" class="agent-grid"></div>
+        <hr style="border-color:#1a1a1a;margin:12px 0">
+        <details class="agent-create-section">
+          <summary>Create New Agent</summary>
+          <div style="margin-top:8px">
+            <label>Name</label>
+            <input id="newAgentName" type="text" placeholder="Agent name">
+            <label>Soul (system prompt)</label>
+            <textarea id="newAgentSoul" rows="4" class="agent-soul-input"></textarea>
+            <label>Model <span class="hint">(optional override)</span></label>
+            <input id="newAgentModel" type="text" placeholder="claude-sonnet-4-20250514">
+            <button class="primary-btn" style="margin-top:8px" onclick="createNewAgent()">Create Agent</button>
+          </div>
+        </details>
       </div>
     </div>
   </div>

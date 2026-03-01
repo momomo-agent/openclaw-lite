@@ -527,11 +527,18 @@ async function openSettings() {
   document.getElementById('cfgTavilyKey').value = config.tavilyKey || ''
   document.getElementById('cfgHeartbeat').checked = config.heartbeat?.enabled || false
   document.getElementById('cfgHeartbeatInterval').value = config.heartbeat?.intervalMinutes || 30
+  document.getElementById('cfgExecApproval').checked = config.execApproval !== false
+  switchSettingsTab('general')
   document.getElementById('settingsOverlay').style.display = 'flex'
 }
 
 function closeSettings() {
   document.getElementById('settingsOverlay').style.display = 'none'
+}
+
+function switchSettingsTab(tabName) {
+  document.querySelectorAll('.settings-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName))
+  document.querySelectorAll('.settings-tab-content').forEach(c => c.classList.toggle('active', c.id === `tab-${tabName}`))
 }
 
 async function saveSettings() {
@@ -541,6 +548,7 @@ async function saveSettings() {
     baseUrl: document.getElementById('cfgBaseUrl').value || undefined,
     model: document.getElementById('cfgModel').value || undefined,
     tavilyKey: document.getElementById('cfgTavilyKey').value || undefined,
+    execApproval: document.getElementById('cfgExecApproval').checked,
     heartbeat: {
       enabled: document.getElementById('cfgHeartbeat').checked,
       intervalMinutes: parseInt(document.getElementById('cfgHeartbeatInterval').value) || 30,
@@ -610,9 +618,23 @@ async function refreshAgentList() {
   list.innerHTML = ''
   for (const a of agents) {
     const el = document.createElement('div')
-    el.className = 'agent-item'
-    el.innerHTML = `<span>🤖 ${esc(a.name)}</span><span class="del-btn" onclick="deleteAgent('${a.id}')">✕</span>`
+    el.className = 'agent-card'
+    const initial = (a.name || '?')[0].toUpperCase()
+    const soulPreview = (a.soul || '').replace(/\n/g, ' ').slice(0, 60)
+    el.innerHTML = `
+      <div class="agent-avatar">${initial}</div>
+      <div class="agent-info">
+        <div class="agent-name">${esc(a.name)}</div>
+        <div class="agent-model">${esc(a.model || 'default model')}</div>
+        ${soulPreview ? `<div class="agent-soul-preview">${esc(soulPreview)}…</div>` : ''}
+      </div>
+      <div class="agent-actions">
+        <button onclick="deleteAgent('${a.id}')" title="Delete">✕</button>
+      </div>`
     list.appendChild(el)
+  }
+  if (!agents.length) {
+    list.innerHTML = '<p style="color:#555;font-size:13px;text-align:center;padding:16px">No agents yet. Create one below.</p>'
   }
 }
 

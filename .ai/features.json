@@ -38,5 +38,9 @@
   {"id":"F037","category":"core","description":"内部状态统一到 .paw/（config.json 迁移）","passes":false,"milestone":"M14"},
   {"id":"F038","category":"ecosystem","description":"Embedding memory search（node-llama-cpp + FTS5 hybrid + sqlite-vec）","passes":false,"milestone":"M14"},
   {"id":"F039","category":"core","description":"web_fetch 工具（URL→markdown）","passes":false,"milestone":"M14"},
-  {"id":"F040","category":"ux","description":"link-understanding 消息预处理（自动抓取链接摘要）","passes":false,"milestone":"M14"}
+  {"id":"F040","category":"ux","description":"link-understanding 消息预处理（自动抓取链接摘要）","passes":false,"milestone":"M14"},
+  {"id":"F041","category":"core","description":"Context compaction — 对话超长时自动摘要压缩历史","passes":false,"milestone":"M15"},
+  {"id":"F042","category":"core","description":"Exec approval — 危险命令弹确认框","passes":false,"milestone":"M15"},
+  {"id":"F043","category":"ux","description":"设置面板重构 — 抽屉式分类布局","passes":false,"milestone":"M15"},
+  {"id":"F044","category":"ux","description":"Agent 管理面板 — 卡片化+创建编辑优化","passes":false,"milestone":"M15"}
 ]
