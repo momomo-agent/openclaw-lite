@@ -4,6 +4,7 @@ const fs = require('fs')
 const vm = require('vm')
 const { spawn } = require('child_process')
 const memoryIndex = require('./memory-index')
+const { getTool, getAnthropicTools, getToolsPrompt } = require('./tools')
 
 let mainWindow
 let clawDir = null
@@ -210,68 +211,47 @@ function createAgent(name, soul, model) {
 }
 
 // ── Tool definitions ──
-const TOOLS = [
-  {
-    name: 'search', description: 'Search the web using Tavily',
-    input_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] }
-  },
-  {
-    name: 'code_exec', description: 'Execute JavaScript code locally',
-    input_schema: { type: 'object', properties: { code: { type: 'string' } }, required: ['code'] }
-  },
-  {
-    name: 'file_read', description: 'Read a file from the Claw directory',
-    input_schema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] }
-  },
-  {
-    name: 'file_write', description: 'Write content to a file in the Claw directory',
-    input_schema: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] }
-  },
-  {
-    name: 'shell_exec', description: 'Execute a shell command in the Claw directory',
-    input_schema: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] }
-  },
-  {
-    name: 'notify', description: 'Send a system notification to the user',
-    input_schema: { type: 'object', properties: { title: { type: 'string' }, body: { type: 'string' } }, required: ['body'] }
-  },
-  {
-    name: 'ui_status_set', description: 'Set Watson status (sidebar glanceable status line). Use 4-20 Chinese chars.',
-    input_schema: { type: 'object', properties: { level: { type: 'string', enum: ['idle','thinking','running','need_you','done'] }, text: { type: 'string' } }, required: ['level','text'] }
-  },
-  {
-    name: 'skill_exec', description: 'Execute a skill script from the skills/ directory',
-    input_schema: { type: 'object', properties: { skill: { type: 'string', description: 'Skill directory name' }, command: { type: 'string', description: 'Command to run inside the skill directory' } }, required: ['skill','command'] }
-  },
-  {
-    name: 'memory_search', description: 'Semantically search MEMORY.md + memory/*.md. Use before answering questions about prior work, decisions, dates, people, preferences, or todos.',
-    input_schema: { type: 'object', properties: { query: { type: 'string' }, maxResults: { type: 'number' }, minScore: { type: 'number' } }, required: ['query'] }
-  },
-  {
-    name: 'memory_get', description: 'Read a snippet from MEMORY.md or memory/*.md with optional line range. Use after memory_search to pull needed lines.',
-    input_schema: { type: 'object', properties: { path: { type: 'string' }, from: { type: 'number', description: 'Start line (1-indexed)' }, lines: { type: 'number', description: 'Number of lines to read' } }, required: ['path'] }
-  },
-  {
-    name: 'web_fetch', description: 'Fetch and extract readable content from a URL (HTML → markdown). Use for lightweight page access.',
-    input_schema: { type: 'object', properties: { url: { type: 'string', description: 'HTTP or HTTPS URL to fetch' }, maxChars: { type: 'number', description: 'Max characters to return (default 50000)' } }, required: ['url'] }
-  },
-  {
-    name: 'task_create', description: 'Create a task in the shared task list. Use for coordinating multi-agent work.',
-    input_schema: { type: 'object', properties: { title: { type: 'string' }, dependsOn: { type: 'array', items: { type: 'string' }, description: 'Task IDs this depends on' } }, required: ['title'] }
-  },
-  {
-    name: 'task_update', description: 'Update a task status: claim (pending→in-progress) or complete (in-progress→done).',
-    input_schema: { type: 'object', properties: { taskId: { type: 'string' }, status: { type: 'string', enum: ['in-progress','done'] }, assignee: { type: 'string', description: 'Agent name claiming the task' } }, required: ['taskId','status'] }
-  },
-  {
-    name: 'task_list', description: 'List all tasks in the current session.',
-    input_schema: { type: 'object', properties: {} }
-  },
-  {
-    name: 'send_message', description: 'Send a message to another agent in this session. Only available in multi-agent sessions.',
-    input_schema: { type: 'object', properties: { targetAgent: { type: 'string', description: 'Name of the target agent' }, message: { type: 'string' } }, required: ['targetAgent','message'] }
-  },
-]
+// Build Anthropic tools array (registry + built-in)
+function getAnthropicToolsArray() {
+  const registryTools = getAnthropicTools();
+  const builtInTools = [
+    {
+      name: 'notify', description: 'Send a system notification to the user',
+      input_schema: { type: 'object', properties: { title: { type: 'string' }, body: { type: 'string' } }, required: ['body'] }
+    },
+    {
+      name: 'ui_status_set', description: 'Set Watson status (sidebar glanceable status line). Use 4-20 Chinese chars.',
+      input_schema: { type: 'object', properties: { level: { type: 'string', enum: ['idle','thinking','running','need_you','done'] }, text: { type: 'string' } }, required: ['level','text'] }
+    },
+    {
+      name: 'memory_search', description: 'Semantically search MEMORY.md + memory/*.md. Use before answering questions about prior work, decisions, dates, people, preferences, or todos.',
+      input_schema: { type: 'object', properties: { query: { type: 'string' }, maxResults: { type: 'number' }, minScore: { type: 'number' } }, required: ['query'] }
+    },
+    {
+      name: 'memory_get', description: 'Read a snippet from MEMORY.md or memory/*.md with optional line range. Use after memory_search to pull needed lines.',
+      input_schema: { type: 'object', properties: { path: { type: 'string' }, from: { type: 'number', description: 'Start line (1-indexed)' }, lines: { type: 'number', description: 'Number of lines to read' } }, required: ['path'] }
+    },
+    {
+      name: 'task_create', description: 'Create a task in the shared task list. Use for coordinating multi-agent work.',
+      input_schema: { type: 'object', properties: { title: { type: 'string' }, dependsOn: { type: 'array', items: { type: 'string' }, description: 'Task IDs this depends on' } }, required: ['title'] }
+    },
+    {
+      name: 'task_update', description: 'Update a task status: claim (pending→in-progress) or complete (in-progress→done).',
+      input_schema: { type: 'object', properties: { taskId: { type: 'string' }, status: { type: 'string', enum: ['in-progress','done'] }, assignee: { type: 'string', description: 'Agent name claiming the task' } }, required: ['taskId','status'] }
+    },
+    {
+      name: 'task_list', description: 'List all tasks in the current session.',
+      input_schema: { type: 'object', properties: {} }
+    },
+    {
+      name: 'send_message', description: 'Send a message to another agent in this session. Only available in multi-agent sessions.',
+      input_schema: { type: 'object', properties: { targetAgent: { type: 'string', description: 'Name of the target agent' }, message: { type: 'string' } }, required: ['targetAgent','message'] }
+    },
+  ];
+  return [...registryTools, ...builtInTools];
+}
+
+const TOOLS = getAnthropicToolsArray();
 
 // ── Memory Search (keyword-based, upgradable to FTS) ──
 function searchMemoryFiles(dir, query, maxResults) {
@@ -322,84 +302,36 @@ function searchMemoryFiles(dir, query, maxResults) {
 }
 
 async function executeTool(name, input, config) {
-  switch (name) {
-    case 'search': {
-      const key = config?.tavilyKey
-      if (!key) return 'Error: No Tavily API key configured'
-      const res = await fetch('https://api.tavily.com/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: key, query: input.query, max_results: 5 }),
-      })
-      if (!res.ok) return `Search error: ${res.status}`
-      const data = await res.json()
-      return data.results?.map(r => `${r.title}\n${r.url}\n${r.content}`).join('\n\n') || 'No results'
-    }
-    case 'code_exec': {
-      try {
-        const sandbox = { result: undefined, console: { log: (...a) => a.join(' ') } }
-        vm.createContext(sandbox)
-        sandbox.result = vm.runInContext(input.code, sandbox, { timeout: 5000 })
-        return String(sandbox.result)
-      } catch (e) { return `Error: ${e.message}` }
-    }
-    case 'file_read': {
-      if (!clawDir) return 'Error: No claw directory'
-      const p = path.resolve(clawDir, input.path)
-      if (!p.startsWith(clawDir)) return 'Error: Path outside claw directory'
-      try { return fs.readFileSync(p, 'utf8') } catch (e) { return `Error: ${e.message}` }
-    }
-    case 'file_write': {
-      if (!clawDir) return 'Error: No claw directory'
-      const p = path.resolve(clawDir, input.path)
-      if (!p.startsWith(clawDir)) return 'Error: Path outside claw directory'
-      fs.mkdirSync(path.dirname(p), { recursive: true })
-      fs.writeFileSync(p, input.content)
-      return `Written ${input.content.length} bytes to ${input.path}`
-    }
-    case 'shell_exec': {
-      if (!clawDir) return 'Error: No claw directory'
-      const cmd = (input.command || '').trim()
-      // Dangerous command detection
-      const DANGEROUS_PATTERNS = [
-        /\brm\s+(-[a-zA-Z]*f|-[a-zA-Z]*r|--force|--recursive)/i,
-        /\brm\s+-rf\b/i,
-        /\bsudo\b/i,
-        /\bkill\s+-9\b/i,
-        /\bkillall\b/i,
-        /\bmkfs\b/i,
-        /\bdd\s+if=/i,
-        /\bchmod\s+777\b/i,
-        /\b>\s*\/dev\//i,
-        /\bcurl\b.*\|\s*(ba)?sh/i,
-        /\bwget\b.*\|\s*(ba)?sh/i,
-      ]
-      const SAFE_COMMANDS = /^(ls|cat|echo|pwd|whoami|date|head|tail|wc|grep|find|which|file|stat|du|df|uname|env|printenv|git\s+(status|log|diff|branch|remote|show))\b/
-      const isDangerous = !SAFE_COMMANDS.test(cmd) && DANGEROUS_PATTERNS.some(p => p.test(cmd))
-      // Check config for exec approval setting
-      let execApprovalEnabled = true
-      try { const cfg = JSON.parse(fs.readFileSync(configPath(), 'utf8')); execApprovalEnabled = cfg.execApproval !== false } catch {}
-      if (isDangerous && execApprovalEnabled && mainWindow) {
-        const approved = await new Promise(resolve => {
-          const { dialog } = require('electron')
-          dialog.showMessageBox(mainWindow, {
-            type: 'warning',
-            title: 'Exec Approval',
-            message: `AI wants to run a potentially dangerous command:`,
-            detail: cmd,
-            buttons: ['Deny', 'Allow'],
-            defaultId: 0,
-            cancelId: 0,
-          }).then(r => resolve(r.response === 1))
-        })
-        if (!approved) return 'Error: Command denied by user'
+  // Try registry first for pluggable tools
+  const tool = getTool(name);
+  if (tool) {
+    const context = {
+      clawDir,
+      tavilyKey: config?.tavilyKey,
+      approvalCallback: async (request) => {
+        if (!mainWindow) return false;
+        const { dialog } = require('electron');
+        const result = await dialog.showMessageBox(mainWindow, {
+          type: 'warning',
+          title: 'Exec Approval',
+          message: `AI wants to run a potentially dangerous command:`,
+          detail: request.command,
+          buttons: ['Deny', 'Allow'],
+          defaultId: 0,
+          cancelId: 0,
+        });
+        return result.response === 1;
       }
-      const { execSync } = require('child_process')
-      try {
-        const out = execSync(cmd, { cwd: clawDir, timeout: 30000, maxBuffer: 1024 * 512, encoding: 'utf8' })
-        return out.slice(0, 5000) || '(no output)'
-      } catch (e) { return `Error: ${e.stderr || e.message}`.slice(0, 2000) }
+    };
+    try {
+      return await tool.handler(input, context);
+    } catch (error) {
+      return `Error executing ${name}: ${error.message}`;
     }
+  }
+
+  // Fallback to built-in tools that need main.js state
+  switch (name) {
     case 'notify': {
       sendNotification(input.title || 'Paw', input.body)
       return 'Notification sent'
@@ -414,45 +346,6 @@ async function executeTool(name, input, config) {
       }
       pushWatsonStatus(level, text)
       return 'OK'
-    }
-    case 'web_fetch': {
-      const url = (input.url || '').trim()
-      if (!url) return 'Error: url is required'
-      try { const u = new URL(url); if (!['http:', 'https:'].includes(u.protocol)) return 'Error: only http/https allowed' } catch { return 'Error: invalid URL' }
-      const maxChars = input.maxChars || 50000
-      try {
-        const res = await fetch(url, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36' },
-          signal: AbortSignal.timeout(15000),
-          redirect: 'follow',
-        })
-        if (!res.ok) return `Error: HTTP ${res.status} ${res.statusText}`
-        const ct = res.headers.get('content-type') || ''
-        const html = await res.text()
-        if (!ct.includes('html')) return html.slice(0, maxChars)
-        // Extract readable content
-        const { Readability } = require('@mozilla/readability')
-        const { parseHTML } = require('linkedom')
-        const { document } = parseHTML(html.slice(0, 1000000))
-        const reader = new Readability(document)
-        const article = reader.parse()
-        if (article?.textContent) {
-          const title = article.title ? `# ${article.title}\n\n` : ''
-          return (title + article.textContent).slice(0, maxChars)
-        }
-        return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxChars)
-      } catch (e) { return `Error: ${e.message}` }
-    }
-    case 'skill_exec': {
-      if (!clawDir) return 'Error: No claw directory'
-      const skillDir = path.resolve(clawDir, 'skills', input.skill || '')
-      if (!skillDir.startsWith(path.join(clawDir, 'skills'))) return 'Error: Path outside skills directory'
-      if (!fs.existsSync(skillDir)) return `Error: Skill not found: ${input.skill}`
-      const { execSync } = require('child_process')
-      try {
-        const out = execSync(input.command, { cwd: skillDir, timeout: 30000, maxBuffer: 1024 * 512, encoding: 'utf8' })
-        return out.slice(0, 5000) || '(no output)'
-      } catch (e) { return `Error: ${e.stderr || e.message}`.slice(0, 2000) }
     }
     case 'memory_get': {
       if (!clawDir) return 'Error: No claw directory'
@@ -954,19 +847,19 @@ async function buildSystemPrompt() {
   }
   // 6. Memory sync instructions
   parts.push('## Memory Sync\nAll sessions share the same memory/ directory. Write important context to memory/ files (e.g. memory/SHARED.md) so other sessions can see it. Use memory_search to recall prior context before answering questions about past work, decisions, or preferences.')
-  parts.push(`## Tools & Capabilities
-You are running inside Paw, an AI-native desktop app with these tools:
-- **search**: Search the web (Tavily). Use for research, lookups, current info.
-- **file_read**: Read files from the claw directory.
-- **file_write**: Write/create files in the claw directory. USE THIS when the user asks you to create reports, save content, write markdown, etc. Always write the actual file, don't just output text.
-- **shell_exec**: Run shell commands in the claw directory.
-- **code_exec**: Execute JavaScript locally.
-- **notify**: Send a desktop notification.
-- **skill_exec**: Run a skill script.
+  
+  // 7. Tools from registry + built-in tools
+  const toolsPrompt = getToolsPrompt()
+  const builtInTools = `
+**Built-in tools (require main.js state):**
+- **notify**: Send a desktop notification
+- **ui_status_set**: Update the sidebar status line (4-20 Chinese chars)
 - **memory_search**: Search MEMORY.md + memory/*.md by keywords. Use BEFORE answering questions about prior work, decisions, dates, people, preferences, or todos.
 - **memory_get**: Read a snippet from MEMORY.md or memory/*.md with optional line range. Use AFTER memory_search to pull only the needed lines.
-- **web_fetch**: Fetch and extract readable content from a URL (HTML → markdown). Use when you need to read a web page.
-- **ui_status_set**: Update the sidebar status line (4-20 Chinese chars).
+- **task_create**: Create a new task in the shared task list
+- **task_update**: Update task status/assignee
+- **task_list**: List all tasks in current session
+- **send_message**: Send a message to another agent
 
 ### Important Rules
 - When the user asks you to "write", "save", "create a file", or "存成markdown" — you MUST call file_write to actually create the file. Do not just output the content as text.
@@ -974,7 +867,9 @@ You are running inside Paw, an AI-native desktop app with these tools:
 - Use ui_status_set to keep the status updated: at start, before tools, when done.
 - You can chain multiple tools in sequence (up to 5 rounds). For example: search → search → file_write.
 - Before answering questions about past work, decisions, or preferences — call memory_search first.
-- Prefer Chinese for status text. Example: '在撰写报告' or '已保存文件'.`)
+- Prefer Chinese for status text. Example: '在撰写报告' or '已保存文件'.`
+  
+  parts.push(toolsPrompt + '\n' + builtInTools)
 
   // Inject task list summary if any tasks exist
   if (currentSessionId && clawDir) {
