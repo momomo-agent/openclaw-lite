@@ -405,12 +405,12 @@
     "id": "F059",
     "name": "IPC 独立",
     "milestone": "M18",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F060",
     "name": "集成验证",
     "milestone": "M18",
-    "passes": false
+    "passes": true
   }
 ]
