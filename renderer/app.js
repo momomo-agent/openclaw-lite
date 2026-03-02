@@ -9,10 +9,12 @@ function setSessionStatus(sessionId, level, text, aiAuthored = false) {
   // unless it's also AI-authored, or we're going to idle/done
   if (cur?.aiAuthored && !aiAuthored && level !== 'idle' && level !== 'done') return
   sessionStatus.set(sessionId, { level, text, aiAuthored })
-  const dot = document.querySelector(`.session-item[data-id="${sessionId}"] .session-status-dot`)
-  const t = document.querySelector(`.session-item[data-id="${sessionId}"] .session-status-text`)
+  const item = document.querySelector(`.session-item[data-id="${sessionId}"]`)
+  const dot = item?.querySelector('.session-status-dot')
+  const t = item?.querySelector('.session-status-text')
   if (dot) dot.className = `session-status-dot ${level}`
   if (t) t.textContent = text || ''
+  if (item) item.classList.toggle('has-ai-status', aiAuthored && level !== 'idle')
   // Persist to SQLite
   if (window.api.updateSessionStatus) {
     window.api.updateSessionStatus(sessionId, level, text)
@@ -161,8 +163,16 @@ async function refreshSessionList() {
     el.dataset.id = s.id
     const st = sessionStatus.get(s.id) || { level: 'idle', text: '' }
     el.innerHTML = `<div class="session-item-main"><span class="session-status-dot ${st.level}"></span><span class="session-title">${esc(s.title)}</span></div><div class="session-item-meta"><span class="session-status-text">${esc(st.text)}</span><span class="del-btn" onclick="event.stopPropagation();deleteSession('${s.id}')">✕</span></div>`
-    el.onclick = () => switchSession(s.id)
-    el.ondblclick = (e) => { e.stopPropagation(); renameSession(s.id, el) }
+    let clickTimer = null
+    el.onclick = () => {
+      if (clickTimer) clearTimeout(clickTimer)
+      clickTimer = setTimeout(() => switchSession(s.id), 250)
+    }
+    el.ondblclick = (e) => {
+      e.stopPropagation()
+      if (clickTimer) { clearTimeout(clickTimer); clickTimer = null }
+      renameSession(s.id, el)
+    }
     list.appendChild(el)
   }
 }
@@ -250,7 +260,7 @@ const sendBtn = document.getElementById('sendBtn')
 const messages = document.getElementById('messages')
 
 input.addEventListener('keydown', e => {
-  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') send()
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send() }
 })
 
 // Cmd+K to focus input
@@ -292,64 +302,60 @@ function removeAttach(i) { pendingFiles.splice(i, 1); renderAttachPreview() }
 document.addEventListener('dragover', e => e.preventDefault())
 document.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files) })
 
-async function send() {
-  const text = input.value.trim()
-  if (!text && !pendingFiles.length) return
-
-  // Snapshot sessionId at send time — immune to session switches
-  const sendSessionId = currentSessionId
-
-  input.value = ''
-  input.style.height = 'auto'
-  const files = [...pendingFiles]
-  pendingFiles = []
-  renderAttachPreview()
-
-  // Detect @mention to pick agent
-  let targetAgentId = null, targetAgentName = 'Assistant'
-  const mention = text.match(/^@(\S+)\s/)
-  if (mention && sendSessionId) {
-    const agents = await window.api.listAgents()
-    const found = agents.find(a => a.name.toLowerCase() === mention[1].toLowerCase())
-    if (found) { targetAgentId = found.id; targetAgentName = found.name }
-  }
-  // Fallback: first agent member in session
-  if (!targetAgentId && sendSessionId) {
-    const s = await window.api.loadSession(sendSessionId)
-    if (s?.members) {
-      const agents = await window.api.listAgents()
-      const first = s.members.find(m => m !== 'user')
-      if (first) { const a = agents.find(x => x.id === first); if (a) { targetAgentId = a.id; targetAgentName = a.name } }
+// ── Per-Agent Independent Context ──
+// Each agent only sees: user messages + its own responses. Never sees other agents' messages.
+function buildAgentContext(sessionMsgs, agentName, isMain) {
+  const raw = []
+  for (const m of sessionMsgs) {
+    if (m.role === 'user') {
+      raw.push({ role: 'user', content: m.content })
+    } else if (m.role === 'assistant') {
+      const isOwn = isMain
+        ? (!m.sender || m.sender === 'Assistant')
+        : m.sender === agentName
+      if (isOwn) {
+        raw.push({ role: 'assistant', content: m.content })
+      }
     }
   }
+  // Merge consecutive same-role messages (LLM APIs require alternating roles)
+  const merged = []
+  for (const m of raw) {
+    if (merged.length && merged[merged.length - 1].role === m.role) {
+      merged[merged.length - 1].content += '\n\n' + m.content
+    } else {
+      merged.push({ ...m })
+    }
+  }
+  return merged
+}
 
-  // Show user message with attachments
-  const attachHtml = files.map(f => f.type.startsWith('image/') ? `<img src="${f.data}" style="max-height:120px;border-radius:6px;margin-top:4px">` : `<div class="attach-chip">📄 ${esc(f.name)}</div>`).join('')
-  addCard('user', text + (attachHtml ? `<div>${attachHtml}</div>` : ''), 'You', true)
+// ── Streaming Helpers (shared by main + agent responses) ──
 
+function createStreamingCard(agentName) {
   const card = document.createElement('div')
   card.className = 'msg-card assistant'
   const _t = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
-  card.innerHTML = `<div class="msg-avatar">🤖</div><div class="msg-body"><div class="msg-header"><span class="msg-name">${esc(targetAgentName)}</span><span class="msg-time">${_t}</span></div><div class="msg-flow"></div></div>`
+  card.innerHTML = `<div class="msg-avatar">🤖</div><div class="msg-body"><div class="msg-header"><span class="msg-name">${esc(agentName)}</span><span class="msg-time">${_t}</span></div><div class="msg-flow"></div></div>`
   messages.appendChild(card)
+  messages.scrollTop = messages.scrollHeight
   const flowContainer = card.querySelector('.msg-flow')
-  // Current text segment
-  let currentTextEl = document.createElement('div')
-  currentTextEl.className = 'msg-content md-content'
-  currentTextEl.innerHTML = '<span class="typing-indicator">…</span>'
-  flowContainer.appendChild(currentTextEl)
-  const contentEl = currentTextEl
-  let fullText = ''
-  let segmentText = '' // text for current segment only
-  let myToolSteps = []
-  let currentToolGroup = null
-  const myRequestId = await window.api.chatPrepare()
-  setSessionStatus(sendSessionId, 'thinking', '…')
+  const firstTextEl = document.createElement('div')
+  firstTextEl.className = 'msg-content md-content'
+  firstTextEl.innerHTML = '<span class="typing-indicator">…</span>'
+  flowContainer.appendChild(firstTextEl)
+  return { card, flowContainer, firstTextEl }
+}
 
-  // Register handlers in the event bus
+function registerStreamHandlers(myRequestId, flowContainer, firstTextEl, sendSessionId) {
+  let currentTextEl = firstTextEl
+  let segmentText = ''
+  let fullText = ''
+  let currentToolGroup = null
+  let myToolSteps = []
+
   requestHandlers.set(myRequestId, {
     onTextStart() {
-      // Explicit boundary: new round of text after tool execution
       if (currentToolGroup || myToolSteps.length > 0) {
         currentTextEl = document.createElement('div')
         currentTextEl.className = 'msg-content md-content'
@@ -363,21 +369,19 @@ async function send() {
       if (!t) return
       fullText += t
       segmentText += t
-      // If there was a tool group before this text, start a new text segment
       if (currentToolGroup) {
         currentTextEl = document.createElement('div')
         currentTextEl.className = 'msg-content md-content'
         flowContainer.appendChild(currentTextEl)
         currentToolGroup = null
-        segmentText = t // new segment starts with this token
+        segmentText = t
       }
       currentTextEl.innerHTML = marked.parse(segmentText)
       messages.scrollTop = messages.scrollHeight
     },
     onToolStep(d) {
       myToolSteps.push({ name: d.name, output: String(d.output).slice(0, 120) })
-      setSessionStatus(sendSessionId, 'running', '…')
-      // Insert tool step inline in the flow (after current text)
+      if (sendSessionId) setSessionStatus(sendSessionId, 'running', '…')
       if (!currentToolGroup) {
         currentToolGroup = document.createElement('div')
         currentToolGroup.className = 'tool-group-inline'
@@ -401,66 +405,121 @@ async function send() {
       count.textContent = body.children.length
       messages.scrollTop = messages.scrollHeight
     },
-    onStatus(level, text) {
-      // Status now goes to sidebar watson status only, not per-card
-    }
+    onStatus() {}
   })
 
-  try {
-    const result = await window.api.chat({ prompt: text, history, agentId: targetAgentId, files })
-    console.log('[Paw] chat result:', JSON.stringify({ answer: (result?.answer || '').slice(0, 100), fullText: fullText.slice(0, 100) }))
-    const finalText = fullText || result?.answer || ''
-    // Apply linkifyPaths to all text segments (don't overwrite with fullText — segments are already rendered)
-    if (finalText.trim()) {
-      card.querySelectorAll('.msg-content.md-content').forEach(el => {
-        el.innerHTML = linkifyPaths(el.innerHTML)
-      })
-    } else {
-      contentEl.innerHTML = '<span style="color:#666;font-style:italic">（无文本回复）</span>'
-    }
-    // Clean up event bus, collapse inline tool groups on completion
-    requestHandlers.delete(myRequestId)
-    // Keep AI's last watson status if it wrote one; otherwise show fallback
-    const curStatus = sessionStatus.get(sendSessionId)
-    if (!curStatus?.aiAuthored) {
-      // Fallback: summarize what was done based on user's question
-      const summary = text.length > 15 ? text.slice(0, 15) + '…' : text
-      setSessionStatus(sendSessionId, 'done', `已回复: ${summary}`)
-    }
-    // Don't clear to empty — keep showing what was done
-    // Collapse all inline tool groups
-    card.querySelectorAll('.tool-group-inline').forEach(g => {
-      const body = g.querySelector('.tool-group-body')
-      const arrow = g.querySelector('.tool-expand')
-      if (body) body.style.display = 'none'
-      if (arrow) arrow.textContent = '▶'
+  return { getFullText: () => fullText }
+}
+
+function finalizeCard(card, myRequestId, fullText) {
+  requestHandlers.delete(myRequestId)
+  if (fullText.trim()) {
+    card.querySelectorAll('.msg-content.md-content').forEach(el => {
+      el.innerHTML = linkifyPaths(el.innerHTML)
     })
-    history.push({ prompt: text, answer: finalText })
-    // Persist to session
-    if (sendSessionId) {
-      const s = await window.api.loadSession(sendSessionId)
-      if (s) {
-        s.messages.push(
-          { role: 'user', content: text, sender: 'You' },
-          { role: 'assistant', content: finalText, sender: targetAgentName }
-        )
-        if (s.messages.length === 2) {
-          // Auto-generate title from first exchange
-          const autoTitle = generateTitle(text, finalText)
-          s.title = autoTitle
-        }
-        await window.api.saveSession(s)
-        document.getElementById('sessionTitle').textContent = s.title
-        await refreshSessionList()
-      }
+  }
+  card.querySelectorAll('.tool-group-inline').forEach(g => {
+    const body = g.querySelector('.tool-group-body')
+    const arrow = g.querySelector('.tool-expand')
+    if (body) body.style.display = 'none'
+    if (arrow) arrow.textContent = '▶'
+  })
+}
+
+async function send() {
+  const text = input.value.trim()
+  if (!text && !pendingFiles.length) return
+
+  const sendSessionId = currentSessionId
+
+  input.value = ''
+  input.style.height = 'auto'
+  const files = [...pendingFiles]
+  pendingFiles = []
+  renderAttachPreview()
+
+  // Detect @mention to pick specific agent
+  let targetAgentId = null, targetAgentName = 'Assistant'
+  const mention = text.match(/^@(\S+)[\s，,]/)
+  if (mention && sendSessionId) {
+    const q = mention[1].toLowerCase()
+    // Fuzzy match: @架构师 matches agent "架构", @设计 matches "设计师"
+    const fuzzyFind = (list) => list.find(a => {
+      const n = a.name.toLowerCase()
+      return n === q || n.startsWith(q) || q.startsWith(n)
+    })
+    const sessionAgents = await window.api.listSessionAgents(sendSessionId)
+    const sFound = fuzzyFind(sessionAgents)
+    if (sFound) { targetAgentId = sFound.id; targetAgentName = sFound.name }
+    if (!sFound) {
+      const agents = await window.api.listAgents()
+      const tFound = fuzzyFind(agents)
+      if (tFound) { targetAgentId = tFound.id; targetAgentName = tFound.name }
     }
-  } catch (err) {
-    setSessionStatus(sendSessionId, 'idle', '出错')
-    requestHandlers.delete(myRequestId)
-    requestHandlers.delete(myRequestId)
-    if (!fullText) {
-      card.remove()
-      addCard('error', err.message || String(err))
+  }
+
+  // Show user message with attachments
+  const attachHtml = files.map(f => f.type.startsWith('image/') ? `<img src="${f.data}" style="max-height:120px;border-radius:6px;margin-top:4px">` : `<div class="attach-chip">📄 ${esc(f.name)}</div>`).join('')
+  addCard('user', text + (attachHtml ? `<div>${attachHtml}</div>` : ''), 'You', true)
+  setSessionStatus(sendSessionId, 'thinking', '…')
+
+  // ── Case 1: @mention → direct to single agent ──
+  // ── Case 2: everything else → Main (orchestrator delegates via send_message) ──
+  {
+    // For @mention to a specific agent, use independent context
+    let chatParams
+    if (targetAgentId) {
+      const sessionData = sendSessionId ? await window.api.loadSession(sendSessionId) : null
+      const rawMessages = buildAgentContext(sessionData?.messages || [], targetAgentName, false)
+      chatParams = { prompt: text, rawMessages, agentId: targetAgentId, files, sessionId: sendSessionId, requestId: null }
+    } else {
+      chatParams = { prompt: text, history, agentId: null, files, sessionId: sendSessionId, requestId: null }
+    }
+
+    const { card, flowContainer, firstTextEl } = createStreamingCard(targetAgentName)
+    const myRequestId = await window.api.chatPrepare()
+    const { getFullText } = registerStreamHandlers(myRequestId, flowContainer, firstTextEl, sendSessionId)
+
+    chatParams.requestId = myRequestId
+
+    try {
+      const result = await window.api.chat(chatParams)
+      const finalText = getFullText() || result?.answer || ''
+      finalizeCard(card, myRequestId, finalText)
+
+      if (!finalText.trim()) {
+        firstTextEl.innerHTML = '<span style="color:#666;font-style:italic">（无文本回复）</span>'
+      }
+
+      const curStatus = sessionStatus.get(sendSessionId)
+      if (!curStatus?.aiAuthored) {
+        const summary = text.length > 15 ? text.slice(0, 15) + '…' : text
+        setSessionStatus(sendSessionId, 'done', `已回复: ${summary}`)
+      }
+
+      history.push({ prompt: text, answer: finalText })
+      if (sendSessionId) {
+        const s = await window.api.loadSession(sendSessionId)
+        if (s) {
+          s.messages.push(
+            { role: 'user', content: text, sender: 'You' },
+            { role: 'assistant', content: finalText, sender: targetAgentName }
+          )
+          if (s.messages.length === 2) {
+            s.title = generateTitle(text, finalText)
+          }
+          await window.api.saveSession(s)
+          document.getElementById('sessionTitle').textContent = s.title
+          await refreshSessionList()
+        }
+      }
+    } catch (err) {
+      setSessionStatus(sendSessionId, 'idle', '出错')
+      requestHandlers.delete(myRequestId)
+      if (!getFullText()) {
+        card.remove()
+        addCard('error', err.message || String(err))
+      }
     }
   }
 
@@ -618,41 +677,94 @@ function closeMembers() { document.getElementById('membersOverlay').style.displa
 
 async function refreshMemberList() {
   if (!currentSessionId) return
-  const session = await window.api.loadSession(currentSessionId)
-  const agents = await window.api.listAgents()
-  const members = session?.members || ['user']
+  const sessionAgents = await window.api.listSessionAgents(currentSessionId)
+  const templateAgents = await window.api.listAgents()
   const list = document.getElementById('memberList')
   list.innerHTML = ''
-  for (const m of members) {
+  // Always show user
+  const userEl = document.createElement('div')
+  userEl.className = 'member-item'
+  userEl.innerHTML = '<span>👤 You</span>'
+  list.appendChild(userEl)
+  // Show lightweight agents
+  for (const a of sessionAgents) {
     const el = document.createElement('div')
     el.className = 'member-item'
-    if (m === 'user') {
-      el.innerHTML = '<span>👤 You</span>'
-    } else {
-      const agent = agents.find(a => a.id === m)
-      el.innerHTML = `<span>🤖 ${esc(agent?.name || m)}</span><span class="del-btn" onclick="removeMember('${m}')">✕</span>`
-    }
+    el.innerHTML = `<span>🤖 ${esc(a.name)}</span><span class="hint" style="margin:0 8px;font-size:11px">${esc((a.role || '').slice(0, 40))}</span><span class="del-btn" onclick="removeSessionAgent('${a.id}')">✕</span>`
     list.appendChild(el)
   }
-  // Populate add dropdown with agents not in session
+  // Populate template dropdown (exclude those already added as session agents)
+  const sessionNames = new Set(sessionAgents.map(a => a.name))
   const select = document.getElementById('addAgentSelect')
-  select.innerHTML = '<option value="">Select agent...</option>'
-  for (const a of agents) {
-    if (!members.includes(a.id)) select.innerHTML += `<option value="${a.id}">${esc(a.name)}</option>`
+  select.innerHTML = '<option value="">Select template...</option>'
+  for (const a of templateAgents) {
+    if (!sessionNames.has(a.name)) select.innerHTML += `<option value="${a.id}">${esc(a.name)}</option>`
   }
 }
 
-async function addAgentToSession() {
-  const id = document.getElementById('addAgentSelect').value
-  if (!id || !currentSessionId) return
-  await window.api.addMember(currentSessionId, id)
+async function createLightweightAgent() {
+  if (!currentSessionId) return
+  const name = document.getElementById('newRoleName').value.trim()
+  const role = document.getElementById('newRoleDesc').value.trim()
+  if (!name || !role) return
+  const result = await window.api.createSessionAgent(currentSessionId, { name, role })
+  if (result?.error) { alert(result.error); return }
+  document.getElementById('newRoleName').value = ''
+  document.getElementById('newRoleDesc').value = ''
   await refreshMemberList()
 }
 
-async function removeMember(agentId) {
-  if (!currentSessionId) return
-  await window.api.removeMember(currentSessionId, agentId)
+async function addAgentFromTemplate() {
+  const id = document.getElementById('addAgentSelect').value
+  if (!id || !currentSessionId) return
+  const agent = await window.api.loadAgent(id)
+  if (!agent) return
+  // Create a lightweight agent from the template
+  const result = await window.api.createSessionAgent(currentSessionId, { name: agent.name, role: agent.soul || '' })
+  if (result?.error) { alert(result.error); return }
   await refreshMemberList()
+}
+
+async function removeSessionAgent(agentId) {
+  if (!currentSessionId) return
+  await window.api.deleteSessionAgent(agentId)
+  await refreshMemberList()
+}
+
+// ── triggerAgentResponse: used by agent-message and auto-rotate ──
+async function triggerAgentResponse(agentId, agentName, prompt, sendSessionId) {
+  const { card, flowContainer, firstTextEl } = createStreamingCard(agentName)
+  const reqId = await window.api.chatPrepare()
+  const { getFullText } = registerStreamHandlers(reqId, flowContainer, firstTextEl, sendSessionId)
+
+  // Build independent context: this agent's prior history only
+  // Remove the last user message — Main's delegation (prompt param) replaces it,
+  // so the agent focuses on Main's specific instruction, not the user's raw message
+  const s = await window.api.loadSession(sendSessionId)
+  const rawMessages = buildAgentContext(s?.messages || [], agentName, false)
+  if (rawMessages.length && rawMessages[rawMessages.length - 1].role === 'user') {
+    rawMessages.pop()
+  }
+
+  try {
+    const result = await window.api.chat({
+      prompt, rawMessages, agentId, files: [],
+      sessionId: sendSessionId, requestId: reqId
+    })
+    const finalText = getFullText() || result?.answer || ''
+    finalizeCard(card, reqId, finalText)
+
+    if (sendSessionId) {
+      const session = await window.api.loadSession(sendSessionId)
+      if (session) {
+        session.messages.push({ role: 'assistant', content: finalText, sender: agentName })
+        await window.api.saveSession(session)
+      }
+    }
+  } catch (err) {
+    console.error(`[Paw] agent ${agentName} response error:`, err)
+    requestHandlers.delete(reqId)
+  }
 }
 
 // ── Agent manager ──
@@ -740,31 +852,36 @@ window.api.onTasksChanged((sid) => {
   if (sid === currentSessionId) refreshTaskBar()
 })
 
-window.api.onAgentMessage(({ from, to, message, sessionId }) => {
-  if (sessionId === currentSessionId) {
-    addCard('agent-to-agent', message, `${from} → ${to}`)
-  }
+window.api.onSessionAgentsChanged((sid) => {
+  if (sid === currentSessionId) refreshMemberList()
+})
+
+window.api.onAgentMessage(async ({ from, to, message, sessionId }) => {
+  if (sessionId !== currentSessionId) return
+  addCard('agent-to-agent', message, `${from} → ${to}`)
+
+  // Auto-trigger target agent to respond
+  const sessionAgents = await window.api.listSessionAgents(currentSessionId)
+  const target = sessionAgents.find(a => a.name === to)
+  if (!target) return
+
+  // Fire and forget — don't await, allow parallel responses when Main delegates to multiple agents
+  triggerAgentResponse(target.id, target.name, message, currentSessionId)
 })
 
 window.api.onAutoRotate(async ({ sessionId, completedBy, nextTask }) => {
   if (sessionId !== currentSessionId) return
-  const agents = await window.api.listAgents()
-  // Find agent assigned to next task, or first available
-  const targetAgent = nextTask.assignee
-    ? agents.find(a => a.name === nextTask.assignee)
-    : agents[0]
+  // Find agent assigned to next task (auto-assigned by main.js)
+  const sessionAgents = await window.api.listSessionAgents(currentSessionId)
+  let targetAgent = null
+  if (nextTask.assignee) {
+    targetAgent = sessionAgents.find(a => a.name === nextTask.assignee)
+  }
   if (!targetAgent) return
   const sysMsg = `Task "${nextTask.title}" is now unblocked (completed by ${completedBy}). Please claim and work on it.`
   addCard('agent-to-agent', sysMsg, `System → ${targetAgent.name}`)
   // Auto-trigger the agent
-  const history = []
-  const s = await window.api.loadSession(currentSessionId)
-  if (s?.messages) {
-    for (let i = 0; i < s.messages.length - 1; i += 2) {
-      if (s.messages[i+1]) history.push({ prompt: s.messages[i].content, answer: s.messages[i+1].content })
-    }
-  }
-  await window.api.chat({ prompt: sysMsg, history, agentId: targetAgent.id, files: [] })
+  await triggerAgentResponse(targetAgent.id, targetAgent.name, sysMsg, currentSessionId)
 })
 
 // Init

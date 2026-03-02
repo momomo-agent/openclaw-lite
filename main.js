@@ -18,7 +18,8 @@ const { pushStatus: corePushStatus, sendNotification: coreSendNotification, push
 const { startHeartbeat: coreStartHeartbeat, stopHeartbeat: coreStopHeartbeat } = require('./core/heartbeat')
 const { updateTrayMenu: coreUpdateTrayMenu } = require('./core/tray')
 const { buildMemoryIndex: coreBuildMemoryIndex, startMemoryWatch: coreStartMemoryWatch, stopMemoryWatch: coreStopMemoryWatch } = require('./core/memory-watch')
-const { buildSystemPrompt: coreBuildSystemPrompt } = require('./core/prompt-builder')
+const { buildSystemPrompt: coreBuildSystemPrompt, buildAgentPrompt: coreBuildAgentPrompt } = require('./core/prompt-builder')
+const { routeMessage: coreRouteMessage } = require('./core/router')
 const { streamAnthropicRaw: coreLlmAnthropicRaw, streamOpenAIRaw: coreLlmOpenAIRaw } = require('./core/llm-raw')
 
 // Legacy globals - kept for backward compat, synced to state via syncState()
@@ -97,8 +98,8 @@ function getAnthropicToolsArray() {
       input_schema: { type: 'object', properties: { path: { type: 'string' }, from: { type: 'number', description: 'Start line (1-indexed)' }, lines: { type: 'number', description: 'Number of lines to read' } }, required: ['path'] }
     },
     {
-      name: 'task_create', description: 'Create a task in the shared task list. Use for coordinating multi-agent work.',
-      input_schema: { type: 'object', properties: { title: { type: 'string' }, dependsOn: { type: 'array', items: { type: 'string' }, description: 'Task IDs this depends on' } }, required: ['title'] }
+      name: 'task_create', description: 'Create a task in the shared task list. Tasks are auto-assigned to the best matching agent by role. You can override with assignee.',
+      input_schema: { type: 'object', properties: { title: { type: 'string' }, dependsOn: { type: 'array', items: { type: 'string' }, description: 'Task IDs this depends on' }, assignee: { type: 'string', description: 'Agent name to assign (auto-assigned if omitted)' } }, required: ['title'] }
     },
     {
       name: 'task_update', description: 'Update a task status: claim (pending→in-progress) or complete (in-progress→done).',
@@ -112,13 +113,52 @@ function getAnthropicToolsArray() {
       name: 'send_message', description: 'Send a message to another agent in this session. Only available in multi-agent sessions.',
       input_schema: { type: 'object', properties: { targetAgent: { type: 'string', description: 'Name of the target agent' }, message: { type: 'string' } }, required: ['targetAgent','message'] }
     },
+    {
+      name: 'create_agent', description: 'Create a lightweight agent in the current session. The agent will be a participant with the given name and role.',
+      input_schema: { type: 'object', properties: { name: { type: 'string', description: 'Agent name (unique within session)' }, role: { type: 'string', description: 'Role description (1-2 sentences)' } }, required: ['name','role'] }
+    },
+    {
+      name: 'remove_agent', description: 'Remove a lightweight agent from the current session.',
+      input_schema: { type: 'object', properties: { name: { type: 'string', description: 'Name of the agent to remove' } }, required: ['name'] }
+    },
   ];
   return [...registryTools, ...builtInTools];
 }
 
 const TOOLS = getAnthropicToolsArray();
 
-// ── Memory Search (keyword-based, upgradable to FTS) ──
+// Agent tool filtering: lightweight agents get a subset of tools
+const AGENT_ALLOWED_TOOLS = new Set([
+  'ui_status_set', 'memory_search', 'memory_get',
+  'task_create', 'task_update', 'task_list', 'send_message',
+]);
+function getToolsForAgent() {
+  return TOOLS.filter(t => AGENT_ALLOWED_TOOLS.has(t.name));
+}
+
+// Auto-assign: find best matching agent for a task title based on role keyword overlap
+function findBestAgent(taskTitle, sessionAgents) {
+  if (!sessionAgents?.length) return null
+  const titleLower = taskTitle.toLowerCase()
+  let best = null, bestScore = 0
+  for (const a of sessionAgents) {
+    const role = (a.role || '').toLowerCase()
+    // Split on delimiters, then also extract 2-char Chinese substrings for fuzzy match
+    const roleTokens = role.split(/[\s,，、/]+/).filter(w => w.length >= 2)
+    // Add 2-char sliding windows from each token for Chinese substring matching
+    const roleKeys = new Set(roleTokens)
+    for (const t of roleTokens) {
+      for (let i = 0; i <= t.length - 2; i++) roleKeys.add(t.slice(i, i + 2))
+    }
+    let score = 0
+    for (const rk of roleKeys) {
+      if (titleLower.includes(rk)) score += rk.length >= 3 ? 3 : 1
+    }
+    if (score > bestScore) { bestScore = score; best = a.name }
+  }
+  return best
+}
+
 function searchMemoryFiles(dir, query, maxResults) {
   const results = []
   const keywords = query.split(/\s+/).filter(Boolean)
@@ -249,8 +289,18 @@ async function executeTool(name, input, config) {
       if (!title) return 'Error: title required'
       const tasks = sessionStore.listTasks(clawDir, currentSessionId)
       if (tasks.length >= 50) return 'Error: Task limit reached (50)'
+      // Resolve assignee: validate LLM-provided name, fallback to auto-assign
+      const sessionAgents = sessionStore.listSessionAgents(clawDir, currentSessionId)
+      const agentNames = new Set(sessionAgents.map(a => a.name))
+      let assignee = null
+      if (input.assignee && agentNames.has(input.assignee)) {
+        assignee = input.assignee  // LLM provided a valid agent name
+      } else {
+        assignee = findBestAgent(title, sessionAgents)  // auto-assign by role match
+      }
       const task = sessionStore.createTask(clawDir, currentSessionId, {
-        title, dependsOn: input.dependsOn, createdBy: currentAgentName || 'user'
+        title, dependsOn: input.dependsOn, createdBy: currentAgentName || 'user',
+        assignee
       })
       if (mainWindow) mainWindow.webContents.send('tasks-changed', currentSessionId)
       return JSON.stringify(task)
@@ -271,6 +321,15 @@ async function executeTool(name, input, config) {
           t.dependsOn.every(dep => allTasks.find(d => d.id === dep)?.status === 'done')
         )
         if (unblocked) {
+          // Auto-assign if no assignee
+          if (!unblocked.assignee) {
+            const sessionAgents = sessionStore.listSessionAgents(clawDir, currentSessionId)
+            const best = findBestAgent(unblocked.title, sessionAgents)
+            if (best) {
+              sessionStore.updateTask(clawDir, unblocked.id, { assignee: best })
+              unblocked.assignee = best
+            }
+          }
           mainWindow.webContents.send('auto-rotate', {
             sessionId: currentSessionId,
             completedTask: justDoneId,
@@ -291,24 +350,50 @@ async function executeTool(name, input, config) {
       const targetName = (input.targetAgent || '').trim()
       const msg = (input.message || '').trim()
       if (!targetName || !msg) return 'Error: targetAgent and message required'
-      // Find target agent
-      const allAgents = listAgents()
-      const target = allAgents.find(a => a.name === targetName)
-      if (!target) return `Error: Agent "${targetName}" not found`
-      // Anti-loop: check recent agent-to-agent messages
+      // Find target agent — check session agents first, then agents/ templates
+      const sessionAgent = sessionStore.findSessionAgentByName(clawDir, currentSessionId, targetName)
+      const templateAgent = !sessionAgent ? listAgents().find(a => a.name === targetName) : null
+      if (!sessionAgent && !templateAgent) return `Error: Agent "${targetName}" not found`
+      // Anti-loop: count exchanges between this specific pair (A↔B), allow 3 round-trips
       const session = sessionStore.loadSession(clawDir, currentSessionId)
       if (session?.messages) {
-        const recent = session.messages.slice(-10)
-        const a2aCount = recent.filter(m => m.role === 'assistant' && m.sender && m.sender !== 'You').length
-        if (a2aCount >= 5) return 'Error: Too many consecutive agent messages. Waiting for user input.'
+        const recent = session.messages.slice(-20)
+        const pair = new Set([currentAgentName || 'Assistant', targetName])
+        let pairCount = 0
+        for (const m of recent) {
+          if (m.role === 'assistant' && m.sender && pair.has(m.sender)) pairCount++
+        }
+        if (pairCount >= 6) return `Error: Conversation chain between ${currentAgentName} and ${targetName} is too long. Waiting for user input.`
       }
       // Emit to renderer as agent-to-agent message
       if (mainWindow) {
         mainWindow.webContents.send('agent-message', {
-          from: currentAgentName, to: targetName, message: msg, sessionId: currentSessionId
+          from: currentAgentName || 'Assistant', to: targetName, message: msg, sessionId: currentSessionId
         })
       }
       return `Message sent to ${targetName}`
+    }
+    case 'create_agent': {
+      if (!clawDir || !currentSessionId) return 'Error: No active session'
+      const name = (input.name || '').trim()
+      const role = (input.role || '').trim()
+      if (!name) return 'Error: name required'
+      if (!role) return 'Error: role required'
+      const existing = sessionStore.findSessionAgentByName(clawDir, currentSessionId, name)
+      if (existing) return `Error: Agent "${name}" already exists in this session`
+      const agent = sessionStore.createSessionAgent(clawDir, currentSessionId, { name, role })
+      if (mainWindow) mainWindow.webContents.send('session-agents-changed', currentSessionId)
+      return JSON.stringify(agent)
+    }
+    case 'remove_agent': {
+      if (!clawDir || !currentSessionId) return 'Error: No active session'
+      const name = (input.name || '').trim()
+      if (!name) return 'Error: name required'
+      const found = sessionStore.findSessionAgentByName(clawDir, currentSessionId, name)
+      if (!found) return `Error: Agent "${name}" not found in this session`
+      sessionStore.deleteSessionAgent(clawDir, found.id)
+      if (mainWindow) mainWindow.webContents.send('session-agents-changed', currentSessionId)
+      return `Agent "${name}" removed`
     }
     default: return `Unknown tool: ${name}`
   }
@@ -535,6 +620,29 @@ ipcMain.handle('session-remove-member', (_, { sessionId, agentId }) => {
   return true
 })
 
+// ── IPC: Session Agents (M19: lightweight agents) ──
+
+ipcMain.handle('session-create-agent', (_, { sessionId, name, role }) => {
+  if (!clawDir || !sessionId) return null
+  const existing = sessionStore.findSessionAgentByName(clawDir, sessionId, name)
+  if (existing) return { error: `Agent "${name}" already exists in this session` }
+  const agent = sessionStore.createSessionAgent(clawDir, sessionId, { name, role })
+  mainWindow?.webContents.send('session-agents-changed', sessionId)
+  return agent
+})
+
+ipcMain.handle('session-list-agents', (_, sessionId) => {
+  if (!clawDir) return []
+  return sessionStore.listSessionAgents(clawDir, sessionId)
+})
+
+ipcMain.handle('session-delete-agent', (_, agentId) => {
+  if (!clawDir) return false
+  const result = sessionStore.deleteSessionAgent(clawDir, agentId)
+  if (result && currentSessionId) mainWindow?.webContents.send('session-agents-changed', currentSessionId)
+  return result
+})
+
 // ── IPC: Tasks ──
 ipcMain.handle('session-tasks', (_, sessionId) => {
   if (!clawDir) return []
@@ -592,23 +700,35 @@ ipcMain.handle('read-file', (_, filePath) => {
 
 // ── IPC: Chat with LLM ──
 
-// Current active requestId - renderer calls chat-prepare to get it before chat()
-let _nextRequestId = null
+// Current active requestId - renderer calls chat-prepare to get a unique ID
 ipcMain.handle('chat-prepare', () => {
-  _nextRequestId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
-  return _nextRequestId
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
 })
 
-ipcMain.handle('chat', async (_, { prompt, history, agentId, files }) => {
-  const requestId = _nextRequestId || Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
-  _nextRequestId = null
+ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files, sessionId, requestId: paramRequestId, focus }) => {
+  const requestId = paramRequestId || Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+  // Sync sessionId from renderer
+  if (sessionId) { currentSessionId = sessionId; syncState() }
   const config = (() => {
     const p = configPath()
     if (!p) return {}
     try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch { return {} }
   })()
 
-  const agent = agentId ? loadAgent(agentId) : null
+  // Resolve agent: lightweight (session-level) or template (agents/ directory)
+  let agent = null
+  let isLightweight = false
+  if (agentId && agentId.startsWith('a') && clawDir && currentSessionId) {
+    // Try lightweight agent first
+    const sessionAgent = sessionStore.getSessionAgent(clawDir, agentId)
+    if (sessionAgent) {
+      agent = { id: sessionAgent.id, name: sessionAgent.name, role: sessionAgent.role }
+      isLightweight = true
+    }
+  }
+  if (!agent && agentId) {
+    agent = loadAgent(agentId)
+  }
   currentAgentName = agent?.name || null
   const provider = config.provider || 'anthropic'
   const apiKey = config.apiKey
@@ -616,9 +736,21 @@ ipcMain.handle('chat', async (_, { prompt, history, agentId, files }) => {
   const model = agent?.model || config.model
   if (!apiKey) throw new Error('No API key configured. Click ⚙️ to set up.')
 
-  // Build system prompt - agent soul takes priority
-  let systemPrompt = await buildSystemPrompt()
-  if (agent?.soul) systemPrompt = agent.soul + '\n\n---\n\n' + systemPrompt
+  // Build system prompt + select tools
+  let systemPrompt
+  let chatTools = TOOLS
+  if (isLightweight && agent?.role) {
+    // Lightweight agent: compact prompt, filtered tools
+    const sessionAgents = sessionStore.listSessionAgents(clawDir, currentSessionId) || []
+    systemPrompt = coreBuildAgentPrompt(agent, focus || '', sessionAgents)
+    chatTools = getToolsForAgent()
+  } else {
+    systemPrompt = await buildSystemPrompt()
+    if (agent?.soul) {
+      // Template agent: soul takes priority
+      systemPrompt = agent.soul + '\n\n---\n\n' + systemPrompt
+    }
+  }
 
   // F046: Inject other agents' recent messages for visibility
   if (agent && currentSessionId && clawDir) {
@@ -636,9 +768,11 @@ ipcMain.handle('chat', async (_, { prompt, history, agentId, files }) => {
     } catch {}
   }
 
-  // Build messages
+  // Build messages — rawMessages (pre-filtered independent context) takes priority
   const messages = []
-  if (history?.length) {
+  if (rawMessages?.length) {
+    messages.push(...rawMessages)
+  } else if (history?.length) {
     for (const h of history) {
       messages.push({ role: 'user', content: h.prompt })
       messages.push({ role: 'assistant', content: h.answer })
@@ -671,10 +805,26 @@ ipcMain.handle('chat', async (_, { prompt, history, agentId, files }) => {
   }
 
   if (provider === 'anthropic') {
-    return await streamAnthropic(finalMessages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow, requestId)
+    return await streamAnthropic(finalMessages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow, requestId, chatTools)
   } else {
-    return await streamOpenAI(finalMessages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow, requestId)
+    return await streamOpenAI(finalMessages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow, requestId, chatTools)
   }
+})
+
+// ── IPC: Route message to determine respondents ──
+ipcMain.handle('chat-route', async (_, { prompt, history, sessionId }) => {
+  if (!clawDir) return { respondents: [{ name: 'Main', focus: '' }] }
+  if (sessionId) { currentSessionId = sessionId; syncState() }
+  const config = (() => {
+    const p = configPath()
+    if (!p) return {}
+    try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch { return {} }
+  })()
+  if (!config.apiKey) return { respondents: [{ name: 'Main', focus: '' }] }
+  const sessionAgents = sessionStore.listSessionAgents(clawDir, sessionId) || []
+  if (!sessionAgents.length) return { respondents: [{ name: 'Main', focus: '' }] }
+  const respondents = await coreRouteMessage(prompt, sessionAgents, history, config)
+  return { respondents }
 })
 
 // Helper: reuse build-system-prompt logic
@@ -682,8 +832,9 @@ async function buildSystemPrompt() { syncState(); return coreBuildSystemPrompt()
 
 // ── Anthropic Streaming ──
 
-async function streamAnthropic(messages, systemPrompt, config, win, requestId) {
+async function streamAnthropic(messages, systemPrompt, config, win, requestId, tools) {
   _activeRequestId = requestId
+  const activeTools = tools || TOOLS
   const base = (config.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '')
   const endpoint = base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`
   const headers = { 'Content-Type': 'application/json', 'x-api-key': getApiKey(config), 'anthropic-version': '2023-06-01' }
@@ -697,7 +848,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId) {
       model: config.model || 'claude-sonnet-4-20250514',
       max_tokens: 4096, stream: true,
       system: systemPrompt || undefined,
-      messages: msgs, tools: TOOLS,
+      messages: msgs, tools: activeTools,
     }
     const res = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body) })
     if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${await res.text()}`)
@@ -718,7 +869,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId) {
           if (evt.type === 'content_block_start' && evt.content_block?.type === 'tool_use') {
             curBlock = { id: evt.content_block.id, name: evt.content_block.name, json: '' }
           } else if (evt.type === 'content_block_delta') {
-            if (evt.delta?.text) { roundText += evt.delta.text; fullText += evt.delta.text; win.webContents.send('chat-token', { requestId, text: evt.delta.text }) }
+            if (evt.delta?.text && !curBlock) { roundText += evt.delta.text; fullText += evt.delta.text; win.webContents.send('chat-token', { requestId, text: evt.delta.text }) }
             if (evt.delta?.partial_json && curBlock) curBlock.json += evt.delta.partial_json
           } else if (evt.type === 'content_block_stop' && curBlock) {
             toolCalls.push(curBlock); curBlock = null
@@ -761,13 +912,14 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId) {
 
 // ── OpenAI Streaming ──
 
-async function streamOpenAI(messages, systemPrompt, config, win, requestId) {
+async function streamOpenAI(messages, systemPrompt, config, win, requestId, tools) {
   _activeRequestId = requestId
+  const activeTools = tools || TOOLS
   const base = (config.baseUrl || 'https://api.openai.com').replace(/\/+$/, '')
   const endpoint = base.endsWith('/v1') ? `${base}/chat/completions` : `${base}/v1/chat/completions`
 
-  // Convert TOOLS to OpenAI function calling format
-  const oaiTools = TOOLS.map(t => ({
+  // Convert tools to OpenAI function calling format
+  const oaiTools = activeTools.map(t => ({
     type: 'function',
     function: { name: t.name, description: t.description, parameters: t.input_schema }
   }))
