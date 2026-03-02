@@ -21,198 +21,44 @@ const { buildMemoryIndex: coreBuildMemoryIndex, startMemoryWatch: coreStartMemor
 const { buildSystemPrompt: coreBuildSystemPrompt } = require('./core/prompt-builder')
 const { streamAnthropicRaw: coreLlmAnthropicRaw, streamOpenAIRaw: coreLlmOpenAIRaw } = require('./core/llm-raw')
 
-// Legacy globals — synced to state for backward compat during migration
+// Legacy globals - kept for backward compat, synced to state via syncState()
 let mainWindow
 let clawDir = null
 let currentSessionId = null
 let currentAgentName = null
 let heartbeatTimer = null
 let tray = null
+
+function syncState() {
+  state.mainWindow = mainWindow
+  state.clawDir = clawDir
+  state.currentSessionId = currentSessionId
+  state.currentAgentName = currentAgentName
+  state.heartbeatTimer = heartbeatTimer
+  state.tray = tray
+}
 let memoryWatcher = null
 
-// ── Config path helper ──
-function configPath() {
-  if (!clawDir) return null
-  const newPath = path.join(clawDir, '.paw', 'config.json')
-  // Migrate from old location if needed
-  const oldPath = path.join(clawDir, 'config.json')
-  if (!fs.existsSync(newPath) && fs.existsSync(oldPath)) {
-    fs.mkdirSync(path.join(clawDir, '.paw'), { recursive: true })
-    fs.renameSync(oldPath, newPath)
-  }
-  return newPath
-}
+// ── Delegated to core/ modules ──
+function configPath() { syncState(); return coreConfigPath(); }
 
-// ── Link Understanding ──
-const BARE_URL_RE = /https?:\/\/\S+/gi
-async function extractLinkContext(text, maxLinks = 3, timeoutMs = 5000) {
-  if (!text) return ''
-  const urls = [...new Set((text.match(BARE_URL_RE) || []).slice(0, maxLinks))]
-  if (!urls.length) return ''
-  const results = await Promise.allSettled(urls.map(async (url) => {
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36' },
-      signal: AbortSignal.timeout(timeoutMs), redirect: 'follow',
-    })
-    if (!res.ok) return null
-    const ct = res.headers.get('content-type') || ''
-    if (!ct.includes('html')) return null
-    const html = await res.text()
-    const { Readability } = require('@mozilla/readability')
-    const { parseHTML } = require('linkedom')
-    const { document } = parseHTML(html.slice(0, 500000))
-    const article = new Readability(document).parse()
-    if (!article?.textContent) return null
-    const title = article.title || url
-    const summary = article.textContent.replace(/\s+/g, ' ').trim().slice(0, 500)
-    return `[Link: ${title}] ${summary}`
-  }))
-  return results.filter(r => r.status === 'fulfilled' && r.value).map(r => r.value).join('\n\n')
-}
+async function extractLinkContext(text, maxLinks, timeoutMs) { return coreExtractLinkContext(text, maxLinks, timeoutMs); }
 
-// ── Memory watcher ──
-let memoryDebounce = null
-
-// ── Context Compaction ──
-const COMPACT_THRESHOLD = 80000 // ~80k tokens trigger compaction
-const COMPACT_KEEP_RECENT = 4  // keep last N message pairs intact
-
-function estimateTokens(text) {
-  if (!text) return 0
-  if (typeof text === 'string') return Math.ceil(text.length / 3.5)
-  if (Array.isArray(text)) return text.reduce((s, c) => s + estimateTokens(c.text || ''), 0)
-  return 0
-}
-
-function estimateMessagesTokens(messages) {
-  return messages.reduce((s, m) => s + estimateTokens(m.content) + 10, 0)
-}
-
+const { COMPACT_THRESHOLD, COMPACT_KEEP_RECENT, estimateTokens, estimateMessagesTokens, compactHistory: coreCompactHistory } = require('./core/compaction')
 async function compactHistory(messages, config) {
-  // Split: old messages to summarize, recent to keep
-  const keepCount = COMPACT_KEEP_RECENT * 2 // pairs
-  if (messages.length <= keepCount + 2) return messages // too short to compact
-
-  const toSummarize = messages.slice(0, messages.length - keepCount)
-  const toKeep = messages.slice(messages.length - keepCount)
-
-  // Build summary prompt
-  const transcript = toSummarize.map(m => `[${m.role}]: ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`).join('\n').slice(0, 30000)
-
-  const summaryPrompt = `Summarize this conversation concisely. Preserve: key decisions, TODOs, open questions, user preferences, file paths mentioned, and current task context. Output in the same language as the conversation.\n\n${transcript}`
-
-  try {
-    const provider = config.provider || 'anthropic'
-    const fn = provider === 'anthropic' ? streamAnthropicRaw : streamOpenAIRaw
-    const summary = await fn([{ role: 'user', content: summaryPrompt }], 'You are a conversation summarizer. Be concise but preserve all important context.', config)
-
-    const compactedMessages = [
-      { role: 'user', content: '[Previous conversation summary]' },
-      { role: 'assistant', content: summary || 'No prior context.' },
-      ...toKeep
-    ]
-    console.log(`[compaction] ${messages.length} msgs → ${compactedMessages.length} msgs (summarized ${toSummarize.length} msgs)`)
-    return compactedMessages
-  } catch (e) {
-    console.warn('[compaction] Failed, using truncation fallback:', e.message)
-    // Fallback: just keep recent messages
-    return [
-      { role: 'user', content: '[Earlier conversation was truncated due to length]' },
-      { role: 'assistant', content: 'Understood. I\'ll continue from the recent context.' },
-      ...toKeep
-    ]
-  }
+  const provider = config.provider || 'anthropic'
+  const rawFn = provider === 'anthropic' ? streamAnthropicRaw : streamOpenAIRaw
+  return coreCompactHistory(messages, config, rawFn)
 }
 
-// Raw API calls for compaction (no streaming to UI)
 // ── API Key Rotation → delegated to core/api-keys.js ──
 
-async function streamAnthropicRaw(messages, system, config) {
-  const base = (config.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '')
-  const endpoint = base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`
-  const apiKey = getApiKey(config);
-  
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({ model: config.model || 'claude-sonnet-4-20250514', max_tokens: 2048, system, messages }),
-    signal: AbortSignal.timeout(30000),
-  })
-  
-  if (!res.ok) {
-    recordKeyUsage(false);
-    // Retry with next key on 429 (rate limit)
-    if (res.status === 429 && rotateApiKey(config)) {
-      console.log('[API] Retrying with next key...');
-      return streamAnthropicRaw(messages, system, config);
-    }
-    throw new Error(`API ${res.status}`)
-  }
-  
-  recordKeyUsage(true);
-  const data = await res.json()
-  return (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('')
-}
+function streamAnthropicRaw(messages, system, config) { return coreLlmAnthropicRaw(messages, system, config); }
+function streamOpenAIRaw(messages, system, config) { return coreLlmOpenAIRaw(messages, system, config); }
 
-async function streamOpenAIRaw(messages, system, config) {
-  const base = (config.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '')
-  const apiKey = getApiKey(config);
-  
-  const res = await fetch(`${base}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-    body: JSON.stringify({ model: config.model || 'gpt-4o', max_tokens: 2048, messages: [{ role: 'system', content: system }, ...messages] }),
-    signal: AbortSignal.timeout(30000),
-  })
-  
-  if (!res.ok) {
-    recordKeyUsage(false);
-    if (res.status === 429 && rotateApiKey(config)) {
-      console.log('[API] Retrying with next key...');
-      return streamOpenAIRaw(messages, system, config);
-    }
-    throw new Error(`API ${res.status}`)
-  }
-  
-  recordKeyUsage(true);
-  const data = await res.json()
-  return data.choices?.[0]?.message?.content || ''
-}
-
-// ── Background memory indexing ──
-async function buildMemoryIndex() {
-  if (!clawDir) return
-  try {
-    const p = configPath()
-    const config = p ? JSON.parse(fs.readFileSync(p, 'utf8')) : {}
-    await memoryIndex.buildIndex(clawDir, config, (file, done, total) => {
-      if (mainWindow && done && total) {
-        mainWindow.webContents.send('memory-index-progress', { file, done, total })
-      }
-    })
-    console.log('[main] Memory index built')
-  } catch (e) {
-    console.warn('[main] Memory index build error:', e.message)
-  }
-}
-
-function startMemoryWatch() {
-  stopMemoryWatch()
-  if (!clawDir) return
-  const memDir = path.join(clawDir, 'memory')
-  if (!fs.existsSync(memDir)) return
-  try {
-    memoryWatcher = fs.watch(memDir, { recursive: true }, (evt, filename) => {
-      if (memoryDebounce) clearTimeout(memoryDebounce)
-      memoryDebounce = setTimeout(() => {
-        mainWindow?.webContents?.send('memory-changed', { file: filename })
-      }, 300)
-    })
-  } catch {}
-}
-function stopMemoryWatch() {
-  if (memoryWatcher) { memoryWatcher.close(); memoryWatcher = null }
-}
+function buildMemoryIndex() { syncState(); return coreBuildMemoryIndex(); }
+function startMemoryWatch() { syncState(); coreStartMemoryWatch(); }
+function stopMemoryWatch() { coreStopMemoryWatch(); }
 
 // ── Session helpers (SQLite backend) ──
 const sessionStore = require('./session-store')
@@ -223,35 +69,11 @@ function saveSession(session) { sessionStore.saveSession(clawDir, session) }
 function createSession(title) { return sessionStore.createSession(clawDir, title) }
 function deleteSessionById(id) { sessionStore.deleteSession(clawDir, id) }
 
-// ── Agent helpers ──
-function agentsDir() { return clawDir ? path.join(clawDir, 'agents') : null }
-
-function listAgents() {
-  const dir = agentsDir()
-  if (!dir || !fs.existsSync(dir)) return []
-  return fs.readdirSync(dir).filter(f => f.endsWith('.json')).map(f => {
-    try { return JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) } catch { return null }
-  }).filter(Boolean)
-}
-
-function loadAgent(id) {
-  const p = path.join(agentsDir(), `${id}.json`)
-  try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch { return null }
-}
-
-function saveAgent(agent) {
-  const dir = agentsDir()
-  if (!dir) return
-  fs.mkdirSync(dir, { recursive: true })
-  fs.writeFileSync(path.join(dir, `${agent.id}.json`), JSON.stringify(agent, null, 2))
-}
-
-function createAgent(name, soul, model) {
-  const id = 'agent-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 4)
-  const agent = { id, name: name || 'Assistant', soul: soul || '', model: model || '' }
-  saveAgent(agent)
-  return agent
-}
+function agentsDir() { syncState(); return coreAgentsDir(); }
+function listAgents() { syncState(); return coreListAgents(); }
+function loadAgent(id) { syncState(); return coreLoadAgent(id); }
+function saveAgent(agent) { syncState(); coreSaveAgent(agent); }
+function createAgent(name, soul, model) { syncState(); return coreCreateAgent(name, soul, model); }
 
 // ── Tool definitions ──
 // Build Anthropic tools array (registry + built-in)
@@ -440,7 +262,7 @@ async function executeTool(name, input, config) {
       })
       if (result?.error) return `Error: ${result.error}`
       if (mainWindow) mainWindow.webContents.send('tasks-changed', currentSessionId)
-      // F048: Auto-rotation — when a task is done, check for unblocked tasks
+      // F048: Auto-rotation - when a task is done, check for unblocked tasks
       if (input.status === 'done' && mainWindow) {
         const allTasks = sessionStore.listTasks(clawDir, currentSessionId)
         const justDoneId = input.taskId
@@ -502,7 +324,7 @@ function savePrefs(p) {
   fs.writeFileSync(PREFS_PATH, JSON.stringify(p, null, 2))
 }
 
-// app.disableHardwareAcceleration() — removed: conflicts with hiddenInset rendering
+// app.disableHardwareAcceleration() - removed: conflicts with hiddenInset rendering
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -556,7 +378,7 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
   createWindow()
 
-  // Tray icon — AI Native menubar presence
+  // Tray icon - AI Native menubar presence
   const trayIconPath = path.join(__dirname, 'assets', 'trayTemplate.png')
   let trayIcon
   if (fs.existsSync(trayIconPath)) {
@@ -566,9 +388,12 @@ app.whenReady().then(() => {
     trayIcon = nativeImage.createEmpty()
   }
   tray = new Tray(trayIcon)
-  tray.setToolTip('Paw — 空闲待命中')
+  tray.setToolTip('Paw - 空闲待命中')
   tray.on('click', () => { mainWindow?.show(); mainWindow?.focus() })
   updateTrayMenu()
+
+  // Sync all globals to core/state after initialization
+  syncState()
 })
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
@@ -618,10 +443,10 @@ ipcMain.handle('create-claw-dir', async () => {
   }
 
   clawDir = dir
+  syncState()
   savePrefs({ clawDir })
   sessionStore.migrateFromJson(clawDir)
   startMemoryWatch()
-  // Background memory indexing
   buildMemoryIndex()
   return dir
 })
@@ -633,8 +458,8 @@ ipcMain.handle('select-claw-dir', async () => {
   })
   if (!result.canceled && result.filePaths[0]) {
     clawDir = result.filePaths[0]
+    syncState()
     savePrefs({ clawDir })
-    // Ensure essential subdirectories exist
     for (const sub of ['memory', 'sessions', 'agents', 'skills']) {
       const d = path.join(clawDir, sub)
       if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true })
@@ -767,7 +592,7 @@ ipcMain.handle('read-file', (_, filePath) => {
 
 // ── IPC: Chat with LLM ──
 
-// Current active requestId — renderer calls chat-prepare to get it before chat()
+// Current active requestId - renderer calls chat-prepare to get it before chat()
 let _nextRequestId = null
 ipcMain.handle('chat-prepare', () => {
   _nextRequestId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
@@ -791,7 +616,7 @@ ipcMain.handle('chat', async (_, { prompt, history, agentId, files }) => {
   const model = agent?.model || config.model
   if (!apiKey) throw new Error('No API key configured. Click ⚙️ to set up.')
 
-  // Build system prompt — agent soul takes priority
+  // Build system prompt - agent soul takes priority
   let systemPrompt = await buildSystemPrompt()
   if (agent?.soul) systemPrompt = agent.soul + '\n\n---\n\n' + systemPrompt
 
@@ -829,14 +654,14 @@ ipcMain.handle('chat', async (_, { prompt, history, agentId, files }) => {
       }
     }
   }
-  // Link understanding — async fetch link summaries (non-blocking)
+  // Link understanding - async fetch link summaries (non-blocking)
   let linkContext = ''
   try { linkContext = await extractLinkContext(prompt) } catch {}
   const textWithContext = linkContext ? `${prompt}\n\n---\n[Auto-fetched link context]\n${linkContext}` : prompt
   userContent.push({ type: 'text', text: textWithContext || '(attached files)' })
   messages.push({ role: 'user', content: userContent })
 
-  // Context compaction — auto-compress if history too long
+  // Context compaction - auto-compress if history too long
   const totalTokens = estimateMessagesTokens(messages)
   let finalMessages = messages
   if (totalTokens > COMPACT_THRESHOLD && messages.length > COMPACT_KEEP_RECENT * 2 + 2) {
@@ -853,125 +678,7 @@ ipcMain.handle('chat', async (_, { prompt, history, agentId, files }) => {
 })
 
 // Helper: reuse build-system-prompt logic
-async function buildSystemPrompt() {
-  const parts = []
-  if (!clawDir) return ''
-  // Cold boot loading chain — aligned with OpenClaw AGENTS.md order
-  // 1. Core identity files (ordered)
-  for (const f of ['SOUL.md', 'USER.md', 'NOW.md', 'AGENTS.md', 'IDENTITY.md']) {
-    const p = path.join(clawDir, f)
-    if (fs.existsSync(p)) parts.push(`## ${f}\n${fs.readFileSync(p, 'utf8')}`)
-  }
-  // 2. Memory navigation + shared state
-  const memDir = path.join(clawDir, 'memory')
-  if (fs.existsSync(memDir)) {
-    for (const f of ['INDEX.md', 'SHARED.md', 'SUBCONSCIOUS.md']) {
-      const p = path.join(memDir, f)
-      if (fs.existsSync(p)) parts.push(`## memory/${f}\n${fs.readFileSync(p, 'utf8').slice(0, 2000)}`)
-    }
-    // 3. Today + yesterday daily notes
-    const today = new Date().toISOString().slice(0, 10)
-    const yd = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
-    for (const d of [today, yd]) {
-      const p = path.join(memDir, `${d}.md`)
-      if (fs.existsSync(p)) parts.push(`## memory/${d}.md\n${fs.readFileSync(p, 'utf8').slice(0, 2000)}`)
-    }
-  }
-  // 4. Long-term memory (last, biggest file)
-  const memoryMd = path.join(clawDir, 'MEMORY.md')
-  if (fs.existsSync(memoryMd)) parts.push(`## MEMORY.md\n${fs.readFileSync(memoryMd, 'utf8')}`)
-  // 5. Skills (with frontmatter support + path compression)
-  const skillsDir = path.join(clawDir, 'skills')
-  if (fs.existsSync(skillsDir)) {
-    const skills = loadAllSkills(skillsDir)
-    const os = require('os')
-    const homeDir = os.homedir()
-    
-    // Always inject skills with `always: true`
-    const alwaysSkills = skills.filter(s => s.always)
-    for (const skill of alwaysSkills) {
-      const content = skill.body.slice(0, 3000)
-      const emoji = skill.emoji ? `${skill.emoji} ` : ''
-      // Compress path: /Users/kenefe/... → ~/...
-      const compressedPath = skill.path.startsWith(homeDir) 
-        ? '~' + skill.path.slice(homeDir.length) 
-        : skill.path
-      parts.push(`## Skill: ${emoji}${skill.name}\nPath: ${compressedPath}/SKILL.md\n\n${content}`)
-    }
-    
-    // Inject all other skills (for now, later we can filter by context)
-    const otherSkills = skills.filter(s => !s.always)
-    for (const skill of otherSkills) {
-      const content = skill.body.slice(0, 3000)
-      const emoji = skill.emoji ? `${skill.emoji} ` : ''
-      const compressedPath = skill.path.startsWith(homeDir) 
-        ? '~' + skill.path.slice(homeDir.length) 
-        : skill.path
-      parts.push(`## Skill: ${emoji}${skill.name}\nPath: ${compressedPath}/SKILL.md\n\n${content}`)
-    }
-  }
-  // 6. Memory sync instructions
-  parts.push('## Memory Sync\nAll sessions share the same memory/ directory. Write important context to memory/ files (e.g. memory/SHARED.md) so other sessions can see it. Use memory_search to recall prior context before answering questions about past work, decisions, or preferences.')
-  
-  // 7. Tools from registry + built-in tools
-  const toolsPrompt = getToolsPrompt()
-  const builtInTools = `
-**Built-in tools (require main.js state):**
-- **notify**: Send a desktop notification
-- **ui_status_set**: Update the sidebar status line (4-20 Chinese chars)
-- **memory_search**: Search MEMORY.md + memory/*.md by keywords. Use BEFORE answering questions about prior work, decisions, dates, people, preferences, or todos.
-- **memory_get**: Read a snippet from MEMORY.md or memory/*.md with optional line range. Use AFTER memory_search to pull only the needed lines.
-- **task_create**: Create a new task in the shared task list
-- **task_update**: Update task status/assignee
-- **task_list**: List all tasks in current session
-- **send_message**: Send a message to another agent
-
-### Important Rules
-- When the user asks you to "write", "save", "create a file", or "存成markdown" — you MUST call file_write to actually create the file. Do not just output the content as text.
-- After writing a file, tell the user the file path.
-- Use ui_status_set to keep the status updated: at start, before tools, when done.
-- You can chain multiple tools in sequence (up to 5 rounds). For example: search → search → file_write.
-- Before answering questions about past work, decisions, or preferences — call memory_search first.
-- Prefer Chinese for status text. Example: '在撰写报告' or '已保存文件'.`
-  
-  parts.push(toolsPrompt + '\n' + builtInTools)
-
-  // Inject task list summary if any tasks exist
-  if (currentSessionId && clawDir) {
-    try {
-      const tasks = sessionStore.listTasks(clawDir, currentSessionId)
-      if (tasks.length) {
-        const statusIcon = { pending: '⏳', 'in-progress': '🔄', done: '✅' }
-        const lines = tasks.map(t => {
-          let line = `[${t.id}] ${statusIcon[t.status] || '?'} ${t.status}: ${t.title}`
-          if (t.assignee) line += ` (${t.assignee})`
-          if (t.dependsOn?.length) line += ` [depends: ${t.dependsOn.join(',')}]`
-          return line
-        })
-        parts.push(`## Shared Task List\n${lines.join('\n')}\n\nUse task_create/task_update/task_list to manage tasks. Claim a task before working on it. Complete when done.`)
-      }
-    } catch {}
-  }
-
-  // Inject task list summary if any
-  if (currentSessionId && clawDir) {
-    try {
-      const tasks = sessionStore.listTasks(clawDir, currentSessionId)
-      if (tasks.length) {
-        const icons = { pending: '⏳', 'in-progress': '🔄', done: '✅' }
-        const lines = tasks.map(t => {
-          let s = `[${t.id}] ${icons[t.status] || '?'} ${t.status}: ${t.title}`
-          if (t.assignee) s += ` (${t.assignee})`
-          if (t.dependsOn?.length) s += ` [depends: ${t.dependsOn.join(',')}]`
-          return s
-        })
-        parts.push(`## Shared Task List\n${lines.join('\n')}\n\nUse task_create/task_update/task_list to manage tasks. Claim a task before working on it. Complete when done.`)
-      }
-    } catch {}
-  }
-
-  return parts.join('\n\n---\n\n')
-}
+async function buildSystemPrompt() { syncState(); return coreBuildSystemPrompt(); }
 
 // ── Anthropic Streaming ──
 
@@ -1180,7 +887,7 @@ ipcMain.handle('heartbeat-stop', () => { stopHeartbeat(); return true })
 
 function pushStatus(win, state, detail) {
   win?.webContents?.send('agent-status', { state, detail })
-  if (tray) tray.setToolTip(`Paw — ${detail || state}`)
+  if (tray) tray.setToolTip(`Paw - ${detail || state}`)
 }
 
 function sendNotification(title, body) {
@@ -1206,7 +913,7 @@ function updateTrayMenu() {
   tray.setContextMenu(menu)
 }
 
-// requestId is optional — when provided, renderer routes to per-card status
+// requestId is optional - when provided, renderer routes to per-card status
 let _activeRequestId = null
 function pushWatsonStatus(level, text, requestId) {
   const rid = requestId || _activeRequestId
@@ -1216,7 +923,7 @@ function pushWatsonStatus(level, text, requestId) {
   _trayStatusText = text || '空闲待命中'
   _trayStatusLevel = level || 'idle'
   if (tray) {
-    tray.setToolTip(`Paw — ${_trayStatusText}`)
+    tray.setToolTip(`Paw - ${_trayStatusText}`)
     // macOS: set tray title to show status text next to icon
     tray.setTitle(level === 'idle' ? '' : text)
     updateTrayMenu()
