@@ -44,12 +44,25 @@ Or download the signed DMG from [Releases](https://github.com/momomo-agent/paw/r
 ~/my-workspace/
 ├── SOUL.md          # personality
 ├── MEMORY.md        # long-term memory
-├── config.json      # provider + api key
+├── .paw/config.json # provider + api key
 ├── agents/          # custom agents
 ├── sessions/        # chat history
 ├── memory/          # shared memory (real-time sync)
 └── skills/          # capabilities (inject + execute)
 ```
+
+## v0.19.0 Changelog
+
+**M18: Lightweight Architecture Refactor**
+- Extracted 12 core modules from main.js (1243→936 lines, -25%)
+- `core/state.js` — AppState singleton replaces scattered globals
+- `core/config.js` — config loading with legacy path migration
+- `core/prompt-builder.js` — system prompt construction (fixed duplicate task list bug)
+- `core/compaction.js` — context compaction with LLM summarization
+- `core/api-keys.js`, `core/llm-raw.js`, `core/agents.js`, `core/link-extract.js`
+- `core/heartbeat.js`, `core/notify.js`, `core/tray.js`, `core/memory-watch.js`
+- syncState() bridge between legacy globals and core modules
+- DBB auto-test: 10/10 pass via Playwright CDP
 
 ## v0.18.0 Changelog
 
