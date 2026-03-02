@@ -30,6 +30,7 @@
       "assets/**/*",
       "tools/**/*",
       "skills/**/*",
+      "core/**/*",
       "package.json"
     ],
     "dmg": {
