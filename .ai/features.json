@@ -381,25 +381,25 @@
     "id": "F055",
     "name": "AppState 单例",
     "milestone": "M18",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F056",
     "name": "核心模块拆分",
     "milestone": "M18",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F057",
     "name": "Prompt Builder 独立",
     "milestone": "M18",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F058",
     "name": "Streaming 独立",
     "milestone": "M18",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F059",

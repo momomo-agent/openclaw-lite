@@ -7,6 +7,21 @@ const memoryIndex = require('./memory-index')
 const { getTool, getAnthropicTools, getToolsPrompt } = require('./tools')
 const { loadAllSkills } = require('./skills/frontmatter')
 
+// ── Core modules (M18 refactor) ──
+const state = require('./core/state')
+const { configPath: coreConfigPath, loadConfig: coreLoadConfig } = require('./core/config')
+const { getApiKey, rotateApiKey, recordKeyUsage } = require('./core/api-keys')
+const { estimateTokens: coreEstimateTokens, estimateMessagesTokens: coreEstimateMessagesTokens } = require('./core/compaction')
+const { extractLinkContext: coreExtractLinkContext } = require('./core/link-extract')
+const { listAgents: coreListAgents, loadAgent: coreLoadAgent, saveAgent: coreSaveAgent, createAgent: coreCreateAgent, agentsDir: coreAgentsDir } = require('./core/agents')
+const { pushStatus: corePushStatus, sendNotification: coreSendNotification, pushWatsonStatus: corePushWatsonStatus } = require('./core/notify')
+const { startHeartbeat: coreStartHeartbeat, stopHeartbeat: coreStopHeartbeat } = require('./core/heartbeat')
+const { updateTrayMenu: coreUpdateTrayMenu } = require('./core/tray')
+const { buildMemoryIndex: coreBuildMemoryIndex, startMemoryWatch: coreStartMemoryWatch, stopMemoryWatch: coreStopMemoryWatch } = require('./core/memory-watch')
+const { buildSystemPrompt: coreBuildSystemPrompt } = require('./core/prompt-builder')
+const { streamAnthropicRaw: coreLlmAnthropicRaw, streamOpenAIRaw: coreLlmOpenAIRaw } = require('./core/llm-raw')
+
+// Legacy globals — synced to state for backward compat during migration
 let mainWindow
 let clawDir = null
 let currentSessionId = null
@@ -110,36 +125,7 @@ async function compactHistory(messages, config) {
 }
 
 // Raw API calls for compaction (no streaming to UI)
-// ── API Key Rotation ──
-let currentKeyIndex = 0;
-let keyStats = {}; // { keyIndex: { uses: 0, failures: 0 } }
-
-function getApiKey(config) {
-  // Support both single key (string) and multiple keys (array)
-  if (Array.isArray(config.apiKeys) && config.apiKeys.length > 0) {
-    return config.apiKeys[currentKeyIndex % config.apiKeys.length];
-  }
-  return config.apiKey;
-}
-
-function rotateApiKey(config) {
-  if (Array.isArray(config.apiKeys) && config.apiKeys.length > 1) {
-    currentKeyIndex = (currentKeyIndex + 1) % config.apiKeys.length;
-    console.log(`[API] Rotated to key ${currentKeyIndex + 1}/${config.apiKeys.length}`);
-    return true;
-  }
-  return false;
-}
-
-function recordKeyUsage(success) {
-  if (!keyStats[currentKeyIndex]) {
-    keyStats[currentKeyIndex] = { uses: 0, failures: 0 };
-  }
-  keyStats[currentKeyIndex].uses++;
-  if (!success) {
-    keyStats[currentKeyIndex].failures++;
-  }
-}
+// ── API Key Rotation → delegated to core/api-keys.js ──
 
 async function streamAnthropicRaw(messages, system, config) {
   const base = (config.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '')
