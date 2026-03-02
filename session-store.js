@@ -55,12 +55,15 @@ function ensureSchema(db) {
     )
   `)
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id)`)
+  // Add status columns (safe migration for existing DBs)
+  try { db.exec(`ALTER TABLE sessions ADD COLUMN status_level TEXT DEFAULT 'idle'`) } catch {}
+  try { db.exec(`ALTER TABLE sessions ADD COLUMN status_text TEXT DEFAULT ''`) } catch {}
 }
 
 function listSessions(clawDir) {
   const d = getDb(clawDir)
   if (!d) return []
-  return d.prepare('SELECT id, title, created_at as createdAt, updated_at as updatedAt FROM sessions ORDER BY updated_at DESC').all()
+  return d.prepare('SELECT id, title, created_at as createdAt, updated_at as updatedAt, status_level as statusLevel, status_text as statusText FROM sessions ORDER BY updated_at DESC').all()
 }
 
 function loadSession(clawDir, id) {
@@ -192,4 +195,16 @@ function closeDb() {
   if (db) { try { db.close() } catch {} db = null; dbPath = null }
 }
 
-module.exports = { getDb, listSessions, loadSession, saveSession, deleteSession, createSession, migrateFromJson, closeDb, createTask, updateTask, listTasks }
+function updateSessionStatus(clawDir, sessionId, level, text) {
+  const d = getDb(clawDir)
+  if (!d) return
+  d.prepare('UPDATE sessions SET status_level = ?, status_text = ? WHERE id = ?').run(level || 'idle', text || '', sessionId)
+}
+
+function getSessionStatus(clawDir, sessionId) {
+  const d = getDb(clawDir)
+  if (!d) return null
+  return d.prepare('SELECT status_level as level, status_text as text FROM sessions WHERE id = ?').get(sessionId)
+}
+
+module.exports = { getDb, listSessions, loadSession, saveSession, deleteSession, createSession, migrateFromJson, closeDb, createTask, updateTask, listTasks, updateSessionStatus, getSessionStatus }

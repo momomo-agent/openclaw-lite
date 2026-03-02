@@ -62,7 +62,7 @@ async function buildSystemPrompt() {
   const builtInTools = `
 **Built-in tools (require main.js state):**
 - **notify**: Send a desktop notification
-- **ui_status_set**: Update the sidebar status line (4-20 Chinese chars)
+- **ui_status_set**: Update the sidebar status line (4-20 Chinese chars). **IMPORTANT: Always call this tool** — at the start of work, before/after tool use, and when done. Your status text is shown to the user in the sidebar and persists across sessions. Write a concise, human description of what you're doing (e.g. '在分析代码', '已完成重构'). This is the primary way the user sees your state.
 - **memory_search**: Search MEMORY.md + memory/*.md by keywords. Use BEFORE answering questions about prior work, decisions, dates, people, preferences, or todos.
 - **memory_get**: Read a snippet from MEMORY.md or memory/*.md with optional line range. Use AFTER memory_search to pull only the needed lines.
 - **task_create**: Create a new task in the shared task list

@@ -95,6 +95,13 @@
             <label>Base URL <span class="hint">(optional)</span></label>
             <input id="cfgBaseUrl" type="text" placeholder="https://api.anthropic.com">
             <button class="secondary-btn" onclick="window.api.openClawDir()">Open Workspace in Finder</button>
+            <div style="margin-top:8px">
+              <label>Workspace Path</label>
+              <div style="display:flex;gap:8px;align-items:center">
+                <code id="cfgWorkspacePath" style="flex:1;color:#888;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></code>
+                <button class="secondary-btn" onclick="changeWorkspace()" style="white-space:nowrap">Change</button>
+              </div>
+            </div>
           </div>
           <!-- Model tab -->
           <div class="settings-tab-content" id="tab-model">

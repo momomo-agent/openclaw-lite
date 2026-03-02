@@ -58,4 +58,6 @@ contextBridge.exposeInMainWorld('api', {
   onMemoryChanged: (cb) => { ipcRenderer.removeAllListeners('memory-changed'); ipcRenderer.on('memory-changed', (_, d) => cb(d)) },
   // Notify
   notify: (title, body) => ipcRenderer.invoke('notify', { title, body }),
+  // Status persistence
+  updateSessionStatus: (sessionId, level, text) => ipcRenderer.invoke('update-session-status', { sessionId, level, text }),
 })

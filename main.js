@@ -394,6 +394,9 @@ app.whenReady().then(() => {
 
   // Sync all globals to core/state after initialization
   syncState()
+
+  // Start heartbeat (default-on)
+  startHeartbeat()
 })
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
@@ -420,22 +423,19 @@ ipcMain.handle('create-claw-dir', async () => {
   if (result.canceled || !result.filePaths[0]) return null
   const dir = result.filePaths[0]
 
-  // Scaffold initial files
-  const scaffold = {
-    'SOUL.md': '# Soul\n\nDescribe who your AI assistant is.\n',
-    'AGENTS.md': '# Agents\n\nWorkspace instructions and conventions.\n',
-    'USER.md': '# User\n\nAbout you.\n',
-  }
-  // Config goes in .paw/
+  // Scaffold from templates/
   const pawDir = path.join(dir, '.paw')
   fs.mkdirSync(pawDir, { recursive: true })
   const configPath = path.join(pawDir, 'config.json')
   if (!fs.existsSync(configPath)) {
     fs.writeFileSync(configPath, JSON.stringify({ provider: 'anthropic', apiKey: '', model: '' }, null, 2))
   }
-  for (const [name, content] of Object.entries(scaffold)) {
-    const p = path.join(dir, name)
-    if (!fs.existsSync(p)) fs.writeFileSync(p, content)
+  const templatesDir = path.join(__dirname, 'templates')
+  if (fs.existsSync(templatesDir)) {
+    for (const f of fs.readdirSync(templatesDir)) {
+      const dest = path.join(dir, f)
+      if (!fs.existsSync(dest)) fs.copyFileSync(path.join(templatesDir, f), dest)
+    }
   }
   for (const d of ['skills', 'memory', 'sessions', 'agents']) {
     const p = path.join(dir, d)
@@ -460,7 +460,7 @@ ipcMain.handle('select-claw-dir', async () => {
     clawDir = result.filePaths[0]
     syncState()
     savePrefs({ clawDir })
-    for (const sub of ['memory', 'sessions', 'agents', 'skills']) {
+    for (const sub of ['memory', 'agents', 'skills']) {
       const d = path.join(clawDir, sub)
       if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true })
     }
@@ -861,9 +861,17 @@ function startHeartbeat() {
   stopHeartbeat()
   if (!clawDir) return
   let cfg; try { cfg = JSON.parse(fs.readFileSync(configPath(), 'utf8')) } catch { return }
-  const hb = cfg.heartbeat; if (!hb?.enabled) return
+  if (cfg.heartbeat?.enabled === false) return
+  const hb = cfg.heartbeat || {}
   const ms = (hb.intervalMinutes || 30) * 60000
-  const prompt = hb.prompt || 'Heartbeat: check if anything needs attention. Reply HEARTBEAT_OK if nothing.'
+  let prompt = hb.prompt || 'Heartbeat: check if anything needs attention. Reply HEARTBEAT_OK if nothing.'
+  // Append HEARTBEAT.md if present
+  if (clawDir) {
+    const hbPath = path.join(clawDir, 'HEARTBEAT.md')
+    if (fs.existsSync(hbPath)) {
+      try { prompt += '\n\n' + fs.readFileSync(hbPath, 'utf8') } catch {}
+    }
+  }
   heartbeatTimer = setInterval(async () => {
     try {
       const c = JSON.parse(fs.readFileSync(configPath(), 'utf8'))
@@ -919,6 +927,10 @@ function pushWatsonStatus(level, text, requestId) {
   const rid = requestId || _activeRequestId
   const payload = { level, text, requestId: rid }
   mainWindow?.webContents?.send('watson-status', payload)
+  // Persist status to SQLite
+  if (currentSessionId && clawDir) {
+    try { sessionStore.updateSessionStatus(clawDir, currentSessionId, level, text) } catch {}
+  }
   // Update tray
   _trayStatusText = text || '空闲待命中'
   _trayStatusLevel = level || 'idle'
@@ -934,3 +946,10 @@ function pushWatsonStatus(level, text, requestId) {
 }
 
 ipcMain.handle('notify', (_, { title, body }) => { sendNotification(title, body); return true })
+
+ipcMain.handle('update-session-status', (_, { sessionId, level, text }) => {
+  if (clawDir && sessionId) {
+    try { sessionStore.updateSessionStatus(clawDir, sessionId, level, text) } catch {}
+  }
+  return true
+})

@@ -13,6 +13,10 @@ function setSessionStatus(sessionId, level, text, aiAuthored = false) {
   const t = document.querySelector(`.session-item[data-id="${sessionId}"] .session-status-text`)
   if (dot) dot.className = `session-status-dot ${level}`
   if (t) t.textContent = text || ''
+  // Persist to SQLite
+  if (window.api.updateSessionStatus) {
+    window.api.updateSessionStatus(sessionId, level, text)
+  }
 }
 
 // ── Request Event Bus ──
@@ -117,9 +121,28 @@ async function enterChat() {
   await refreshSessionList()
   // Auto-create first session if none exist
   const sessions = await window.api.listSessions()
-  if (!sessions.length) await newSession()
+  if (!sessions.length) {
+    await newSession()
+    bootstrapFirstSession()
+  }
   else await switchSession(sessions[0].id)
   document.getElementById('input').focus()
+}
+
+// ── Bootstrap: cold start ──
+// On very first session, auto-send a bootstrap prompt so the AI reads its
+// identity files (SOUL.md, USER.md, IDENTITY.md) and introduces itself.
+async function bootstrapFirstSession() {
+  if (!currentSessionId) return
+  // Only bootstrap if config has an API key set
+  const config = await window.api.getConfig()
+  if (!config?.apiKey) return
+  // Only if session has no messages
+  const session = await window.api.loadSession(currentSessionId)
+  if (session?.messages?.length) return
+  // Inject the bootstrap prompt as if the user typed it
+  input.value = '你好，请读取 SOUL.md 和 USER.md，介绍一下你自己。'
+  send()
 }
 
 // ── Session management ──
@@ -129,6 +152,10 @@ async function refreshSessionList() {
   const list = document.getElementById('sessionList')
   list.innerHTML = ''
   for (const s of sessions) {
+    // Pre-populate status from DB if not already in memory
+    if (!sessionStatus.has(s.id) && s.statusLevel) {
+      sessionStatus.set(s.id, { level: s.statusLevel, text: s.statusText || '' })
+    }
     const el = document.createElement('div')
     el.className = 'session-item' + (s.id === currentSessionId ? ' active' : '')
     el.dataset.id = s.id
@@ -309,7 +336,7 @@ async function send() {
   // Current text segment
   let currentTextEl = document.createElement('div')
   currentTextEl.className = 'msg-content md-content'
-  currentTextEl.innerHTML = '<span class="typing-indicator">思考中…</span>'
+  currentTextEl.innerHTML = '<span class="typing-indicator">…</span>'
   flowContainer.appendChild(currentTextEl)
   const contentEl = currentTextEl
   let fullText = ''
@@ -317,7 +344,7 @@ async function send() {
   let myToolSteps = []
   let currentToolGroup = null
   const myRequestId = await window.api.chatPrepare()
-  setSessionStatus(sendSessionId, 'thinking', '思考中…')
+  setSessionStatus(sendSessionId, 'thinking', '…')
 
   // Register handlers in the event bus
   requestHandlers.set(myRequestId, {
@@ -349,15 +376,16 @@ async function send() {
     },
     onToolStep(d) {
       myToolSteps.push({ name: d.name, output: String(d.output).slice(0, 120) })
-      setSessionStatus(sendSessionId, 'running', `执行 ${d.name}…`)
+      setSessionStatus(sendSessionId, 'running', '…')
       // Insert tool step inline in the flow (after current text)
       if (!currentToolGroup) {
         currentToolGroup = document.createElement('div')
         currentToolGroup.className = 'tool-group-inline'
         currentToolGroup.innerHTML = '<div class="tool-group-header">🔧 <span class="tool-count">0</span> 个工具调用 <span class="tool-expand">▼</span></div><div class="tool-group-body"></div>'
-        currentToolGroup.querySelector('.tool-group-header').onclick = () => {
-          const body = currentToolGroup.querySelector('.tool-group-body')
-          const arrow = currentToolGroup.querySelector('.tool-expand')
+        const thisGroup = currentToolGroup
+        thisGroup.querySelector('.tool-group-header').onclick = () => {
+          const body = thisGroup.querySelector('.tool-group-body')
+          const arrow = thisGroup.querySelector('.tool-expand')
           const show = body.style.display === 'none'
           body.style.display = show ? 'block' : 'none'
           arrow.textContent = show ? '▼' : '▶'
@@ -427,7 +455,7 @@ async function send() {
       }
     }
   } catch (err) {
-    setSessionStatus(sendSessionId, 'idle', '出错了')
+    setSessionStatus(sendSessionId, 'idle', '出错')
     requestHandlers.delete(myRequestId)
     requestHandlers.delete(myRequestId)
     if (!fullText) {
@@ -526,16 +554,30 @@ function esc(s) {
 
 async function openSettings() {
   const config = await window.api.getConfig() || {}
+  const prefs = await window.api.getPrefs()
   document.getElementById('cfgProvider').value = config.provider || 'anthropic'
   document.getElementById('cfgApiKey').value = config.apiKey || ''
   document.getElementById('cfgBaseUrl').value = config.baseUrl || ''
   document.getElementById('cfgModel').value = config.model || ''
   document.getElementById('cfgTavilyKey').value = config.tavilyKey || ''
-  document.getElementById('cfgHeartbeat').checked = config.heartbeat?.enabled || false
+  document.getElementById('cfgHeartbeat').checked = config.heartbeat?.enabled !== false
   document.getElementById('cfgHeartbeatInterval').value = config.heartbeat?.intervalMinutes || 30
   document.getElementById('cfgExecApproval').checked = config.execApproval !== false
+  document.getElementById('cfgWorkspacePath').textContent = prefs.clawDir || '(not set)'
   switchSettingsTab('general')
   document.getElementById('settingsOverlay').style.display = 'flex'
+}
+
+async function changeWorkspace() {
+  const dir = await window.api.selectClawDir()
+  if (dir) {
+    closeSettings()
+    // Reload the app with the new workspace
+    sessionStatus.clear()
+    currentSessionId = null
+    history = []
+    await enterChat()
+  }
 }
 
 function closeSettings() {
