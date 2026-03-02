@@ -29,5 +29,20 @@
 - 数据格式与 OpenClaw 完全兼容
 - macOS 原生体验（后续可扩展 Windows/Linux）
 
+## Agent 模型
+
+Agent 不是 Paw 的功能，agent 是参与者——跟人一样来去自由。
+
+```
+Agent
+├── 身份（名字、soul、记忆）
+└── 工具（怎么行动：CC、终端、浏览器、文件…）
+```
+
+- **Session = 对话空间**，参与者有两种：人和 agent
+- **创建成本趋近于零** — 群聊里需要一个角色，现场建、现场用，不需要提前注册
+- **工具是 agent 的手** — Claude Code、web_fetch、file_write 都是工具层。CC 是个重量级工具（持久进程），但跟轻量工具是同一层抽象
+- **CC 不是 agent** — agent 有 soul、有记忆、有人格。CC 没有。Agent 在需要写代码时调 CC，就像人需要写代码时打开终端
+
 ## 待定
 - 产品名称和项目名称待定

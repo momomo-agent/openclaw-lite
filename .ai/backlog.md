@@ -4,7 +4,11 @@
 
 ## 待分配（Backlog）
 
-*(所有 backlog 项目已完成)*
+| # | 需求 | 来源 | 优先级 | 备注 |
+|---|------|------|--------|------|
+| B036 | Agent 即参与者 | kenefe | P0 | Agent 和人一样是 session 的参与者，可以随时创建、加入、离开，创建成本趋近于零。不需要提前在 Agent Manager 注册。 |
+| B037 | 工具层抽象 | kenefe | P1 | Agent 的行动能力可插拔。工具分轻量（单次调用，如 file_write）和重量（持久进程，如 CC）。Paw 只定义协议。 |
+| B038 | Claude Code 作为工具 | kenefe | P0 | 第一个持久进程类工具。Agent 在需要编码时调用 CC，CC 不是 agent，是 agent 手里的工具。依赖 B037。 |
 
 ## 已完成（✅ 已分配到里程碑）
 
