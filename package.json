@@ -45,6 +45,7 @@
     "@mozilla/readability": "^0.6.0",
     "better-sqlite3": "^12.6.2",
     "linkedom": "^0.18.12",
+    "marked-highlight": "^2.2.3",
     "node-llama-cpp": "^3.17.1",
     "sqlite-vec": "^0.1.7-alpha.2"
   }

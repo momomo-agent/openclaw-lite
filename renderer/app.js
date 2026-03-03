@@ -57,11 +57,14 @@ window.api.onTrayNewChat(() => { newSession() })
 
 marked.setOptions({
   breaks: true,
+})
+marked.use(markedHighlight.markedHighlight({
+  langPrefix: 'hljs language-',
   highlight: (code, lang) => {
     if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value
     return hljs.highlightAuto(code).value
   },
-})
+}))
 
 // File click handler — detect file paths in rendered messages
 document.addEventListener('click', async (e) => {
