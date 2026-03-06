@@ -245,8 +245,8 @@ async function refreshSessionList() {
       lastGroup = group
     }
     const st = sessionStatus.get(s.id) || { level: 'idle', text: '' }
-    // Status text: use AI-authored status if available, otherwise last message preview
-    const statusText = st.text || s.lastMessage || ''
+    // Idle: show last message preview. Active/AI-authored: show status text
+    const statusText = (st.level === 'idle' || st.level === 'done') ? (s.lastMessage || '') : (st.text || s.lastMessage || '')
     el.innerHTML = `<div class="session-item-main"><span class="session-title">${esc(s.title)}</span></div><div class="session-item-meta"><span class="session-status-dot ${st.level}"></span><span class="session-status-text">${esc(statusText)}</span><span class="del-btn" onclick="event.stopPropagation();deleteSession('${s.id}')">✕</span></div>`
     let clickTimer = null
     el.onclick = () => {
