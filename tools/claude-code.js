@@ -92,7 +92,12 @@ registerTool({
         });
 
         proc.stderr.on('data', (data) => {
-          stderr += data.toString();
+          const chunk = data.toString();
+          stderr += chunk;
+          // Stream stderr to UI as progress (JSON mode has no stdout streaming)
+          if (mainWindow) {
+            mainWindow.webContents.send('cc-output', { chunk, total: stderr.length });
+          }
         });
 
         proc.on('close', (code) => {

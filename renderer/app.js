@@ -68,18 +68,19 @@ window.api.onCcStatus(({ status, task, error, length }) => {
   if (status === 'running') {
     ccOutputText = ''
     // Find the last assistant card's tool area or create one
-    const cards = document.querySelectorAll('.card.assistant')
+    const cards = document.querySelectorAll('.msg-card.assistant')
     const lastCard = cards[cards.length - 1]
     if (lastCard) {
       let toolArea = lastCard.querySelector('.tool-steps')
       if (!toolArea) {
         toolArea = document.createElement('div')
         toolArea.className = 'tool-steps'
-        lastCard.querySelector('.card-body')?.appendChild(toolArea)
+        const flow = lastCard.querySelector('.msg-flow')
+        if (flow) flow.appendChild(toolArea)
       }
       ccOutputEl = document.createElement('div')
       ccOutputEl.className = 'tool-step cc-output expanded'
-      ccOutputEl.innerHTML = `<div class="tool-step-header"><span class="tool-icon">🔧</span> <strong>Claude Code</strong> <span class="cc-task">${esc(task || '')}</span> <button class="cc-stop-btn" onclick="window.api.ccStop()">Stop</button></div><pre class="cc-pre"></pre>`
+      ccOutputEl.innerHTML = `<div class="tool-step-header"><span class="tool-icon">🤖</span> <strong>Claude Code</strong> <span class="cc-task">${esc(task || '')}</span> <button class="cc-stop-btn" onclick="window.api.ccStop()">Stop</button></div><pre class="cc-pre"></pre>`
       toolArea.appendChild(ccOutputEl)
     }
   } else if (status === 'done') {
