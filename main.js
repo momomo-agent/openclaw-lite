@@ -540,10 +540,17 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
     finalMessages = await compactHistory(messages, { apiKey, baseUrl, model, provider })
   }
 
-  if (provider === 'anthropic') {
-    return await streamAnthropic(finalMessages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow, requestId, chatTools)
-  } else {
-    return await streamOpenAI(finalMessages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow, requestId, chatTools)
+  try {
+    console.log(`[Paw] chat handler: provider=${provider} model=${model} msgs=${finalMessages.length} tools=${chatTools.length} reqId=${requestId}`)
+    if (provider === 'anthropic') {
+      return await streamAnthropic(finalMessages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow, requestId, chatTools)
+    } else {
+      return await streamOpenAI(finalMessages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow, requestId, chatTools)
+    }
+  } catch (err) {
+    console.error('[Paw] chat error:', err.message, err.stack?.split('\n')[1])
+    pushStatus(mainWindow, 'error', err.message.slice(0, 80))
+    throw err
   }
 })
 
@@ -586,7 +593,9 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
       system: systemPrompt || undefined,
       messages: msgs, tools: activeTools,
     }
+    console.log(`[Paw] streamAnthropic round=${round} endpoint=${endpoint} model=${body.model} msgCount=${msgs.length} toolCount=${activeTools.length}`)
     const res = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body) })
+    console.log(`[Paw] streamAnthropic response status=${res.status}`)
     if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${await res.text()}`)
 
     const reader = res.body.getReader()
