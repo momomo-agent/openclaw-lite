@@ -77,11 +77,15 @@
 - Gate: 语法检查 ✅，E2E + DBB 待验证
 
 ## M19 — 主/轻量 Agent 分层 (v0.20.0)
-- F061: 轻量 Agent 数据模型（session_agents SQLite 表 + CRUD 函数）
-- F062: 轻量 Agent CRUD（IPC handlers + preload + create_agent/remove_agent LLM 工具）
-- F063: 主 Agent 身份确立（chat handler 支持轻量 agent ID，role 注入 system prompt）
-- F064: 轻量 Agent 对话路由（@mention 优先查 session agents，fallback 查模板）
-- F065: 轻量 Agent UI（Members 面板：创建角色 + 从模板添加 + 删除）
-- F066: Agent 工具适配（send_message/auto-rotation 支持轻量 agent）
+- F061: 轻量 Agent 数据模型（session_agents SQLite 表 + CRUD + 级联删除 + 索引）
+- F062: 轻量 Agent CRUD（3 IPC handlers + preload + create_agent/remove_agent LLM 工具）
+- F063: 主 Agent 身份确立（agentId.startsWith('a') 走 session agent，主 Agent 用 SOUL.md）
+- F064: 轻量 Agent 对话路由（@mention 优先查 session agents，fuzzy match，fallback 查模板）
+- F065: 轻量 Agent UI（Members 面板：轻量 agent 列表 + 创建表单 + 从模板添加 + 删除）
+- F066: Agent 工具适配（send_message 先查 session agents，session-agents-changed 事件同步 UI）
+- F067: 集成验证 — 代码审查全通过（数据层 CRUD、IPC、路由、UI、工具适配）
+- 新增 core/router.js：LLM 路由层（2消息策略 + fuzzy name match + JSON 解析 + fallback）
+- 新增 templates/ 目录：AGENTS.md, HEARTBEAT.md, IDENTITY.md, SOUL.md, USER.md 工作区模板
 - 设计选择：所有 agent 平等参与，不区分 subagent/teammate，不做能力限制
-- Gate: 语法检查 ✅，E2E 启动 ✅，功能验证待做
+- 代码量：main.js 1107 + core/ 660 + renderer 888 + session-store 259 = ~2900 行
+- Gate: 语法检查 ✅，代码审查 ✅，E2E 需手动验证
