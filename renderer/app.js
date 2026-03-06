@@ -176,10 +176,6 @@ async function openExisting() {
 async function enterChat() {
   document.getElementById('setupScreen').style.display = 'none'
   document.getElementById('chatScreen').style.display = 'flex'
-  // Show current model in header
-  const config = await window.api.getConfig() || {}
-  const modelEl = document.getElementById('currentModel')
-  if (modelEl) modelEl.textContent = config.model || (config.provider === 'openai' ? 'gpt-4o' : 'claude-sonnet-4')
   await refreshSessionList()
   // Auto-create first session if none exist
   const sessions = await window.api.listSessions()
@@ -802,9 +798,6 @@ async function saveSettings() {
   await window.api.saveConfig(config)
   if (config.heartbeat.enabled) await window.api.heartbeatStart()
   else await window.api.heartbeatStop()
-  // Update model display in header
-  const modelEl = document.getElementById('currentModel')
-  if (modelEl) modelEl.textContent = config.model || (config.provider === 'openai' ? 'gpt-4o' : 'claude-sonnet-4')
   closeSettings()
 }
 
