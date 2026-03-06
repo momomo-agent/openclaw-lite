@@ -59,7 +59,7 @@ registerTool({
         '--print',
         '--output-format', 'json',
         '--dangerously-skip-permissions',
-        '--model', 'sonnet',  // Force sonnet for speed (opus is too slow for tool calls)
+        // Uses model from ~/.claude/settings.json (currently opus via subrouter)
       ];
 
       // Continue previous session if requested and available
@@ -74,9 +74,10 @@ registerTool({
         let stderr = '';
         let textOutput = ''; // For streaming display
 
-        const proc = spawn('claude', ccArgs, {
+        // Resolve claude binary path (shell: false needs absolute or PATH-visible path)
+        const claudePath = process.env.HOME + '/.local/bin/claude';
+        const proc = spawn(claudePath, ccArgs, {
           cwd: workdir,
-          shell: true,
           env: { ...process.env, TERM: 'dumb' },
         });
 
