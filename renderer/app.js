@@ -176,6 +176,10 @@ async function openExisting() {
 async function enterChat() {
   document.getElementById('setupScreen').style.display = 'none'
   document.getElementById('chatScreen').style.display = 'flex'
+  // Show current model in header
+  const config = await window.api.getConfig() || {}
+  const modelEl = document.getElementById('currentModel')
+  if (modelEl) modelEl.textContent = config.model || (config.provider === 'openai' ? 'gpt-4o' : 'claude-sonnet-4')
   await refreshSessionList()
   // Auto-create first session if none exist
   const sessions = await window.api.listSessions()
@@ -209,6 +213,16 @@ async function refreshSessionList() {
   const sessions = await window.api.listSessions()
   const list = document.getElementById('sessionList')
   list.innerHTML = ''
+  // Clear search
+  const searchInput = document.getElementById('sessionSearch')
+  if (searchInput) searchInput.value = ''
+  
+  // Time grouping
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const yesterday = new Date(today - 86400000)
+  let lastGroup = ''
+  
   for (const s of sessions) {
     // Pre-populate status from DB if not already in memory
     if (!sessionStatus.has(s.id) && s.statusLevel) {
@@ -217,6 +231,19 @@ async function refreshSessionList() {
     const el = document.createElement('div')
     el.className = 'session-item' + (s.id === currentSessionId ? ' active' : '')
     el.dataset.id = s.id
+    
+    // Time group label
+    const updatedAt = new Date(s.updated_at || s.created_at)
+    let group = '更早'
+    if (updatedAt >= today) group = '今天'
+    else if (updatedAt >= yesterday) group = '昨天'
+    if (group !== lastGroup) {
+      const label = document.createElement('div')
+      label.className = 'session-group-label'
+      label.textContent = group
+      list.appendChild(label)
+      lastGroup = group
+    }
     const st = sessionStatus.get(s.id) || { level: 'idle', text: '' }
     el.innerHTML = `<div class="session-item-main"><span class="session-status-dot ${st.level}"></span><span class="session-title">${esc(s.title)}</span></div><div class="session-item-meta"><span class="session-status-text">${esc(st.text)}</span><span class="del-btn" onclick="event.stopPropagation();deleteSession('${s.id}')">✕</span></div>`
     let clickTimer = null
@@ -228,6 +255,11 @@ async function refreshSessionList() {
       e.stopPropagation()
       if (clickTimer) { clearTimeout(clickTimer); clickTimer = null }
       renameSession(s.id, el)
+    }
+    el.oncontextmenu = (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      showSessionContextMenu(e, s.id, el)
     }
     list.appendChild(el)
   }
@@ -261,6 +293,7 @@ async function newSession() {
 }
 
 async function deleteSession(id) {
+  if (!confirm('确定要删除这个对话吗？')) return
   await window.api.deleteSession(id)
   if (id === currentSessionId) {
     const sessions = await window.api.listSessions()
@@ -269,6 +302,37 @@ async function deleteSession(id) {
   } else {
     await refreshSessionList()
   }
+}
+
+function showSessionContextMenu(e, id, el) {
+  // Remove any existing context menu
+  document.querySelector('.ctx-menu')?.remove()
+  const menu = document.createElement('div')
+  menu.className = 'ctx-menu'
+  menu.style.left = e.clientX + 'px'
+  menu.style.top = e.clientY + 'px'
+  menu.innerHTML = `
+    <div class="ctx-item" data-action="rename">✏️ 重命名</div>
+    <div class="ctx-item ctx-danger" data-action="delete">🗑️ 删除</div>
+  `
+  menu.onclick = (ev) => {
+    const action = ev.target.closest('.ctx-item')?.dataset.action
+    menu.remove()
+    if (action === 'rename') renameSession(id, el)
+    if (action === 'delete') deleteSession(id)
+  }
+  document.body.appendChild(menu)
+  // Close on click elsewhere
+  const close = () => { menu.remove(); document.removeEventListener('click', close) }
+  setTimeout(() => document.addEventListener('click', close), 0)
+}
+
+function filterSessions(query) {
+  const q = query.toLowerCase().trim()
+  document.querySelectorAll('.session-item').forEach(el => {
+    const title = el.querySelector('.session-title')?.textContent?.toLowerCase() || ''
+    el.style.display = (!q || title.includes(q)) ? '' : 'none'
+  })
 }
 
 function toggleSidebar() {
@@ -736,6 +800,9 @@ async function saveSettings() {
   await window.api.saveConfig(config)
   if (config.heartbeat.enabled) await window.api.heartbeatStart()
   else await window.api.heartbeatStop()
+  // Update model display in header
+  const modelEl = document.getElementById('currentModel')
+  if (modelEl) modelEl.textContent = config.model || (config.provider === 'openai' ? 'gpt-4o' : 'claude-sonnet-4')
   closeSettings()
 }
 

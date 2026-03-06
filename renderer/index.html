@@ -39,11 +39,15 @@
         <span>Sessions</span>
         <button class="icon-btn" onclick="newSession()">+</button>
       </div>
+      <div class="sidebar-search">
+        <input type="text" id="sessionSearch" placeholder="搜索对话..." oninput="filterSessions(this.value)">
+      </div>
       <div id="sessionList" class="session-list"></div>
     </div>
     <div class="chat-main">
       <div class="chat-header">
         <span id="sessionTitle">New Chat</span>
+        <span id="currentModel" class="header-model"></span>
         <div class="header-actions">
           <button class="icon-btn" onclick="toggleMembers()">👥</button>
           <button class="icon-btn" onclick="exportChat()">📥</button>
@@ -81,6 +85,7 @@
           <button class="settings-tab" data-tab="model" onclick="switchSettingsTab('model')">Model</button>
           <button class="settings-tab" data-tab="tools" onclick="switchSettingsTab('tools')">Tools</button>
           <button class="settings-tab" data-tab="heartbeat" onclick="switchSettingsTab('heartbeat')">Heartbeat</button>
+          <button class="settings-tab" data-tab="about" onclick="switchSettingsTab('about')">About</button>
         </div>
         <div class="settings-content">
           <!-- General tab -->
@@ -122,6 +127,21 @@
             <p class="hint" style="margin:4px 0 12px">Agent checks in periodically to do background work.</p>
             <label>Interval (minutes)</label>
             <input id="cfgHeartbeatInterval" type="number" value="30" min="1" max="1440" style="width:100px">
+          </div>
+          <!-- About tab -->
+          <div class="settings-tab-content" id="tab-about">
+            <div style="text-align:center;padding:12px 0">
+              <div style="font-size:32px;margin-bottom:8px">🐾</div>
+              <div style="font-size:18px;font-weight:600;color:#e0e0e0">Paw</div>
+              <div style="font-size:12px;color:#666;margin-top:4px" id="cfgVersion">v0.21.0</div>
+              <div style="margin-top:16px;font-size:13px;color:#888">Portable AI Workspace</div>
+              <div style="margin-top:4px;font-size:12px;color:#555">One folder, one assistant. Local-first.</div>
+              <div style="margin-top:16px">
+                <a href="https://github.com/momomo-agent/paw" style="color:#60a5fa;font-size:13px;text-decoration:none" onclick="event.preventDefault();require('electron').shell.openExternal(this.href)">GitHub</a>
+                <span style="color:#333;margin:0 8px">·</span>
+                <a href="https://momomo-agent.github.io/paw/" style="color:#60a5fa;font-size:13px;text-decoration:none" onclick="event.preventDefault();require('electron').shell.openExternal(this.href)">Website</a>
+              </div>
+            </div>
           </div>
         </div>
         <div class="settings-footer">

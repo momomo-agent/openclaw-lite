@@ -78,11 +78,25 @@ button:hover { background: #2a2a2a; }
   -webkit-app-region: no-drag;
 }
 .session-list { flex: 1; overflow-y: auto; padding: 4px 8px; -webkit-app-region: no-drag; }
+.sidebar-search {
+  padding: 4px 10px 6px; -webkit-app-region: no-drag;
+}
+.sidebar-search input {
+  width: 100%; background: #141414; border: 1px solid #222; border-radius: 6px;
+  padding: 5px 10px; font-size: 12px; color: #ccc; outline: none;
+  font-family: inherit;
+}
+.sidebar-search input:focus { border-color: #444; }
+.sidebar-search input::placeholder { color: #555; }
 .session-item {
   padding: 7px 10px; border-radius: 6px; cursor: pointer;
   font-size: 13px; color: #777; overflow: hidden;
   display: flex; flex-direction: column; gap: 2px;
   transition: background 0.1s;
+}
+.session-group-label {
+  padding: 8px 10px 4px; font-size: 11px; color: #555;
+  font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
 }
 .session-item:hover { background: #ffffff08; color: #bbb; }
 .session-item.active { background: #ffffff0d; color: #e0e0e0; }
@@ -113,6 +127,10 @@ button:hover { background: #2a2a2a; }
 }
 .chat-header .icon-btn { -webkit-app-region: no-drag; }
 .chat-header span { flex: 1; }
+.header-model {
+  flex: 0 !important; font-size: 11px; color: #555; padding: 2px 8px;
+  background: #141414; border-radius: 4px; white-space: nowrap;
+}
 .icon-btn { background: none; border: none; font-size: 15px; padding: 4px 6px; color: #555; cursor: pointer; border-radius: 4px; transition: background 0.1s; }
 .icon-btn:hover { background: #ffffff0d; color: #999; }
 
@@ -383,6 +401,21 @@ button:hover { background: #2a2a2a; }
 .msg-card.agent-to-agent { opacity: 0.85; border-left: 2px solid #555; margin-left: 16px; }
 .a2a-name { color: #888; font-style: italic; }
 .a2a-content { color: #aaa; }
+
+/* Context menu */
+.ctx-menu {
+  position: fixed; z-index: 300;
+  background: #1a1a1a; border: 1px solid #333; border-radius: 8px;
+  padding: 4px 0; min-width: 140px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+.ctx-item {
+  padding: 7px 14px; font-size: 13px; color: #ccc; cursor: pointer;
+  display: flex; align-items: center; gap: 8px;
+}
+.ctx-item:hover { background: #ffffff0d; }
+.ctx-danger { color: #ef4444; }
+.ctx-danger:hover { background: #ef44441a; }
 
 /* Claude Code output */
 .cc-output { border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; margin: 8px 0; overflow: hidden; }
