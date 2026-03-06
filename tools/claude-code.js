@@ -56,7 +56,7 @@ registerTool({
     try {
       const ccArgs = [
         '--print',
-        '--output-format', 'text',
+        '--output-format', 'json',
         '--dangerously-skip-permissions',
       ];
 
@@ -70,6 +70,7 @@ registerTool({
       const result = await new Promise((resolve, reject) => {
         let stdout = '';
         let stderr = '';
+        let textOutput = ''; // For streaming display
 
         const proc = spawn('claude', ccArgs, {
           cwd: workdir,
@@ -83,9 +84,10 @@ registerTool({
         proc.stdout.on('data', (data) => {
           const chunk = data.toString();
           stdout += chunk;
-          // Stream to UI
+          textOutput += chunk;
+          // Stream to UI (show raw output during execution)
           if (mainWindow) {
-            mainWindow.webContents.send('cc-output', { chunk, total: stdout.length });
+            mainWindow.webContents.send('cc-output', { chunk, total: textOutput.length });
           }
         });
 
@@ -95,10 +97,15 @@ registerTool({
 
         proc.on('close', (code) => {
           ccProcess = null;
-          if (code === 0) {
-            resolve(stdout);
-          } else {
-            resolve(`CC exited with code ${code}\n${stdout}\n${stderr}`.trim());
+          // Parse JSON output to extract result and session_id
+          try {
+            const json = JSON.parse(stdout);
+            if (json.session_id) ccSessionId = json.session_id;
+            const resultText = json.result || stdout;
+            resolve({ text: resultText, sessionId: json.session_id, cost: json.total_cost_usd, isError: json.is_error });
+          } catch {
+            // Fallback to raw text
+            resolve({ text: stdout + (stderr ? `\nSTDERR:\n${stderr}` : ''), sessionId: null, cost: null, isError: code !== 0 });
           }
         });
 
@@ -110,15 +117,24 @@ registerTool({
 
       // Truncate output for context efficiency
       const MAX_OUTPUT = 3000;
-      const truncated = result.length > MAX_OUTPUT
-        ? `...(truncated ${result.length - MAX_OUTPUT} chars)...\n${result.slice(-MAX_OUTPUT)}`
-        : result;
+      const text = result.text || '';
+      const truncated = text.length > MAX_OUTPUT
+        ? `...(truncated ${text.length - MAX_OUTPUT} chars)...\n${text.slice(-MAX_OUTPUT)}`
+        : text;
 
       if (mainWindow) {
-        mainWindow.webContents.send('cc-status', { status: 'done', length: result.length });
+        mainWindow.webContents.send('cc-status', {
+          status: result.isError ? 'error' : 'done',
+          length: text.length,
+          cost: result.cost,
+          error: result.isError ? text.slice(0, 200) : undefined
+        });
       }
 
-      return truncated;
+      // Return result with metadata
+      const meta = result.sessionId ? `\n[CC session: ${result.sessionId}]` : '';
+      const costInfo = result.cost ? ` [cost: $${result.cost.toFixed(4)}]` : '';
+      return truncated + meta + costInfo;
 
     } catch (err) {
       if (mainWindow) {
