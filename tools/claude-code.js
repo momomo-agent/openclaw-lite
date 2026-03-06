@@ -102,13 +102,15 @@ registerTool({
 
         proc.on('close', (code) => {
           ccProcess = null;
+          console.log(`[CC] process closed code=${code} stdout=${stdout.length}B stderr=${stderr.length}B`);
           // Parse JSON output to extract result and session_id
           try {
             const json = JSON.parse(stdout);
             if (json.session_id) ccSessionId = json.session_id;
             const resultText = json.result || stdout;
-            resolve({ text: resultText, sessionId: json.session_id, cost: json.total_cost_usd, isError: json.is_error });
-          } catch {
+            resolve({ text: resultText, sessionId: json.session_id, cost: json.total_cost_usd, isError: !!json.is_error });
+          } catch (e) {
+            console.log(`[CC] JSON parse failed: ${e.message}, stdout start: ${stdout.slice(0, 80)}`);
             // Fallback to raw text
             resolve({ text: stdout + (stderr ? `\nSTDERR:\n${stderr}` : ''), sessionId: null, cost: null, isError: code !== 0 });
           }
@@ -128,11 +130,12 @@ registerTool({
         : text;
 
       if (mainWindow) {
+        const isDone = !result.isError;
         mainWindow.webContents.send('cc-status', {
-          status: result.isError ? 'error' : 'done',
+          status: isDone ? 'done' : 'error',
           length: text.length,
           cost: result.cost,
-          error: result.isError ? text.slice(0, 200) : undefined
+          error: isDone ? undefined : (text.slice(0, 200) || 'CC execution failed')
         });
       }
 
