@@ -77,52 +77,9 @@ function saveAgent(agent) { syncState(); coreSaveAgent(agent); }
 function createAgent(name, soul, model) { syncState(); return coreCreateAgent(name, soul, model); }
 
 // ── Tool definitions ──
-// Build Anthropic tools array (registry + built-in)
+// All tools come from registry (tools/ directory)
 function getAnthropicToolsArray() {
-  const registryTools = getAnthropicTools();
-  const builtInTools = [
-    {
-      name: 'notify', description: 'Send a system notification to the user',
-      input_schema: { type: 'object', properties: { title: { type: 'string' }, body: { type: 'string' } }, required: ['body'] }
-    },
-    {
-      name: 'ui_status_set', description: 'Set Watson status (sidebar glanceable status line). Use 4-20 Chinese chars.',
-      input_schema: { type: 'object', properties: { level: { type: 'string', enum: ['idle','thinking','running','need_you','done'] }, text: { type: 'string' } }, required: ['level','text'] }
-    },
-    {
-      name: 'memory_search', description: 'Semantically search MEMORY.md + memory/*.md. Use before answering questions about prior work, decisions, dates, people, preferences, or todos.',
-      input_schema: { type: 'object', properties: { query: { type: 'string' }, maxResults: { type: 'number' }, minScore: { type: 'number' } }, required: ['query'] }
-    },
-    {
-      name: 'memory_get', description: 'Read a snippet from MEMORY.md or memory/*.md with optional line range. Use after memory_search to pull needed lines.',
-      input_schema: { type: 'object', properties: { path: { type: 'string' }, from: { type: 'number', description: 'Start line (1-indexed)' }, lines: { type: 'number', description: 'Number of lines to read' } }, required: ['path'] }
-    },
-    {
-      name: 'task_create', description: 'Create a task in the shared task list. Tasks are auto-assigned to the best matching agent by role. You can override with assignee.',
-      input_schema: { type: 'object', properties: { title: { type: 'string' }, dependsOn: { type: 'array', items: { type: 'string' }, description: 'Task IDs this depends on' }, assignee: { type: 'string', description: 'Agent name to assign (auto-assigned if omitted)' } }, required: ['title'] }
-    },
-    {
-      name: 'task_update', description: 'Update a task status: claim (pending→in-progress) or complete (in-progress→done).',
-      input_schema: { type: 'object', properties: { taskId: { type: 'string' }, status: { type: 'string', enum: ['in-progress','done'] }, assignee: { type: 'string', description: 'Agent name claiming the task' } }, required: ['taskId','status'] }
-    },
-    {
-      name: 'task_list', description: 'List all tasks in the current session.',
-      input_schema: { type: 'object', properties: {} }
-    },
-    {
-      name: 'send_message', description: 'Send a message to another agent in this session. Only available in multi-agent sessions.',
-      input_schema: { type: 'object', properties: { targetAgent: { type: 'string', description: 'Name of the target agent' }, message: { type: 'string' } }, required: ['targetAgent','message'] }
-    },
-    {
-      name: 'create_agent', description: 'Create a lightweight agent in the current session. The agent will be a participant with the given name and role.',
-      input_schema: { type: 'object', properties: { name: { type: 'string', description: 'Agent name (unique within session)' }, role: { type: 'string', description: 'Role description (1-2 sentences)' } }, required: ['name','role'] }
-    },
-    {
-      name: 'remove_agent', description: 'Remove a lightweight agent from the current session.',
-      input_schema: { type: 'object', properties: { name: { type: 'string', description: 'Name of the agent to remove' } }, required: ['name'] }
-    },
-  ];
-  return [...registryTools, ...builtInTools];
+  return getAnthropicTools();
 }
 
 const TOOLS = getAnthropicToolsArray();
@@ -137,83 +94,22 @@ function getToolsForAgent() {
 }
 
 // Auto-assign: find best matching agent for a task title based on role keyword overlap
-function findBestAgent(taskTitle, sessionAgents) {
-  if (!sessionAgents?.length) return null
-  const titleLower = taskTitle.toLowerCase()
-  let best = null, bestScore = 0
-  for (const a of sessionAgents) {
-    const role = (a.role || '').toLowerCase()
-    // Split on delimiters, then also extract 2-char Chinese substrings for fuzzy match
-    const roleTokens = role.split(/[\s,，、/]+/).filter(w => w.length >= 2)
-    // Add 2-char sliding windows from each token for Chinese substring matching
-    const roleKeys = new Set(roleTokens)
-    for (const t of roleTokens) {
-      for (let i = 0; i <= t.length - 2; i++) roleKeys.add(t.slice(i, i + 2))
-    }
-    let score = 0
-    for (const rk of roleKeys) {
-      if (titleLower.includes(rk)) score += rk.length >= 3 ? 3 : 1
-    }
-    if (score > bestScore) { bestScore = score; best = a.name }
-  }
-  return best
-}
-
-function searchMemoryFiles(dir, query, maxResults) {
-  const results = []
-  const keywords = query.split(/\s+/).filter(Boolean)
-  // Collect all .md files in memory/ + root MEMORY.md
-  const files = []
-  const memDir = path.join(dir, 'memory')
-  if (fs.existsSync(path.join(dir, 'MEMORY.md'))) files.push('MEMORY.md')
-  if (fs.existsSync(memDir)) {
-    const walk = (d, prefix) => {
-      for (const f of fs.readdirSync(d)) {
-        const full = path.join(d, f)
-        const rel = prefix ? `${prefix}/${f}` : f
-        if (fs.statSync(full).isDirectory()) walk(full, rel)
-        else if (f.endsWith('.md')) files.push(`memory/${rel}`)
-      }
-    }
-    walk(memDir, '')
-  }
-  // Search each file
-  for (const relPath of files) {
-    const content = fs.readFileSync(path.join(dir, relPath), 'utf8')
-    const lines = content.split('\n')
-    for (let i = 0; i < lines.length; i++) {
-      const lower = lines[i].toLowerCase()
-      const hits = keywords.filter(k => lower.includes(k)).length
-      if (hits === 0) continue
-      const score = hits / keywords.length
-      const start = Math.max(0, i - 1)
-      const end = Math.min(lines.length, i + 3)
-      const snippet = lines.slice(start, end).join('\n').slice(0, 500)
-      results.push({ path: relPath, startLine: start + 1, endLine: end, score, snippet })
-    }
-  }
-  results.sort((a, b) => b.score - a.score)
-  // Dedupe overlapping snippets
-  const seen = new Set()
-  const deduped = []
-  for (const r of results) {
-    const key = `${r.path}:${Math.floor(r.startLine / 4)}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    deduped.push(r)
-    if (deduped.length >= maxResults) break
-  }
-  return deduped
-}
-
 async function executeTool(name, input, config) {
   // Try registry first for pluggable tools
   const tool = getTool(name);
   if (tool) {
     const context = {
       clawDir,
+      sessionId: currentSessionId,
+      agentName: currentAgentName,
+      mainWindow,
+      sessionStore,
+      memoryIndex,
       tavilyKey: config?.tavilyKey,
       skillEnv: config?.skillEnv || {},
+      sendNotification,
+      pushStatus: pushWatsonStatus,
+      listAgentsFn: listAgents,
       approvalCallback: async (request) => {
         if (!mainWindow) return false;
         const { dialog } = require('electron');
@@ -236,167 +132,7 @@ async function executeTool(name, input, config) {
     }
   }
 
-  // Fallback to built-in tools that need main.js state
-  switch (name) {
-    case 'notify': {
-      sendNotification(input.title || 'Paw', input.body)
-      return 'Notification sent'
-    }
-    case 'ui_status_set': {
-      const level = String(input.level || 'idle')
-      const text = String(input.text || '').trim()
-      const minLen = 4, maxLen = 20
-      if (!['idle','thinking','running','need_you','done'].includes(level)) return 'Error: invalid level'
-      if (text.length < minLen || text.length > maxLen) {
-        return `Error: text length must be ${minLen}-${maxLen} chars (got ${text.length}). Please rewrite shorter/longer.`
-      }
-      pushWatsonStatus(level, text)
-      return 'OK'
-    }
-    case 'memory_get': {
-      if (!clawDir) return 'Error: No claw directory'
-      const relPath = (input.path || '').trim()
-      if (!relPath) return 'Error: path required'
-      if (!relPath.endsWith('.md')) return 'Error: only .md files allowed'
-      const absPath = path.resolve(clawDir, relPath)
-      if (!absPath.startsWith(clawDir)) return 'Error: path outside claw directory'
-      if (!fs.existsSync(absPath)) return `Error: file not found: ${relPath}`
-      const content = fs.readFileSync(absPath, 'utf8')
-      if (!input.from && !input.lines) return JSON.stringify({ text: content, path: relPath })
-      const allLines = content.split('\n')
-      const start = Math.max(1, input.from || 1)
-      const count = Math.max(1, input.lines || allLines.length)
-      const slice = allLines.slice(start - 1, start - 1 + count)
-      return JSON.stringify({ text: slice.join('\n'), path: relPath, from: start, lines: slice.length })
-    }
-    case 'memory_search': {
-      if (!clawDir) return 'Error: No claw directory'
-      const query = (input.query || '').trim()
-      if (!query) return 'Error: query required'
-      const maxResults = input.maxResults || 5
-      try {
-        const results = await memoryIndex.search(clawDir, query, maxResults)
-        return JSON.stringify({ results })
-      } catch (e) {
-        // Fallback to keyword search
-        const results = searchMemoryFiles(clawDir, query.toLowerCase(), maxResults)
-        return JSON.stringify({ results })
-      }
-    }
-    case 'task_create': {
-      if (!clawDir || !currentSessionId) return 'Error: No active session'
-      const title = (input.title || '').trim()
-      if (!title) return 'Error: title required'
-      const tasks = sessionStore.listTasks(clawDir, currentSessionId)
-      if (tasks.length >= 50) return 'Error: Task limit reached (50)'
-      // Resolve assignee: validate LLM-provided name, fallback to auto-assign
-      const sessionAgents = sessionStore.listSessionAgents(clawDir, currentSessionId)
-      const agentNames = new Set(sessionAgents.map(a => a.name))
-      let assignee = null
-      if (input.assignee && agentNames.has(input.assignee)) {
-        assignee = input.assignee  // LLM provided a valid agent name
-      } else {
-        assignee = findBestAgent(title, sessionAgents)  // auto-assign by role match
-      }
-      const task = sessionStore.createTask(clawDir, currentSessionId, {
-        title, dependsOn: input.dependsOn, createdBy: currentAgentName || 'user',
-        assignee
-      })
-      if (mainWindow) mainWindow.webContents.send('tasks-changed', currentSessionId)
-      return JSON.stringify(task)
-    }
-    case 'task_update': {
-      if (!clawDir || !currentSessionId) return 'Error: No active session'
-      const result = sessionStore.updateTask(clawDir, input.taskId, {
-        status: input.status, assignee: input.assignee || currentAgentName
-      })
-      if (result?.error) return `Error: ${result.error}`
-      if (mainWindow) mainWindow.webContents.send('tasks-changed', currentSessionId)
-      // F048: Auto-rotation - when a task is done, check for unblocked tasks
-      if (input.status === 'done' && mainWindow) {
-        const allTasks = sessionStore.listTasks(clawDir, currentSessionId)
-        const justDoneId = input.taskId
-        const unblocked = allTasks.find(t =>
-          t.status === 'pending' && t.dependsOn?.includes(justDoneId) &&
-          t.dependsOn.every(dep => allTasks.find(d => d.id === dep)?.status === 'done')
-        )
-        if (unblocked) {
-          // Auto-assign if no assignee
-          if (!unblocked.assignee) {
-            const sessionAgents = sessionStore.listSessionAgents(clawDir, currentSessionId)
-            const best = findBestAgent(unblocked.title, sessionAgents)
-            if (best) {
-              sessionStore.updateTask(clawDir, unblocked.id, { assignee: best })
-              unblocked.assignee = best
-            }
-          }
-          mainWindow.webContents.send('auto-rotate', {
-            sessionId: currentSessionId,
-            completedTask: justDoneId,
-            completedBy: currentAgentName,
-            nextTask: unblocked
-          })
-        }
-      }
-      return JSON.stringify(result)
-    }
-    case 'task_list': {
-      if (!clawDir || !currentSessionId) return 'Error: No active session'
-      const tasks = sessionStore.listTasks(clawDir, currentSessionId)
-      return JSON.stringify({ tasks, total: tasks.length })
-    }
-    case 'send_message': {
-      if (!clawDir || !currentSessionId) return 'Error: No active session'
-      const targetName = (input.targetAgent || '').trim()
-      const msg = (input.message || '').trim()
-      if (!targetName || !msg) return 'Error: targetAgent and message required'
-      // Find target agent — check session agents first, then agents/ templates
-      const sessionAgent = sessionStore.findSessionAgentByName(clawDir, currentSessionId, targetName)
-      const templateAgent = !sessionAgent ? listAgents().find(a => a.name === targetName) : null
-      if (!sessionAgent && !templateAgent) return `Error: Agent "${targetName}" not found`
-      // Anti-loop: count exchanges between this specific pair (A↔B), allow 3 round-trips
-      const session = sessionStore.loadSession(clawDir, currentSessionId)
-      if (session?.messages) {
-        const recent = session.messages.slice(-20)
-        const pair = new Set([currentAgentName || 'Assistant', targetName])
-        let pairCount = 0
-        for (const m of recent) {
-          if (m.role === 'assistant' && m.sender && pair.has(m.sender)) pairCount++
-        }
-        if (pairCount >= 6) return `Error: Conversation chain between ${currentAgentName} and ${targetName} is too long. Waiting for user input.`
-      }
-      // Emit to renderer as agent-to-agent message
-      if (mainWindow) {
-        mainWindow.webContents.send('agent-message', {
-          from: currentAgentName || 'Assistant', to: targetName, message: msg, sessionId: currentSessionId
-        })
-      }
-      return `Message sent to ${targetName}`
-    }
-    case 'create_agent': {
-      if (!clawDir || !currentSessionId) return 'Error: No active session'
-      const name = (input.name || '').trim()
-      const role = (input.role || '').trim()
-      if (!name) return 'Error: name required'
-      if (!role) return 'Error: role required'
-      const existing = sessionStore.findSessionAgentByName(clawDir, currentSessionId, name)
-      if (existing) return `Error: Agent "${name}" already exists in this session`
-      const agent = sessionStore.createSessionAgent(clawDir, currentSessionId, { name, role })
-      if (mainWindow) mainWindow.webContents.send('session-agents-changed', currentSessionId)
-      return JSON.stringify(agent)
-    }
-    case 'remove_agent': {
-      if (!clawDir || !currentSessionId) return 'Error: No active session'
-      const name = (input.name || '').trim()
-      if (!name) return 'Error: name required'
-      const found = sessionStore.findSessionAgentByName(clawDir, currentSessionId, name)
-      if (!found) return `Error: Agent "${name}" not found in this session`
-      sessionStore.deleteSessionAgent(clawDir, found.id)
-      if (mainWindow) mainWindow.webContents.send('session-agents-changed', currentSessionId)
-      return `Agent "${name}" removed`
-    }
-    default: return `Unknown tool: ${name}`
-  }
+  return `Unknown tool: ${name}`;
 }
 
 // Persist directory choices
