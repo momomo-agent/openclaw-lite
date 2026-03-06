@@ -75,7 +75,12 @@ function ensureSchema(db) {
 function listSessions(clawDir) {
   const d = getDb(clawDir)
   if (!d) return []
-  return d.prepare('SELECT id, title, created_at as createdAt, updated_at as updatedAt, status_level as statusLevel, status_text as statusText FROM sessions ORDER BY updated_at DESC').all()
+  return d.prepare(`
+    SELECT s.id, s.title, s.created_at as createdAt, s.updated_at as updatedAt,
+           s.status_level as statusLevel, s.status_text as statusText,
+           (SELECT substr(m.content, 1, 60) FROM messages m WHERE m.session_id = s.id ORDER BY m.id DESC LIMIT 1) as lastMessage
+    FROM sessions s ORDER BY s.updated_at DESC
+  `).all()
 }
 
 function loadSession(clawDir, id) {
