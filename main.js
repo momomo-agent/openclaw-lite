@@ -647,6 +647,10 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
       }
       toolResults.push({ type: 'tool_result', tool_use_id: tc.id, content: String(result) })
     }
+    // Send round info to renderer
+    if (toolCalls.length > 0) {
+      win.webContents.send('chat-round-info', { requestId, round: round + 1, maxRounds: 5 })
+    }
     msgs.push({ role: 'user', content: toolResults })
     fullText += '\n'
     win.webContents.send('chat-token', { requestId, text: '\n' })
@@ -743,6 +747,10 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
         win.webContents.send('chat-tool-step', { requestId, name: tc.name, output: String(result).slice(0, 500) })
       }
       msgs.push({ role: 'tool', tool_call_id: tc.id, content: String(result) })
+    }
+    // Send round info to renderer
+    if (tcList.length > 0) {
+      win.webContents.send('chat-round-info', { requestId, round: round + 1, maxRounds: 5 })
     }
     fullText += '\n'
     win.webContents.send('chat-token', { requestId, text: '\n' })

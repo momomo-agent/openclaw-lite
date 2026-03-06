@@ -47,7 +47,7 @@ body {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .dir-path.set { color: #e0e0e0; }
-.hint { font-size: 11px; color: #444; }
+.hint { font-size: 11px; color: #666; }
 
 button {
   background: #222; border: 1px solid #333; border-radius: 8px;
@@ -136,8 +136,8 @@ button:hover { background: #2a2a2a; }
 .msg-header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 1px; }
 .msg-name { font-size: 14px; font-weight: 600; color: #e0e0e0; }
 .msg-name.user-name { color: #999; }
-.msg-time { font-size: 11px; color: #444; }
-.msg-content { color: #ccc; line-height: 1.5; font-size: 14px; overflow-x: hidden; word-break: break-word; }
+.msg-time { font-size: 11px; color: #666; }
+.msg-content { color: #ccc; line-height: 1.6; font-size: 14px; overflow-x: hidden; word-break: break-word; overflow-wrap: anywhere; }
 
 /* Tool steps — collapsible */
 .tool-group { border-left: 2px solid #1a1a1a; margin-left: 40px; padding-left: 12px; }
@@ -178,7 +178,7 @@ button:hover { background: #2a2a2a; }
   resize: none; outline: none; min-height: 20px; max-height: 120px; line-height: 1.5;
 }
 .input-bar textarea:focus { border-color: #ffffff1a; }
-.input-bar textarea::placeholder { color: #444; }
+.input-bar textarea::placeholder { color: #666; }
 .input-bar button {
   width: 36px; height: 36px; border-radius: 8px;
   background: #e0e0e0; color: #0a0a0a; font-size: 16px; font-weight: 700;
@@ -191,13 +191,13 @@ button:hover { background: #2a2a2a; }
 .md-content { font-size: 14px; line-height: 1.7; overflow-x: hidden; word-break: break-word; }
 .md-content p { margin-bottom: 10px; }
 .md-content h1, .md-content h2, .md-content h3 { margin: 12px 0 6px; font-weight: 600; }
-.md-content code { background: #1a1a1a; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
-.md-content pre { background: #0d0d0d; padding: 12px; border-radius: 8px; overflow-x: auto; margin: 10px 0; max-width: 100%; }
-.md-content pre code { background: none; padding: 0; }
+.md-content code { background: #1a1a1a; padding: 2px 6px; border-radius: 4px; font-size: 13px; color: #e8b4b8; }
+.md-content pre { background: #0d0d0d; padding: 12px; border-radius: 8px; overflow-x: auto; margin: 10px 0; max-width: 100%; white-space: pre; word-break: normal; }
+.md-content pre code { background: none; padding: 0; white-space: pre; word-break: normal; }
 .md-content a { color: #fbbf24; text-decoration: none; }
 .md-content ul, .md-content ol { padding-left: 20px; margin-bottom: 10px; }
 .md-content li { margin-bottom: 3px; }
-.md-content blockquote { border-left: 3px solid #333; padding-left: 12px; color: #888; margin: 10px 0; }
+.md-content blockquote { border-left: 3px solid #444; padding-left: 12px; color: #999; margin: 10px 0; }
 .md-content strong { color: #f0f0f0; }
 
 /* Settings overlay */
@@ -262,15 +262,19 @@ button:hover { background: #2a2a2a; }
   user-select: none;
 }
 .tool-group-header:hover { color: #888; background: #1a1a1a; }
-.tool-expand { font-size: 10px; margin-left: auto; color: #444; }
+.tool-expand { font-size: 10px; margin-left: auto; color: #666; }
+.tool-round { font-size: 11px; color: #f59e0b; margin-left: 8px; }
 .tool-group-body { padding: 0 12px 8px; }
+.tool-step-item.success .tool-step-name::before { content: '✓ '; color: #22c55e; }
+.tool-step-item.error .tool-step-name::before { content: '✗ '; color: #ef4444; }
+.tool-step-item.error .tool-step-output { color: #ef4444; }
 .tool-step-item {
   padding: 4px 0; border-top: 1px solid #1a1a1a;
   color: #555; font-size: 12px; line-height: 1.4;
 }
 .tool-step-item:first-child { border-top: none; }
 .tool-step-name { color: #777; font-weight: 500; }
-.tool-step-output { color: #444; }
+.tool-step-output { color: #666; }
 
 /* Per-card status line */
 .card-status-line {

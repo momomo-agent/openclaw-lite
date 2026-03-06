@@ -39,6 +39,12 @@ window.api.onTextStart((d) => {
   if (h?.onTextStart) h.onTextStart(d)
 })
 
+// Round info — update tool group header with progress
+window.api.onRoundInfo((d) => {
+  const h = requestHandlers.get(d.requestId)
+  if (h?.onRoundInfo) h.onRoundInfo(d)
+})
+
 // Watson status — AI-authored, highest priority
 window.api.onWatsonStatus(({ level, text, requestId }) => {
   if (currentSessionId) {
@@ -322,7 +328,11 @@ document.addEventListener('keydown', e => {
 input.addEventListener('input', () => {
   input.style.height = 'auto'
   input.style.height = Math.min(input.scrollHeight, 120) + 'px'
+  // Disable send button when empty
+  sendBtn.disabled = !input.value.trim()
 })
+// Initial state
+sendBtn.disabled = true
 
 // File attachments
 let pendingFiles = []
@@ -455,7 +465,18 @@ function registerStreamHandlers(myRequestId, flowContainer, firstTextEl, sendSes
       count.textContent = body.children.length
       messages.scrollTop = messages.scrollHeight
     },
-    onStatus() {}
+    onStatus() {},
+    onRoundInfo(d) {
+      // Update the latest tool group header with round info
+      if (currentToolGroup) {
+        const header = currentToolGroup.querySelector('.tool-group-header')
+        if (header) {
+          const count = currentToolGroup.querySelector('.tool-count')?.textContent || '0'
+          const expand = currentToolGroup.querySelector('.tool-expand')?.textContent || '▼'
+          header.innerHTML = `🔧 <span class="tool-count">${count}</span> 个工具调用 <span class="tool-round">轮次 ${d.round}/${d.maxRounds}</span> <span class="tool-expand">${expand}</span>`
+        }
+      }
+    }
   })
 
   return { getFullText: () => fullText }
@@ -484,6 +505,7 @@ async function send() {
 
   input.value = ''
   input.style.height = 'auto'
+  sendBtn.disabled = true
   const files = [...pendingFiles]
   pendingFiles = []
   renderAttachPreview()

@@ -16,6 +16,9 @@ contextBridge.exposeInMainWorld('api', {
   onToolStep: (cb) => {
     ipcRenderer.on('chat-tool-step', (_, d) => cb(d))
   },
+  onRoundInfo: (cb) => {
+    ipcRenderer.on('chat-round-info', (_, d) => cb(d))
+  },
   onTextStart: (cb) => {
     ipcRenderer.on('chat-text-start', (_, d) => cb(d))
   },
