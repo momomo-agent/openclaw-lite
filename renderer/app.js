@@ -310,8 +310,8 @@ function showSessionContextMenu(e, id, el) {
   menu.style.left = e.clientX + 'px'
   menu.style.top = e.clientY + 'px'
   menu.innerHTML = `
-    <div class="ctx-item" data-action="rename">✏️ 重命名</div>
-    <div class="ctx-item ctx-danger" data-action="delete">🗑️ 删除</div>
+    <div class="ctx-item" data-action="rename">重命名</div>
+    <div class="ctx-item ctx-danger" data-action="delete">删除</div>
   `
   menu.onclick = (ev) => {
     const action = ev.target.closest('.ctx-item')?.dataset.action

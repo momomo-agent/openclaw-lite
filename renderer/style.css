@@ -104,8 +104,8 @@ button:hover { background: #2a2a2a; }
 .session-item:hover .del-btn { opacity: 1; }
 .session-item-main { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .session-item-main .session-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
-.session-item-meta { display: flex; align-items: center; justify-content: space-between; min-height: 14px; }
-.session-status-text { font-size: 11px; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; transition: color 0.3s; }
+.session-item-meta { display: flex; align-items: center; gap: 4px; min-height: 14px; }
+.session-status-text { font-size: 11px; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; transition: color 0.3s; }
 .session-item.active .session-status-text { color: #888; }
 .session-status-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; transition: background 0.3s, box-shadow 0.3s; }
 .session-status-dot.idle { background: #333; }
