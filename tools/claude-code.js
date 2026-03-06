@@ -52,12 +52,14 @@ registerTool({
     if (mainWindow) {
       mainWindow.webContents.send('cc-status', { status: 'running', task: task.slice(0, 80) });
     }
+    const ccStartTime = Date.now();
 
     try {
       const ccArgs = [
         '--print',
         '--output-format', 'json',
         '--dangerously-skip-permissions',
+        '--model', 'sonnet',  // Force sonnet for speed (opus is too slow for tool calls)
       ];
 
       // Continue previous session if requested and available
@@ -75,11 +77,18 @@ registerTool({
         const proc = spawn('claude', ccArgs, {
           cwd: workdir,
           shell: true,
-          timeout: 300000, // 5 minutes
           env: { ...process.env, TERM: 'dumb' },
         });
 
         ccProcess = proc;
+
+        // Manual timeout (5 min) — spawn's timeout with shell:true can kill process before JSON output
+        const ccTimeout = setTimeout(() => {
+          if (proc && !proc.killed) {
+            console.log('[CC] manual timeout reached (5 min), killing');
+            proc.kill('SIGTERM');
+          }
+        }, 300000);
 
         proc.stdout.on('data', (data) => {
           const chunk = data.toString();
@@ -100,9 +109,11 @@ registerTool({
           }
         });
 
-        proc.on('close', (code) => {
+        proc.on('close', (code, signal) => {
+          clearTimeout(ccTimeout);
           ccProcess = null;
-          console.log(`[CC] process closed code=${code} stdout=${stdout.length}B stderr=${stderr.length}B`);
+          const elapsed = ((Date.now() - ccStartTime) / 1000).toFixed(1);
+          console.log(`[CC] process closed code=${code} signal=${signal} elapsed=${elapsed}s stdout=${stdout.length}B stderr=${stderr.length}B`);
           // Parse JSON output to extract result and session_id
           try {
             const json = JSON.parse(stdout);
@@ -117,6 +128,7 @@ registerTool({
         });
 
         proc.on('error', (err) => {
+          clearTimeout(ccTimeout);
           ccProcess = null;
           reject(err);
         });
