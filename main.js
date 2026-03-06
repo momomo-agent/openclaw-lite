@@ -221,7 +221,7 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
-app.on('will-quit', () => { sessionStore.closeDb(); memoryIndex.closeDb() })
+app.on('will-quit', () => { sessionStore.closeDb(); memoryIndex.closeDb(); try { require('./tools/claude-code').ccStop() } catch {} })
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 
 async function openNewWindow() {
@@ -839,5 +839,10 @@ ipcMain.handle('update-session-status', (_, { sessionId, level, text }) => {
   if (clawDir && sessionId) {
     try { sessionStore.updateSessionStatus(clawDir, sessionId, level, text) } catch {}
   }
+  return true
+})
+
+ipcMain.handle('cc-stop', () => {
+  try { require('./tools/claude-code').ccStop() } catch {}
   return true
 })

@@ -10,6 +10,7 @@ require('./ui-status');
 require('./memory');
 require('./tasks');
 require('./agents');
+require('./claude-code');
 
 const { getAllTools, getTool, getAnthropicTools, getToolsPrompt } = require('./registry');
 

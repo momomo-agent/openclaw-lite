@@ -61,6 +61,55 @@ window.api.onMemoryChanged(({ file }) => {
 // Tray menu: new chat
 window.api.onTrayNewChat(() => { newSession() })
 
+// Claude Code events
+let ccOutputEl = null
+let ccOutputText = ''
+window.api.onCcStatus(({ status, task, error, length }) => {
+  if (status === 'running') {
+    ccOutputText = ''
+    // Find the last assistant card's tool area or create one
+    const cards = document.querySelectorAll('.card.assistant')
+    const lastCard = cards[cards.length - 1]
+    if (lastCard) {
+      let toolArea = lastCard.querySelector('.tool-steps')
+      if (!toolArea) {
+        toolArea = document.createElement('div')
+        toolArea.className = 'tool-steps'
+        lastCard.querySelector('.card-body')?.appendChild(toolArea)
+      }
+      ccOutputEl = document.createElement('div')
+      ccOutputEl.className = 'tool-step cc-output expanded'
+      ccOutputEl.innerHTML = `<div class="tool-step-header"><span class="tool-icon">🔧</span> <strong>Claude Code</strong> <span class="cc-task">${esc(task || '')}</span> <button class="cc-stop-btn" onclick="window.api.ccStop()">Stop</button></div><pre class="cc-pre"></pre>`
+      toolArea.appendChild(ccOutputEl)
+    }
+  } else if (status === 'done') {
+    if (ccOutputEl) {
+      const header = ccOutputEl.querySelector('.tool-step-header')
+      if (header) header.innerHTML = `<span class="tool-icon">✅</span> <strong>Claude Code</strong> <span class="hint">${length || 0} chars</span>`
+    }
+    ccOutputEl = null
+  } else if (status === 'error') {
+    if (ccOutputEl) {
+      const header = ccOutputEl.querySelector('.tool-step-header')
+      if (header) header.innerHTML = `<span class="tool-icon">❌</span> <strong>Claude Code</strong> <span class="hint">${esc(error || 'unknown error')}</span>`
+    }
+    ccOutputEl = null
+  }
+})
+window.api.onCcOutput(({ chunk }) => {
+  ccOutputText += chunk
+  if (ccOutputEl) {
+    const pre = ccOutputEl.querySelector('.cc-pre')
+    if (pre) {
+      // Show last 50 lines
+      const lines = ccOutputText.split('\n')
+      const visible = lines.slice(-50).join('\n')
+      pre.textContent = visible
+      pre.scrollTop = pre.scrollHeight
+    }
+  }
+})
+
 marked.setOptions({
   breaks: true,
 })
