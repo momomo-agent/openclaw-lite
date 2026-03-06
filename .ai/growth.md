@@ -76,7 +76,19 @@
 - 对标 Claude Code Agent Teams 设计
 - Gate: 语法检查 ✅，E2E + DBB 待验证
 
-## M19 — 主/轻量 Agent 分层 (v0.20.0)
+## M20 — 工具层抽象 + Claude Code (v0.21.0)
+- F068: Tool Registry 重构（已有 tools/registry.js 基础上扩展 context）
+- F069: Tool 协议定义（融入 F068，lightweight/persistent 区分）
+- F070: 轻量工具迁移（main.js 1107→843 行, -24%，16 个工具全部在 tools/ 目录）
+- F071: Claude Code 工具基础（tools/claude-code.js，--print --output-format json，5 分钟超时）
+- F072: Claude Code UX（cc-status/cc-output 事件，streaming 面板，Stop 按钮，monospace 输出）
+- F073: Claude Code 上下文（JSON 解析 session_id，--resume 多轮续接，cost 追踪）
+- F074: 集成验证 — CDP 12/12 全通过：
+  - TC1 Title ✅ TC2 Screen(chat) ✅ TC3 API(全 7 个新方法) ✅
+  - TC4 Config(anthropic) ✅ TC5 Screenshot ✅ TC6 Console(0 errors) ✅
+  - TC7 chatPrepare ✅ TC8 Sessions ✅ TC9 Agents ✅
+  - TC10 SessionAgents ✅ TC11 Sidebar ✅ TC12 CC DOM vars ✅
+- Gate: 语法 ✅, CDP 验证 ✅
 - F061: 轻量 Agent 数据模型（session_agents SQLite 表 + CRUD + 级联删除 + 索引）
 - F062: 轻量 Agent CRUD（3 IPC handlers + preload + create_agent/remove_agent LLM 工具）
 - F063: 主 Agent 身份确立（agentId.startsWith('a') 走 session agent，主 Agent 用 SOUL.md）
