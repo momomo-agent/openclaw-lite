@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('api', {
   buildSystemPrompt: () => ipcRenderer.invoke('build-system-prompt'),
   chat: (msg) => ipcRenderer.invoke('chat', msg),
   chatPrepare: () => ipcRenderer.invoke('chat-prepare'),
+  chatRoute: (msg) => ipcRenderer.invoke('chat-route', msg),
   onToken: (cb) => {
     ipcRenderer.on('chat-token', (_, d) => cb(d))
   },
@@ -37,6 +38,11 @@ contextBridge.exposeInMainWorld('api', {
   // Session members
   addMember: (sessionId, agentId) => ipcRenderer.invoke('session-add-member', { sessionId, agentId }),
   removeMember: (sessionId, agentId) => ipcRenderer.invoke('session-remove-member', { sessionId, agentId }),
+  // Session agents (M19: lightweight agents)
+  createSessionAgent: (sessionId, opts) => ipcRenderer.invoke('session-create-agent', { sessionId, ...opts }),
+  listSessionAgents: (sessionId) => ipcRenderer.invoke('session-list-agents', sessionId),
+  deleteSessionAgent: (agentId) => ipcRenderer.invoke('session-delete-agent', agentId),
+  onSessionAgentsChanged: (cb) => { ipcRenderer.removeAllListeners('session-agents-changed'); ipcRenderer.on('session-agents-changed', (_, sid) => cb(sid)) },
   // Tasks
   listTasks: (sessionId) => ipcRenderer.invoke('session-tasks', sessionId),
   onTasksChanged: (cb) => { ipcRenderer.removeAllListeners('tasks-changed'); ipcRenderer.on('tasks-changed', (_, sid) => cb(sid)) },

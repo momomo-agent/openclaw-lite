@@ -75,3 +75,13 @@
 - F048: 自动轮转（task 完成后自动触发 unblocked agent）
 - 对标 Claude Code Agent Teams 设计
 - Gate: 语法检查 ✅，E2E + DBB 待验证
+
+## M19 — 主/轻量 Agent 分层 (v0.20.0)
+- F061: 轻量 Agent 数据模型（session_agents SQLite 表 + CRUD 函数）
+- F062: 轻量 Agent CRUD（IPC handlers + preload + create_agent/remove_agent LLM 工具）
+- F063: 主 Agent 身份确立（chat handler 支持轻量 agent ID，role 注入 system prompt）
+- F064: 轻量 Agent 对话路由（@mention 优先查 session agents，fallback 查模板）
+- F065: 轻量 Agent UI（Members 面板：创建角色 + 从模板添加 + 删除）
+- F066: Agent 工具适配（send_message/auto-rotation 支持轻量 agent）
+- 设计选择：所有 agent 平等参与，不区分 subagent/teammate，不做能力限制
+- Gate: 语法检查 ✅，E2E 启动 ✅，功能验证待做

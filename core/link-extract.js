@@ -1,9 +1,17 @@
 // core/link-extract.js — 链接内容提取
-const BARE_URL_RE = /https?:\/\/\S+/gi;
+// Only extract bare URLs that the user explicitly pasted, not markdown/code URLs
 
 async function extractLinkContext(text, maxLinks = 3, timeoutMs = 5000) {
   if (!text) return '';
-  const urls = [...new Set((text.match(BARE_URL_RE) || []).slice(0, maxLinks))];
+
+  // Strip markdown links [text](url), inline code `...`, and code blocks ```...```
+  const cleaned = text
+    .replace(/```[\s\S]*?```/g, '')     // code blocks
+    .replace(/`[^`]+`/g, '')            // inline code
+    .replace(/\[([^\]]*)\]\([^)]+\)/g, '$1')  // markdown links → keep text only
+
+  // Now match bare URLs in the cleaned text
+  const urls = [...new Set((cleaned.match(/https?:\/\/\S+/gi) || []).slice(0, maxLinks))];
   if (!urls.length) return '';
   const results = await Promise.allSettled(urls.map(async (url) => {
     const res = await fetch(url, {

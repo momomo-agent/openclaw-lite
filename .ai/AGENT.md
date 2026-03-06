@@ -45,7 +45,7 @@ Preload (preload.js) — IPC bridge, contextBridge.exposeInMainWorld('api', {...
 | `renderer/app.js` | Chat UI, session management, status display, bootstrap |
 | `renderer/index.html` | HTML layout, settings panel, overlays |
 | `renderer/style.css` | All styles, dark theme |
-| `session-store.js` | SQLite backend — sessions, messages, tasks, status persistence |
+| `session-store.js` | SQLite backend — sessions, messages, tasks, session agents, status persistence |
 | `memory-index.js` | Memory indexing — FTS5 + optional vector search |
 | `tools/registry.js` | Unified tool registration system |
 | `tools/*.js` | Individual tools: web-fetch, file-ops, exec, search, skill, skill-install |
@@ -59,7 +59,9 @@ Preload (preload.js) — IPC bridge, contextBridge.exposeInMainWorld('api', {...
 - **M18 modular architecture.** core/ modules share state via core/state.js. main.js orchestrates.
 - **Dark theme only.** Background #0a0a0a, accent #fbbf24, -apple-system font stack.
 - **Chinese + English mixed.** UI labels and status can be either. User is Chinese-speaking.
-- **SQLite for state.** Sessions, tasks, status, memory index all in `.paw/*.db`. No JSON files for state.
+- **SQLite for state.** Sessions, tasks, session agents, status, memory index all in `.paw/*.db`. No JSON files for state.
+- **Two-tier agent model (M19).** Main Agent = SOUL.md + workspace memory (always present, default responder). Lightweight agents = session-level, name + role only, stored in session_agents table.
+- **agents/ = template library.** Persistent agent definitions in agents/*.json are templates, not active agents. Used to quickly create lightweight agents in sessions.
 - **OpenClaw compatible.** Workspace structure, cold boot chain, memory file layout all match OpenClaw.
 
 ## Workspace Structure (user's clawDir)

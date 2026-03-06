@@ -140,12 +140,26 @@
       </div>
       <div class="settings-body">
         <div id="memberList"></div>
-        <div class="member-add">
-          <select id="addAgentSelect"></select>
-          <button onclick="addAgentToSession()">Add</button>
-        </div>
         <hr style="border-color:#1a1a1a;margin:8px 0">
-        <button class="primary-btn" onclick="openAgentManager()">Manage Agents</button>
+        <details class="agent-create-section">
+          <summary>Create Role</summary>
+          <div style="margin-top:8px">
+            <label>Name</label>
+            <input id="newRoleName" type="text" placeholder="e.g. Reviewer">
+            <label>Role description</label>
+            <textarea id="newRoleDesc" rows="2" maxlength="500" placeholder="e.g. Code review expert, focus on security and performance" style="width:100%;resize:vertical;background:#111;color:#e0e0e0;border:1px solid #333;border-radius:4px;padding:6px;font-size:13px"></textarea>
+            <button class="primary-btn" style="margin-top:8px" onclick="createLightweightAgent()">Add to Session</button>
+          </div>
+        </details>
+        <details class="agent-create-section" style="margin-top:4px">
+          <summary>Add from Templates</summary>
+          <div style="margin-top:8px" class="member-add">
+            <select id="addAgentSelect"></select>
+            <button onclick="addAgentFromTemplate()">Add</button>
+          </div>
+        </details>
+        <hr style="border-color:#1a1a1a;margin:8px 0">
+        <button class="secondary-btn" onclick="openAgentManager()">Manage Templates</button>
       </div>
     </div>
   </div>

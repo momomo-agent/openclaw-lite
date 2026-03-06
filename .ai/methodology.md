@@ -52,7 +52,7 @@ Electron Renderer
 □ growth.md 写本轮记录
 ```
 
-### M8/M9/M17 教训（已发生，不可再犯）
+### M8/M9/M17/M19 教训（已发生，不可再犯）
 
 1. **一次只做一个 feature** — M8 塞了 5 个 feature 一起做，跳过了 PLAN，没有逐个验证
 2. **Edit 匹配唯一性** — main.js 有两处 `return { answer: fullText }`，Edit 报错。用更长上下文或先 Read 确认行号
@@ -62,6 +62,7 @@ Electron Renderer
 6. **DBB 不能只跑脚本** — 必须截图 + taste.md 对照，自动化测试只验功能不验体验
 7. **新增目录必须加 build.files** — v0.18.0 加了 tools/ 和 skills/ 但没加到 package.json build.files，asar 打包不包含，导致生产环境 crash（Cannot find module './tools'）。node --check 在源码目录能过，但打包后找不到模块
 8. **发布前必须启动测试打包产物** — 不是测试源码 `npm start`，是测试 `dist/` 里的 .app，两者区别是 asar 打包
+9. **工具调用路径必须端到端验证** — node --check 只验语法，npm start 只验启动不崩溃，都不能替代"实际触发一次工具调用"。M19 的 create_agent 工具因为 main.js 的 currentSessionId 从未被 renderer 同步，运行时必定报 "No active session"，但语法检查和启动测试都发现不了。新增 LLM 工具后，必须实际让 AI 调一次或手动模拟一次完整调用链
 
 ## 约束（已解除）
 - ~~MVP 不做：cron/heartbeat~~ → M8 已实现

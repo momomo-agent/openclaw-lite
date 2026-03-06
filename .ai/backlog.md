@@ -6,7 +6,7 @@
 
 | # | 需求 | 来源 | 优先级 | 备注 |
 |---|------|------|--------|------|
-| B036 | Agent 即参与者 | kenefe | P0 | Agent 和人一样是 session 的参与者，可以随时创建、加入、离开，创建成本趋近于零。不需要提前在 Agent Manager 注册。 |
+| B036 | 主/轻量 Agent 分层 | kenefe | P0 | 主 Agent = workspace 灵魂（SOUL.md + 记忆 + 工具），默认回复者。轻量 Agent = session 内临时参与者（名称 + 角色描述），不持久化到 agents/，存在 session 数据里。agents/ 保留为常用模板库。 |
 | B037 | 工具层抽象 | kenefe | P1 | Agent 的行动能力可插拔。工具分轻量（单次调用，如 file_write）和重量（持久进程，如 CC）。Paw 只定义协议。 |
 | B038 | Claude Code 作为工具 | kenefe | P0 | 第一个持久进程类工具。Agent 在需要编码时调用 CC，CC 不是 agent，是 agent 手里的工具。依赖 B037。 |
 

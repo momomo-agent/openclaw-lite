@@ -55,6 +55,18 @@ function ensureSchema(db) {
     )
   `)
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id)`)
+  // Session-level lightweight agents (M19)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_agents (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    )
+  `)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_session_agents_session ON session_agents(session_id)`)
   // Add status columns (safe migration for existing DBs)
   try { db.exec(`ALTER TABLE sessions ADD COLUMN status_level TEXT DEFAULT 'idle'`) } catch {}
   try { db.exec(`ALTER TABLE sessions ADD COLUMN status_text TEXT DEFAULT ''`) } catch {}
@@ -117,15 +129,15 @@ function createSession(clawDir, title) {
 
 // ── Tasks CRUD ──
 
-function createTask(clawDir, sessionId, { title, dependsOn, createdBy }) {
+function createTask(clawDir, sessionId, { title, dependsOn, createdBy, assignee }) {
   const d = getDb(clawDir)
   if (!d) return null
   const id = 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5)
   const now = Date.now()
   const deps = Array.isArray(dependsOn) && dependsOn.length ? JSON.stringify(dependsOn) : null
-  d.prepare('INSERT INTO tasks (id, session_id, title, status, depends_on, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)')
-    .run(id, sessionId, title, 'pending', deps, createdBy || null, now, now)
-  return { id, sessionId, title, status: 'pending', assignee: null, dependsOn: dependsOn || [], createdBy, createdAt: now }
+  d.prepare('INSERT INTO tasks (id, session_id, title, status, assignee, depends_on, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
+    .run(id, sessionId, title, 'pending', assignee || null, deps, createdBy || null, now, now)
+  return { id, sessionId, title, status: 'pending', assignee: assignee || null, dependsOn: dependsOn || [], createdBy, createdAt: now }
 }
 
 function updateTask(clawDir, taskId, { status, assignee }) {
@@ -207,4 +219,41 @@ function getSessionStatus(clawDir, sessionId) {
   return d.prepare('SELECT status_level as level, status_text as text FROM sessions WHERE id = ?').get(sessionId)
 }
 
-module.exports = { getDb, listSessions, loadSession, saveSession, deleteSession, createSession, migrateFromJson, closeDb, createTask, updateTask, listTasks, updateSessionStatus, getSessionStatus }
+// ── Session Agents CRUD (M19: lightweight agents) ──
+
+function createSessionAgent(clawDir, sessionId, { name, role }) {
+  const d = getDb(clawDir)
+  if (!d) return null
+  const id = 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5)
+  const now = Date.now()
+  d.prepare('INSERT INTO session_agents (id, session_id, name, role, created_at) VALUES (?,?,?,?,?)')
+    .run(id, sessionId, name, role || '', now)
+  return { id, sessionId, name, role: role || '', createdAt: now }
+}
+
+function listSessionAgents(clawDir, sessionId) {
+  const d = getDb(clawDir)
+  if (!d) return []
+  return d.prepare('SELECT id, session_id as sessionId, name, role, created_at as createdAt FROM session_agents WHERE session_id = ? ORDER BY created_at').all(sessionId)
+}
+
+function getSessionAgent(clawDir, agentId) {
+  const d = getDb(clawDir)
+  if (!d) return null
+  return d.prepare('SELECT id, session_id as sessionId, name, role, created_at as createdAt FROM session_agents WHERE id = ?').get(agentId)
+}
+
+function deleteSessionAgent(clawDir, agentId) {
+  const d = getDb(clawDir)
+  if (!d) return false
+  const result = d.prepare('DELETE FROM session_agents WHERE id = ?').run(agentId)
+  return result.changes > 0
+}
+
+function findSessionAgentByName(clawDir, sessionId, name) {
+  const d = getDb(clawDir)
+  if (!d) return null
+  return d.prepare('SELECT id, session_id as sessionId, name, role, created_at as createdAt FROM session_agents WHERE session_id = ? AND name = ?').get(sessionId, name)
+}
+
+module.exports = { getDb, listSessions, loadSession, saveSession, deleteSession, createSession, migrateFromJson, closeDb, createTask, updateTask, listTasks, updateSessionStatus, getSessionStatus, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName }
