@@ -6,10 +6,21 @@ let acpxBin = null;
 
 // Detect acpx binary on startup
 function init() {
+  const fs = require('fs');
+  // Try node_modules/.bin/acpx first (most reliable for CLI packages)
+  const localBin = path.join(__dirname, '..', 'node_modules', '.bin', 'acpx');
+  if (fs.existsSync(localBin)) {
+    acpxBin = localBin;
+    console.log('[acpx] found at', acpxBin);
+    return;
+  }
+  // Fallback: try require.resolve
   try {
-    const acpxPkg = require.resolve('acpx');
-    acpxBin = path.join(path.dirname(acpxPkg), '../.bin/acpx');
-  } catch (e) {
+    const acpxPkg = require.resolve('acpx/package.json');
+    acpxBin = path.join(path.dirname(acpxPkg), 'node_modules', '.bin', 'acpx');
+    if (!fs.existsSync(acpxBin)) acpxBin = null;
+  } catch (e) {}
+  if (!acpxBin) {
     console.warn('[acpx] not found in node_modules, acpx features disabled');
   }
 }
