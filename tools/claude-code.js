@@ -1,35 +1,32 @@
-// tools/claude-code.js — Claude Code as a persistent tool
+// tools/claude-code.js — Claude Code via acpx
 const { registerTool } = require('./registry');
-const { spawn } = require('child_process');
+const acpx = require('../core/acpx');
 const path = require('path');
 
-let ccProcess = null;
-let ccSessionId = null;
+const sessionCCSessions = new Map(); // pawSessionId -> acpxSessionName
 
 function isRunning() {
-  return ccProcess !== null && !ccProcess.killed;
+  return false; // acpx handles process lifecycle
 }
 
 function stop() {
-  if (ccProcess && !ccProcess.killed) {
-    ccProcess.kill('SIGTERM');
-    setTimeout(() => {
-      if (ccProcess && !ccProcess.killed) ccProcess.kill('SIGKILL');
-    }, 5000);
-  }
-  ccProcess = null;
-  ccSessionId = null;
+  // No-op: acpx manages session lifecycle with TTL
 }
 
 registerTool({
   name: 'claude_code',
-  description: 'Delegate a coding task to Claude Code. Use when you need to write, edit, or refactor code. Claude Code has full file system access and can run commands. Provide a clear task description.',
+  description: 'Delegate a coding task to a coding agent (Claude Code/Codex/Gemini). Use when you need to write, edit, or refactor code. Has full file system access and can run commands.',
   parameters: {
     type: 'object',
     properties: {
       task: {
         type: 'string',
         description: 'Clear description of the coding task'
+      },
+      agent: {
+        type: 'string',
+        enum: ['claude', 'codex', 'gemini'],
+        description: 'Which coding agent to use (default: claude)'
       },
       workdir: {
         type: 'string',
@@ -43,99 +40,46 @@ registerTool({
     required: ['task']
   },
   handler: async (args, context) => {
-    const { clawDir, mainWindow } = context;
+    const { clawDir, mainWindow, sessionId, config } = context;
     const workdir = args.workdir ? path.resolve(clawDir, args.workdir) : clawDir;
     const task = (args.task || '').trim();
     if (!task) return 'Error: task required';
+    if (!acpx.isAvailable()) return 'Error: acpx not available. Install with: npm install acpx';
 
-    // Notify UI
+    const agent = args.agent || config?.defaultCodingAgent || 'claude';
+
     if (mainWindow) {
       mainWindow.webContents.send('cc-status', { status: 'running', task: task.slice(0, 80) });
     }
-    const ccStartTime = Date.now();
 
     try {
-      const ccArgs = [
-        '--print',
-        '--output-format', 'json',
-        '--dangerously-skip-permissions',
-        // Uses model from ~/.claude/settings.json (currently opus via subrouter)
-      ];
+      const acpxOpts = {
+        cwd: workdir,
+        timeout: 300000,
+        approveAll: true,
+        onOutput: (chunk) => {
+          if (mainWindow) {
+            mainWindow.webContents.send('cc-output', { chunk, total: chunk.length });
+          }
+        }
+      };
 
-      // Continue previous session if requested and available
-      if (args.continue_session && ccSessionId) {
-        ccArgs.push('--resume', ccSessionId);
+      let result;
+      const existingCCSession = sessionCCSessions.get(sessionId);
+
+      if (args.continue_session && existingCCSession) {
+        acpxOpts.session = existingCCSession;
+        result = await acpx.prompt(agent, task, acpxOpts);
+      } else {
+        const sessionName = sessionId ? `paw-${sessionId}` : undefined;
+        acpxOpts.session = sessionName;
+        result = await acpx.exec(agent, task, acpxOpts);
       }
 
-      ccArgs.push(task);
+      if (result.sessionName && sessionId) {
+        sessionCCSessions.set(sessionId, result.sessionName);
+      }
 
-      const result = await new Promise((resolve, reject) => {
-        let stdout = '';
-        let stderr = '';
-        let textOutput = ''; // For streaming display
-
-        // Resolve claude binary path (shell: false needs absolute or PATH-visible path)
-        const claudePath = process.env.HOME + '/.local/bin/claude';
-        const proc = spawn(claudePath, ccArgs, {
-          cwd: workdir,
-          env: { ...process.env, TERM: 'dumb' },
-        });
-
-        ccProcess = proc;
-
-        // Manual timeout (5 min) — spawn's timeout with shell:true can kill process before JSON output
-        const ccTimeout = setTimeout(() => {
-          if (proc && !proc.killed) {
-            console.log('[CC] manual timeout reached (5 min), killing');
-            proc.kill('SIGTERM');
-          }
-        }, 300000);
-
-        proc.stdout.on('data', (data) => {
-          const chunk = data.toString();
-          stdout += chunk;
-          textOutput += chunk;
-          // Stream to UI (show raw output during execution)
-          if (mainWindow) {
-            mainWindow.webContents.send('cc-output', { chunk, total: textOutput.length });
-          }
-        });
-
-        proc.stderr.on('data', (data) => {
-          const chunk = data.toString();
-          stderr += chunk;
-          // Stream stderr to UI as progress (JSON mode has no stdout streaming)
-          if (mainWindow) {
-            mainWindow.webContents.send('cc-output', { chunk, total: stderr.length });
-          }
-        });
-
-        proc.on('close', (code, signal) => {
-          clearTimeout(ccTimeout);
-          ccProcess = null;
-          const elapsed = ((Date.now() - ccStartTime) / 1000).toFixed(1);
-          console.log(`[CC] process closed code=${code} signal=${signal} elapsed=${elapsed}s stdout=${stdout.length}B stderr=${stderr.length}B`);
-          // Parse JSON output to extract result and session_id
-          try {
-            const json = JSON.parse(stdout);
-            if (json.session_id) ccSessionId = json.session_id;
-            const resultText = json.result || stdout;
-            resolve({ text: resultText, sessionId: json.session_id, cost: json.total_cost_usd, isError: !!json.is_error });
-          } catch (e) {
-            console.log(`[CC] JSON parse failed: ${e.message}, stdout start: ${stdout.slice(0, 80)}`);
-            // Fallback to raw text
-            resolve({ text: stdout + (stderr ? `\nSTDERR:\n${stderr}` : ''), sessionId: null, cost: null, isError: code !== 0 });
-          }
-        });
-
-        proc.on('error', (err) => {
-          clearTimeout(ccTimeout);
-          ccProcess = null;
-          reject(err);
-        });
-      });
-
-      // Truncate output for context efficiency
       const MAX_OUTPUT = 3000;
       const text = result.text || '';
       const truncated = text.length > MAX_OUTPUT
@@ -143,17 +87,15 @@ registerTool({
         : text;
 
       if (mainWindow) {
-        const isDone = !result.isError;
         mainWindow.webContents.send('cc-status', {
-          status: isDone ? 'done' : 'error',
+          status: result.isError ? 'error' : 'done',
           length: text.length,
           cost: result.cost,
-          error: isDone ? undefined : (text.slice(0, 200) || 'CC execution failed')
+          error: result.isError ? (text.slice(0, 200) || 'CC execution failed') : undefined
         });
       }
 
-      // Return result with metadata
-      const meta = result.sessionId ? `\n[CC session: ${result.sessionId}]` : '';
+      const meta = result.sessionName ? `\n[CC session: ${result.sessionName}]` : '';
       const costInfo = result.cost ? ` [cost: $${result.cost.toFixed(4)}]` : '';
       return truncated + meta + costInfo;
 

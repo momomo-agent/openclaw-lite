@@ -1,9 +1,9 @@
 {
-  "currentMilestone": "M18",
-  "currentFeature": null,
-  "phase": "review",
-  "version": "0.15.0",
-  "lastUpdate": "2026-03-02",
+  "currentMilestone": "M22",
+  "currentFeature": "F085",
+  "phase": "plan",
+  "version": "0.21.0",
+  "lastUpdate": "2026-03-09",
   "completedMilestones": [
     "M1",
     "M2",
@@ -21,6 +21,9 @@
     "M15",
     "M16",
     "M17",
-    "M18"
+    "M18",
+    "M19",
+    "M20",
+    "M21"
   ]
 }

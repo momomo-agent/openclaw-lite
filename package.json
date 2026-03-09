@@ -44,6 +44,7 @@
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
+    "acpx": "^0.1.15",
     "better-sqlite3": "^12.6.2",
     "linkedom": "^0.18.12",
     "marked-highlight": "^2.2.3",

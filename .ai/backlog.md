@@ -8,6 +8,8 @@
 |---|------|------|--------|------|
 | B037 | 工具层抽象 | kenefe | P1 | Agent 的行动能力可插拔。工具分轻量（单次调用，如 file_write）和重量（持久进程，如 CC）。Paw 只定义协议。→ M20 F068-F070 |
 | B038 | Claude Code 作为工具 | kenefe | P0 | 第一个持久进程类工具。Agent 在需要编码时调用 CC，CC 不是 agent，是 agent 手里的工具。依赖 B037。→ M20 F071-F073 |
+| B039 | ACP 协议接入 | kenefe | P0 | 用 acpx 协议驱动 CC，替代 PTY spawn。标准化 session/cancel/steer/多 harness。→ M22 F085-F088 |
+| B040 | 多 Harness 支持 | kenefe | P1 | 同一套接口支持 Claude Code/Codex/Gemini CLI。依赖 B039。→ M22 F090 |
 
 ## 已完成（✅ 已分配到里程碑）
 

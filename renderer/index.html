@@ -115,7 +115,13 @@
           </div>
           <!-- Tools tab -->
           <div class="settings-tab-content" id="tab-tools">
-            <label>Tavily API Key <span class="hint">(for web search)</span></label>
+            <label>Default Coding Agent</label>
+            <select id="cfgCodingAgent">
+              <option value="claude">Claude Code</option>
+              <option value="codex">Codex</option>
+              <option value="gemini">Gemini CLI</option>
+            </select>
+            <label style="margin-top:12px">Tavily API Key <span class="hint">(for web search)</span></label>
             <input id="cfgTavilyKey" type="password" placeholder="tvly-...">
             <label style="margin-top:12px">Exec Approval</label>
             <label class="toggle-label"><input type="checkbox" id="cfgExecApproval" checked> Require approval for dangerous commands</label>

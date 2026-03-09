@@ -21,6 +21,7 @@ const { buildMemoryIndex: coreBuildMemoryIndex, startMemoryWatch: coreStartMemor
 const { buildSystemPrompt: coreBuildSystemPrompt, buildAgentPrompt: coreBuildAgentPrompt } = require('./core/prompt-builder')
 const { routeMessage: coreRouteMessage } = require('./core/router')
 const { streamAnthropicRaw: coreLlmAnthropicRaw, streamOpenAIRaw: coreLlmOpenAIRaw } = require('./core/llm-raw')
+const acpx = require('./core/acpx')
 
 // Legacy globals - kept for backward compat, synced to state via syncState()
 let mainWindow
@@ -171,6 +172,9 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Initialize acpx
+  acpx.init()
+
   // Support --claw-dir CLI arg
   const clawDirArg = process.argv.find(a => a.startsWith('--claw-dir='))
   if (clawDirArg) {
@@ -305,6 +309,20 @@ ipcMain.handle('save-config', (_, config) => {
   const p = configPath()
   if (!p) return false
   fs.mkdirSync(path.dirname(p), { recursive: true })
+  fs.writeFileSync(p, JSON.stringify(config, null, 2))
+  return true
+})
+
+ipcMain.handle('get-coding-agent', () => {
+  const config = coreLoadConfig()
+  return config.defaultCodingAgent || 'claude'
+})
+
+ipcMain.handle('set-coding-agent', (_, agent) => {
+  const p = configPath()
+  if (!p) return false
+  const config = coreLoadConfig()
+  config.defaultCodingAgent = agent
   fs.writeFileSync(p, JSON.stringify(config, null, 2))
   return true
 })

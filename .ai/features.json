@@ -412,5 +412,54 @@
     "name": "集成验证",
     "milestone": "M18",
     "passes": true
+  },
+  {
+    "id": "F085",
+    "category": "core",
+    "description": "acpx 依赖接入 + 可用性检测",
+    "passes": false,
+    "milestone": "M22"
+  },
+  {
+    "id": "F086",
+    "category": "core",
+    "description": "acpx 核心封装（exec/prompt/cancel/status/setMode）",
+    "passes": false,
+    "milestone": "M22"
+  },
+  {
+    "id": "F087",
+    "category": "core",
+    "description": "CC 工具迁移到 acpx（替代 PTY spawn）",
+    "passes": false,
+    "milestone": "M22"
+  },
+  {
+    "id": "F088",
+    "category": "ux",
+    "description": "CC UX 适配（JSONL 事件解析 + Cancel + 状态面板）",
+    "passes": false,
+    "milestone": "M22"
+  },
+  {
+    "id": "F089",
+    "category": "core",
+    "description": "acpx Session 管理（持久化 + session 切换保留）",
+    "passes": false,
+    "milestone": "M22"
+  },
+  {
+    "id": "F090",
+    "category": "core",
+    "description": "多 Harness 支持（Codex / Gemini CLI 切换）",
+    "passes": false,
+    "milestone": "M22"
+  },
+  {
+    "id": "F091",
+    "category": "core",
+    "description": "M22 集成验证",
+    "passes": false,
+    "milestone": "M22"
   }
 ]

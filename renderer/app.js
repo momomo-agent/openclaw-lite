@@ -748,10 +748,12 @@ function esc(s) {
 async function openSettings() {
   const config = await window.api.getConfig() || {}
   const prefs = await window.api.getPrefs()
+  const codingAgent = await window.api.invoke('get-coding-agent')
   document.getElementById('cfgProvider').value = config.provider || 'anthropic'
   document.getElementById('cfgApiKey').value = config.apiKey || ''
   document.getElementById('cfgBaseUrl').value = config.baseUrl || ''
   document.getElementById('cfgModel').value = config.model || ''
+  document.getElementById('cfgCodingAgent').value = codingAgent || 'claude'
   document.getElementById('cfgTavilyKey').value = config.tavilyKey || ''
   document.getElementById('cfgHeartbeat').checked = config.heartbeat?.enabled !== false
   document.getElementById('cfgHeartbeatInterval').value = config.heartbeat?.intervalMinutes || 30
@@ -795,7 +797,9 @@ async function saveSettings() {
       intervalMinutes: parseInt(document.getElementById('cfgHeartbeatInterval').value) || 30,
     },
   }
+  const codingAgent = document.getElementById('cfgCodingAgent').value
   await window.api.saveConfig(config)
+  await window.api.invoke('set-coding-agent', codingAgent)
   if (config.heartbeat.enabled) await window.api.heartbeatStart()
   else await window.api.heartbeatStop()
   closeSettings()
