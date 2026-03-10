@@ -48,7 +48,7 @@ function configPath() { syncState(); return coreConfigPath(); }
 
 async function extractLinkContext(text, maxLinks, timeoutMs) { return coreExtractLinkContext(text, maxLinks, timeoutMs); }
 
-const { COMPACT_THRESHOLD, COMPACT_KEEP_RECENT, estimateTokens, estimateMessagesTokens, compactHistory: coreCompactHistory } = require('./core/compaction')
+const { COMPACT_THRESHOLD_FALLBACK, COMPACT_KEEP_RECENT, estimateTokens, estimateMessagesTokens, compactHistory: coreCompactHistory, getCompactThreshold } = require('./core/compaction')
 async function compactHistory(messages, config) {
   const provider = config.provider || 'anthropic'
   const rawFn = provider === 'anthropic' ? streamAnthropicRaw : streamOpenAIRaw
@@ -573,11 +573,12 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
   // Session pruning — trim old tool results before token counting (in-memory only)
   const prunedMessages = pruneToolResults(messages)
 
-  // Context compaction - auto-compress if history too long
+  // Context compaction - auto-compress if history too long (model-aware threshold)
+  const compactThreshold = getCompactThreshold(model)
   const totalTokens = estimateMessagesTokens(prunedMessages)
   let finalMessages = prunedMessages
-  if (totalTokens > COMPACT_THRESHOLD && prunedMessages.length > COMPACT_KEEP_RECENT * 2 + 2) {
-    console.log(`[compaction] ${totalTokens} tokens exceeds threshold ${COMPACT_THRESHOLD}, compacting...`)
+  if (totalTokens > compactThreshold && prunedMessages.length > COMPACT_KEEP_RECENT * 2 + 2) {
+    console.log(`[compaction] ${totalTokens} tokens exceeds threshold ${compactThreshold} (model: ${model}), compacting...`)
     mainWindow?.webContents.send('chat-status', { text: '压缩历史对话...', requestId })
     finalMessages = await compactHistory(prunedMessages, { apiKey, baseUrl, model, provider })
   }
