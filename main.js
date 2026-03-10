@@ -461,9 +461,9 @@ ipcMain.handle('sessions-list', (_, opts) => listSessions(opts))
 ipcMain.handle('session-load', (_, id) => loadSession(id))
 ipcMain.handle('session-save', (_, session) => { saveSession(session); return true })
 ipcMain.handle('session-create', (_, opts) => {
-  if (typeof opts === 'string') return createSession(opts)  // backward compat
-  const { title, workspaceId, participants } = opts || {}
-  return createSession(title, { workspaceId, participants })
+  if (typeof opts === 'string') return createSession(opts)
+  const { title, participants } = opts || {}
+  return createSession(title, { participants })
 })
 ipcMain.handle('session-delete', (_, id) => {
   try { deleteSessionById(id); return true } catch { return false }

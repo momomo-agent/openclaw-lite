@@ -29,7 +29,8 @@ function ensureSchema(db) {
       status_level TEXT DEFAULT 'idle',
       status_text TEXT DEFAULT '',
       input_tokens INTEGER DEFAULT 0,
-      output_tokens INTEGER DEFAULT 0
+      output_tokens INTEGER DEFAULT 0,
+      participants TEXT DEFAULT '[]'
     )
   `)
   db.exec(`
@@ -59,7 +60,6 @@ function ensureSchema(db) {
     )
   `)
   db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id)`)
-  // Session-level lightweight agents (M19)
   db.exec(`
     CREATE TABLE IF NOT EXISTS session_agents (
       id TEXT PRIMARY KEY,
@@ -71,16 +71,11 @@ function ensureSchema(db) {
     )
   `)
   db.exec(`CREATE INDEX IF NOT EXISTS idx_session_agents_session ON session_agents(session_id)`)
-  // M32: session participants (many-to-many)
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS session_participants (
-      session_id TEXT NOT NULL,
-      workspace_id TEXT NOT NULL,
-      added_at INTEGER NOT NULL DEFAULT 0,
-      PRIMARY KEY (session_id, workspace_id),
-      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-    )
-  `)
+}
+
+function _parseParticipants(raw) {
+  if (!raw) return []
+  try { return JSON.parse(raw) } catch { return [] }
 }
 
 function listSessions(clawDir, { workspaceId } = {}) {
@@ -88,14 +83,12 @@ function listSessions(clawDir, { workspaceId } = {}) {
   if (!d) return []
   const sessions = d.prepare(`
     SELECT s.id, s.title, s.created_at as createdAt, s.updated_at as updatedAt,
-           s.status_level as statusLevel, s.status_text as statusText,
+           s.status_level as statusLevel, s.status_text as statusText, s.participants,
            (SELECT substr(m.content, 1, 60) FROM messages m WHERE m.session_id = s.id ORDER BY m.id DESC LIMIT 1) as lastMessage
     FROM sessions s ORDER BY s.updated_at DESC
   `).all()
-  // Attach participants
-  const stmtP = d.prepare('SELECT workspace_id FROM session_participants WHERE session_id = ?')
   for (const s of sessions) {
-    s.participants = stmtP.all(s.id).map(r => r.workspace_id)
+    s.participants = _parseParticipants(s.participants)
   }
   if (workspaceId) {
     return sessions.filter(s => s.participants.includes(workspaceId))
@@ -106,17 +99,15 @@ function listSessions(clawDir, { workspaceId } = {}) {
 function loadSession(clawDir, id) {
   const d = getDb(clawDir)
   if (!d) return null
-  const session = d.prepare('SELECT id, title, created_at as createdAt, updated_at as updatedAt FROM sessions WHERE id = ?').get(id)
+  const session = d.prepare('SELECT id, title, created_at as createdAt, updated_at as updatedAt, participants FROM sessions WHERE id = ?').get(id)
   if (!session) return null
+  session.participants = _parseParticipants(session.participants)
   const rows = d.prepare('SELECT role, content, timestamp, metadata FROM messages WHERE session_id = ? ORDER BY id').all(id)
   session.messages = rows.map(r => {
     const msg = { role: r.role, content: r.content, timestamp: r.timestamp }
     if (r.metadata) try { Object.assign(msg, JSON.parse(r.metadata)) } catch {}
     return msg
   })
-  // Attach participants
-  session.participants = d.prepare('SELECT workspace_id FROM session_participants WHERE session_id = ?')
-    .all(id).map(r => r.workspace_id)
   return session
 }
 
@@ -125,10 +116,10 @@ function saveSession(clawDir, session) {
   if (!d) return
   const now = Date.now()
   session.updatedAt = now
-  // Upsert session row
-  d.prepare('INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET title=excluded.title, updated_at=excluded.updated_at')
-    .run(session.id, session.title || 'New Chat', session.createdAt || now, now)
-  // Replace all messages (simple approach — fine for desktop app scale)
+  const participants = JSON.stringify(session.participants || [])
+  d.prepare('INSERT INTO sessions (id, title, created_at, updated_at, participants) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET title=excluded.title, updated_at=excluded.updated_at, participants=excluded.participants')
+    .run(session.id, session.title || 'New Chat', session.createdAt || now, now, participants)
+  // Replace all messages
   d.prepare('DELETE FROM messages WHERE session_id = ?').run(session.id)
   const insert = d.prepare('INSERT INTO messages (session_id, role, content, timestamp, metadata) VALUES (?, ?, ?, ?, ?)')
   const tx = d.transaction((msgs) => {
@@ -147,19 +138,12 @@ function deleteSession(clawDir, id) {
   d.prepare('DELETE FROM sessions WHERE id = ?').run(id)
 }
 
-function createSession(clawDir, title, { workspaceId, participants } = {}) {
+function createSession(clawDir, title, { participants } = {}) {
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
   const now = Date.now()
-  const session = { id, title: title || 'New Chat', messages: [], createdAt: now, updatedAt: now, participants: [] }
+  const wsIds = participants || []
+  const session = { id, title: title || 'New Chat', messages: [], createdAt: now, updatedAt: now, participants: wsIds }
   saveSession(clawDir, session)
-  // Add participants
-  const wsIds = participants || (workspaceId ? [workspaceId] : [])
-  const d = getDb(clawDir)
-  if (d && wsIds.length) {
-    const stmt = d.prepare('INSERT OR IGNORE INTO session_participants (session_id, workspace_id, added_at) VALUES (?, ?, ?)')
-    for (const wsId of wsIds) stmt.run(id, wsId, now)
-  }
-  session.participants = wsIds
   return session
 }
 
@@ -182,17 +166,14 @@ function updateTask(clawDir, taskId, { status, assignee }) {
   const task = d.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId)
   if (!task) return { error: 'Task not found' }
 
-  // Parse depends_on
   const deps = task.depends_on ? JSON.parse(task.depends_on) : []
 
-  // Check dependencies before claiming
   if (status === 'in-progress' && deps.length) {
     const placeholders = deps.map(() => '?').join(',')
     const blocked = d.prepare(`SELECT id FROM tasks WHERE id IN (${placeholders}) AND status != 'done'`).all(...deps)
     if (blocked.length) return { error: `Blocked by: ${blocked.map(b => b.id).join(', ')}` }
   }
 
-  // Status can only move forward
   const order = { pending: 0, 'in-progress': 1, done: 2 }
   if (order[status] <= order[task.status]) return { error: `Cannot move from ${task.status} to ${status}` }
 
@@ -215,28 +196,6 @@ function listTasks(clawDir, sessionId) {
     assignee: r.assignee, dependsOn: r.depends_on ? JSON.parse(r.depends_on) : [],
     createdBy: r.created_by, createdAt: r.created_at
   }))
-}
-
-// Migrate JSON sessions to SQLite
-function migrateFromJson(clawDir) {
-  const jsonDir = path.join(clawDir, 'sessions')
-  if (!fs.existsSync(jsonDir)) return 0
-  const files = fs.readdirSync(jsonDir).filter(f => f.endsWith('.json'))
-  let count = 0
-  for (const f of files) {
-    try {
-      const data = JSON.parse(fs.readFileSync(path.join(jsonDir, f), 'utf8'))
-      if (!data.id) continue
-      // Check if already migrated
-      const d = getDb(clawDir)
-      const existing = d.prepare('SELECT id FROM sessions WHERE id = ?').get(data.id)
-      if (existing) continue
-      saveSession(clawDir, data)
-      count++
-    } catch {}
-  }
-  if (count > 0) console.log(`[session-store] Migrated ${count} JSON sessions to SQLite`)
-  return count
 }
 
 function closeDb() {
@@ -269,7 +228,7 @@ function getSessionStatus(clawDir, sessionId) {
   return d.prepare('SELECT status_level as level, status_text as text FROM sessions WHERE id = ?').get(sessionId)
 }
 
-// ── Session Agents CRUD (M19: lightweight agents) ──
+// ── Session Agents CRUD ──
 
 function createSessionAgent(clawDir, sessionId, { name, role }) {
   const d = getDb(clawDir)
@@ -306,72 +265,56 @@ function findSessionAgentByName(clawDir, sessionId, name) {
   return d.prepare('SELECT id, session_id as sessionId, name, role, created_at as createdAt FROM session_agents WHERE session_id = ? AND name = ?').get(sessionId, name)
 }
 
-/**
- * Check if a session is stale and should be reset.
- * @param {string} clawDir
- * @param {string} sessionId
- * @param {object} resetConfig - { dailyResetHour, idleMinutes }
- * @returns {boolean}
- */
 function isSessionStale(clawDir, sessionId, resetConfig = {}) {
-  const d = getDb(clawDir);
-  if (!d) return false;
-  const session = d.prepare('SELECT updated_at as updatedAt FROM sessions WHERE id = ?').get(sessionId);
-  if (!session) return false;
+  const d = getDb(clawDir)
+  if (!d) return false
+  const session = d.prepare('SELECT updated_at as updatedAt FROM sessions WHERE id = ?').get(sessionId)
+  if (!session) return false
 
-  const lastUpdate = session.updatedAt;
-  const now = Date.now();
+  const lastUpdate = session.updatedAt
+  const now = Date.now()
 
-  // Daily reset: check if last update was before today's reset hour
-  const dailyHour = resetConfig.dailyResetHour ?? 4; // Default 4 AM
+  const dailyHour = resetConfig.dailyResetHour ?? 4
   if (dailyHour >= 0) {
-    const resetTime = new Date();
-    resetTime.setHours(dailyHour, 0, 0, 0);
-    if (resetTime.getTime() > now) {
-      // If reset time is in the future today, use yesterday's reset
-      resetTime.setDate(resetTime.getDate() - 1);
-    }
-    if (lastUpdate < resetTime.getTime()) {
-      return true;
-    }
+    const resetTime = new Date()
+    resetTime.setHours(dailyHour, 0, 0, 0)
+    if (resetTime.getTime() > now) resetTime.setDate(resetTime.getDate() - 1)
+    if (lastUpdate < resetTime.getTime()) return true
   }
 
-  // Idle reset: check if session has been idle too long
-  const idleMinutes = resetConfig.idleMinutes;
+  const idleMinutes = resetConfig.idleMinutes
   if (idleMinutes && idleMinutes > 0) {
-    const idleMs = idleMinutes * 60 * 1000;
-    if (now - lastUpdate > idleMs) {
-      return true;
-    }
+    if (now - lastUpdate > idleMinutes * 60 * 1000) return true
   }
 
-  return false;
+  return false
 }
 
-// M32/F164: Set workspace for existing sessions (migration)
 // ── Session participants ──
-
-function addSessionParticipant(clawDir, sessionId, workspaceId) {
-  const d = getDb(clawDir)
-  if (!d) return false
-  d.prepare('INSERT OR IGNORE INTO session_participants (session_id, workspace_id, added_at) VALUES (?, ?, ?)')
-    .run(sessionId, workspaceId, Date.now())
-  return true
-}
-
-function removeSessionParticipant(clawDir, sessionId, workspaceId) {
-  const d = getDb(clawDir)
-  if (!d) return false
-  d.prepare('DELETE FROM session_participants WHERE session_id = ? AND workspace_id = ?')
-    .run(sessionId, workspaceId)
-  return true
-}
 
 function getSessionParticipants(clawDir, sessionId) {
   const d = getDb(clawDir)
   if (!d) return []
-  return d.prepare('SELECT workspace_id FROM session_participants WHERE session_id = ?')
-    .all(sessionId).map(r => r.workspace_id)
+  const row = d.prepare('SELECT participants FROM sessions WHERE id = ?').get(sessionId)
+  return _parseParticipants(row?.participants)
 }
 
-module.exports = { getDb, listSessions, loadSession, saveSession, deleteSession, createSession, migrateFromJson, closeDb, createTask, updateTask, listTasks, updateSessionStatus, getSessionStatus, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, addSessionParticipant, removeSessionParticipant, getSessionParticipants }
+function addSessionParticipant(clawDir, sessionId, workspaceId) {
+  const participants = getSessionParticipants(clawDir, sessionId)
+  if (participants.includes(workspaceId)) return true
+  participants.push(workspaceId)
+  const d = getDb(clawDir)
+  if (!d) return false
+  d.prepare('UPDATE sessions SET participants = ? WHERE id = ?').run(JSON.stringify(participants), sessionId)
+  return true
+}
+
+function removeSessionParticipant(clawDir, sessionId, workspaceId) {
+  const participants = getSessionParticipants(clawDir, sessionId).filter(id => id !== workspaceId)
+  const d = getDb(clawDir)
+  if (!d) return false
+  d.prepare('UPDATE sessions SET participants = ? WHERE id = ?').run(JSON.stringify(participants), sessionId)
+  return true
+}
+
+module.exports = { getDb, listSessions, loadSession, saveSession, deleteSession, createSession, closeDb, createTask, updateTask, listTasks, updateSessionStatus, getSessionStatus, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, addSessionParticipant, removeSessionParticipant, getSessionParticipants }
