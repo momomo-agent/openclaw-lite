@@ -2,7 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('api', {
   getFeatureFlags: () => ipcRenderer.invoke('get-feature-flags'),
-  // Workspace registry (M32/F162)
+  // Agent registry (M32 — agents = workspace folders with SOUL.md + identity)
   listWorkspaces: () => ipcRenderer.invoke('workspaces-list'),
   addWorkspace: (wsPath) => ipcRenderer.invoke('workspace-add', wsPath),
   removeWorkspace: (id) => ipcRenderer.invoke('workspace-remove', id),
@@ -88,6 +88,7 @@ contextBridge.exposeInMainWorld('api', {
   // Coding agent
   getCodingAgent: () => ipcRenderer.invoke('get-coding-agent'),
   setCodingAgent: (agent) => ipcRenderer.invoke('set-coding-agent', agent),
+  listCodingAgents: () => ipcRenderer.invoke('list-coding-agents'),
   // Claude Code
   onCcStatus: (cb) => { ipcRenderer.removeAllListeners('cc-status'); ipcRenderer.on('cc-status', (_, d) => cb(d)) },
   onCcOutput: (cb) => { ipcRenderer.removeAllListeners('cc-output'); ipcRenderer.on('cc-output', (_, d) => cb(d)) },

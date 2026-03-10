@@ -458,6 +458,10 @@ ipcMain.handle('set-coding-agent', (_, agent) => {
   return saveGlobalConfig(config)
 })
 
+ipcMain.handle('list-coding-agents', () => {
+  return codingAgents.listAvailable()
+})
+
 // ── IPC: Sessions ──
 
 ipcMain.handle('sessions-list', (_, opts) => listSessions(opts))

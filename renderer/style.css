@@ -253,13 +253,8 @@ button:hover { background: #2a2a2a; }
 }
 .new-chat-panel {
   background: #111; border: 1px solid #222; border-radius: 12px;
-  width: 340px; max-height: 70vh; overflow-y: auto;
+  width: 360px; max-height: 70vh; overflow: hidden;
 }
-.new-chat-header {
-  padding: 14px 18px; border-bottom: 1px solid #1a1a1a;
-  font-weight: 600; font-size: 14px; color: #e0e0e0;
-}
-.new-chat-list { padding: 8px; }
 .new-chat-item {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 12px; border-radius: 8px; cursor: pointer;
@@ -271,13 +266,25 @@ button:hover { background: #2a2a2a; }
 .new-chat-info { flex: 1; min-width: 0; }
 .new-chat-name { font-size: 14px; color: #e0e0e0; font-weight: 500; }
 .new-chat-desc { font-size: 11px; color: #666; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.new-chat-actions { display: flex; gap: 4px; margin-left: auto; }
-.new-chat-mode-btn {
-  display: flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; border-radius: 6px; cursor: pointer;
-  font-size: 14px; transition: background 0.15s; opacity: 0.5;
+.new-chat-header {
+  display: flex; gap: 0; border-bottom: 1px solid #1a1a1a; padding: 0;
 }
-.new-chat-mode-btn:hover { background: #ffffff1a; opacity: 1; }
+.new-chat-tab {
+  flex: 1; text-align: center; padding: 10px 8px; font-size: 13px; color: #666;
+  cursor: pointer; transition: color 0.15s, border-color 0.15s;
+  border-bottom: 2px solid transparent;
+}
+.new-chat-tab:hover { color: #aaa; }
+.new-chat-tab.active { color: #e0e0e0; border-bottom-color: #fbbf24; }
+.new-chat-body { max-height: 400px; overflow-y: auto; }
+.new-chat-tab-content { display: none; padding: 8px; }
+.new-chat-tab-content.active { display: block; }
+.new-chat-coding-select {
+  background: #111; color: #e0e0e0; border: 1px solid #333; border-radius: 4px;
+  padding: 2px 6px; font-size: 11px;
+}
+.new-chat-coding-label { font-size: 11px; color: #888; }
+.new-chat-empty { text-align: center; padding: 24px 16px; color: #555; font-size: 13px; }
 .group-ws-check { accent-color: #fbbf24; }
 
 /* Sidebar footer (M32) */

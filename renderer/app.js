@@ -399,9 +399,13 @@ async function createNewSession(workspaceId, mode) {
   await refreshSessionList()
 }
 
-function showNewChatSelector(workspaces) {
+async function showNewChatSelector(workspaces) {
   // Remove existing overlay if any
   document.getElementById('newChatOverlay')?.remove()
+
+  // Fetch available coding agents
+  let codingAgentsList = []
+  try { codingAgentsList = await window.api.listCodingAgents() } catch {}
 
   const overlay = document.createElement('div')
   overlay.id = 'newChatOverlay'
@@ -410,103 +414,133 @@ function showNewChatSelector(workspaces) {
 
   const panel = document.createElement('div')
   panel.className = 'new-chat-panel'
-  panel.innerHTML = `<div class="new-chat-header">新建对话</div><div class="new-chat-list"></div>`
 
-  const listEl = panel.querySelector('.new-chat-list')
+  // Tabs: 💬 对话  |  ⌨ Coding  |  👥 群聊
+  const hasCoding = codingAgentsList.length > 0
+  const hasGroup = workspaces.length > 1
+  panel.innerHTML = `
+    <div class="new-chat-header">
+      <span class="new-chat-tab active" data-tab="chat">💬 对话</span>
+      ${hasCoding ? '<span class="new-chat-tab" data-tab="coding">⌨ Coding</span>' : ''}
+      ${hasGroup ? '<span class="new-chat-tab" data-tab="group">👥 群聊</span>' : ''}
+    </div>
+    <div class="new-chat-body">
+      <div class="new-chat-tab-content active" data-tab="chat"></div>
+      ${hasCoding ? '<div class="new-chat-tab-content" data-tab="coding"></div>' : ''}
+      ${hasGroup ? '<div class="new-chat-tab-content" data-tab="group"></div>' : ''}
+    </div>
+  `
 
+  // Tab switching
+  panel.querySelectorAll('.new-chat-tab').forEach(tab => {
+    tab.onclick = () => {
+      panel.querySelectorAll('.new-chat-tab').forEach(t => t.classList.remove('active'))
+      panel.querySelectorAll('.new-chat-tab-content').forEach(t => t.classList.remove('active'))
+      tab.classList.add('active')
+      panel.querySelector(`.new-chat-tab-content[data-tab="${tab.dataset.tab}"]`).classList.add('active')
+    }
+  })
+
+  // ── Tab 1: Chat ──
+  const chatTab = panel.querySelector('.new-chat-tab-content[data-tab="chat"]')
   for (const ws of workspaces) {
-    const item = document.createElement('div')
-    item.className = 'new-chat-item'
-    const avatar = ws.identity.avatar || '🤖'
-    const isEmoji = avatar.length <= 4 && !avatar.includes('.')
-    const avatarHtml = isEmoji ? `<span class="new-chat-avatar">${avatar}</span>` : `<img src="file://${esc(ws.path + '/' + avatar)}" class="new-chat-avatar-img">`
-    item.innerHTML = `${avatarHtml}<div class="new-chat-info"><div class="new-chat-name">${esc(ws.identity.name)}</div>${ws.identity.description ? `<div class="new-chat-desc">${esc(ws.identity.description)}</div>` : ''}</div><div class="new-chat-actions"><span class="new-chat-mode-btn" data-mode="chat" title="对话">💬</span><span class="new-chat-mode-btn" data-mode="coding" title="Coding">⌨</span></div>`
-    item.querySelector('[data-mode="chat"]').onclick = (e) => {
-      e.stopPropagation()
+    chatTab.appendChild(_makeAgentItem(ws, () => {
       overlay.remove()
       createNewSession(ws.id, 'chat')
-    }
-    item.querySelector('[data-mode="coding"]').onclick = (e) => {
-      e.stopPropagation()
-      overlay.remove()
-      createNewSession(ws.id, 'coding')
-    }
-    item.onclick = () => {
-      overlay.remove()
-      createNewSession(ws.id)
-    }
-    listEl.appendChild(item)
+    }))
   }
 
-  // Group chat option
-  if (workspaces.length > 1) {
-    const divider = document.createElement('div')
-    divider.style.cssText = 'border-top:1px solid #222;margin:8px 0'
-    listEl.appendChild(divider)
-
-    const groupItem = document.createElement('div')
-    groupItem.className = 'new-chat-item'
-    groupItem.innerHTML = `<span class="new-chat-avatar">👥</span><div class="new-chat-info"><div class="new-chat-name">群聊</div><div class="new-chat-desc">多个 workspace 协作</div></div>`
-    groupItem.onclick = () => {
-      overlay.remove()
-      showGroupChatCreator(workspaces)
+  // ── Tab 2: Coding ──
+  if (hasCoding) {
+    const codingTab = panel.querySelector('.new-chat-tab-content[data-tab="coding"]')
+    // Show each agent × coding-agent combo
+    for (const ws of workspaces) {
+      const item = document.createElement('div')
+      item.className = 'new-chat-item'
+      const avatar = ws.identity.avatar || '🤖'
+      const isEmoji = avatar.length <= 4 && !avatar.includes('.')
+      const avatarHtml = isEmoji ? `<span class="new-chat-avatar">${avatar}</span>` : `<img src="file://${esc(ws.path + '/' + avatar)}" class="new-chat-avatar-img">`
+      // Coding agent selector
+      let selectHtml = ''
+      if (codingAgentsList.length === 1) {
+        selectHtml = `<span class="new-chat-coding-label">${esc(codingAgentsList[0].name)}</span>`
+      } else {
+        selectHtml = `<select class="new-chat-coding-select">${codingAgentsList.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select>`
+      }
+      item.innerHTML = `${avatarHtml}<div class="new-chat-info"><div class="new-chat-name">${esc(ws.identity.name)}</div><div class="new-chat-desc">Coding Agent: ${selectHtml}</div></div>`
+      item.onclick = () => {
+        const sel = item.querySelector('.new-chat-coding-select')
+        const agentId = sel ? sel.value : codingAgentsList[0]?.id
+        overlay.remove()
+        createNewSession(ws.id, 'coding')
+      }
+      codingTab.appendChild(item)
     }
-    listEl.appendChild(groupItem)
+    if (codingAgentsList.length === 0) {
+      const hint = document.createElement('div')
+      hint.className = 'new-chat-empty'
+      hint.textContent = '未检测到本地 coding agent (claude/codex/gemini/kiro)'
+      codingTab.appendChild(hint)
+    }
+  }
+
+  // ── Tab 3: Group Chat ──
+  if (hasGroup) {
+    const groupTab = panel.querySelector('.new-chat-tab-content[data-tab="group"]')
+    const selected = new Set()
+    for (const ws of workspaces) {
+      const item = document.createElement('div')
+      item.className = 'new-chat-item'
+      const avatar = ws.identity.avatar || '🤖'
+      const isEmoji = avatar.length <= 4 && !avatar.includes('.')
+      const avatarHtml = isEmoji ? `<span class="new-chat-avatar">${avatar}</span>` : `<img src="file://${esc(ws.path + '/' + avatar)}" class="new-chat-avatar-img">`
+      item.innerHTML = `<input type="checkbox" class="group-ws-check" data-id="${esc(ws.id)}" style="margin-right:8px">${avatarHtml}<div class="new-chat-info"><div class="new-chat-name">${esc(ws.identity.name)}</div></div>`
+      item.onclick = (e) => {
+        if (e.target.tagName === 'INPUT') return
+        const cb = item.querySelector('input')
+        cb.checked = !cb.checked
+        cb.dispatchEvent(new Event('change'))
+      }
+      item.querySelector('input').onchange = (e) => {
+        if (e.target.checked) selected.add(ws.id)
+        else selected.delete(ws.id)
+        createBtn.disabled = selected.size < 2
+      }
+      groupTab.appendChild(item)
+    }
+    const createBtn = document.createElement('button')
+    createBtn.className = 'primary-btn'
+    createBtn.style.cssText = 'margin:12px 16px;width:calc(100% - 32px)'
+    createBtn.textContent = '创建群聊'
+    createBtn.disabled = true
+    createBtn.onclick = async () => {
+      if (selected.size < 2) return
+      const participantIds = [...selected]
+      const opts = { title: 'Group Chat', participants: participantIds }
+      const session = await window.api.createSession(opts)
+      currentSessionId = session.id
+      history = []
+      messages.innerHTML = ''
+      document.getElementById('sessionTitle').textContent = session.title
+      overlay.remove()
+      await refreshSessionList()
+    }
+    groupTab.appendChild(createBtn)
   }
 
   overlay.appendChild(panel)
   document.body.appendChild(overlay)
 }
 
-function showGroupChatCreator(workspaces) {
-  const overlay = document.createElement('div')
-  overlay.id = 'newChatOverlay'
-  overlay.className = 'overlay-backdrop'
-  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove() }
-
-  const panel = document.createElement('div')
-  panel.className = 'new-chat-panel'
-  panel.innerHTML = `<div class="new-chat-header">新建群聊</div><div class="new-chat-list" style="margin-bottom:12px"></div><div style="padding:0 16px 16px"><button class="primary-btn" id="createGroupBtn" disabled>创建群聊</button></div>`
-
-  const listEl = panel.querySelector('.new-chat-list')
-  const selected = new Set()
-
-  for (const ws of workspaces) {
-    const item = document.createElement('div')
-    item.className = 'new-chat-item'
-    const avatar = ws.identity.avatar || '🤖'
-    const isEmoji = avatar.length <= 4 && !avatar.includes('.')
-    const avatarHtml = isEmoji ? `<span class="new-chat-avatar">${avatar}</span>` : `<img src="file://${esc(ws.path + '/' + avatar)}" class="new-chat-avatar-img">`
-    item.innerHTML = `<input type="checkbox" class="group-ws-check" data-id="${esc(ws.id)}" style="margin-right:8px">${avatarHtml}<div class="new-chat-info"><div class="new-chat-name">${esc(ws.identity.name)}</div></div>`
-    item.onclick = (e) => {
-      if (e.target.tagName === 'INPUT') return
-      const cb = item.querySelector('input')
-      cb.checked = !cb.checked
-      cb.dispatchEvent(new Event('change'))
-    }
-    item.querySelector('input').onchange = (e) => {
-      if (e.target.checked) selected.add(ws.id)
-      else selected.delete(ws.id)
-      panel.querySelector('#createGroupBtn').disabled = selected.size < 2
-    }
-    listEl.appendChild(item)
-  }
-
-  panel.querySelector('#createGroupBtn').onclick = async () => {
-    if (selected.size < 2) return
-    const participantIds = [...selected]
-    const opts = { title: 'Group Chat', participants: participantIds }
-    const session = await window.api.createSession(opts)
-    currentSessionId = session.id
-    history = []
-    messages.innerHTML = ''
-    document.getElementById('sessionTitle').textContent = session.title
-    overlay.remove()
-    await refreshSessionList()
-  }
-
-  overlay.appendChild(panel)
-  document.body.appendChild(overlay)
+function _makeAgentItem(ws, onclick) {
+  const item = document.createElement('div')
+  item.className = 'new-chat-item'
+  const avatar = ws.identity.avatar || '🤖'
+  const isEmoji = avatar.length <= 4 && !avatar.includes('.')
+  const avatarHtml = isEmoji ? `<span class="new-chat-avatar">${avatar}</span>` : `<img src="file://${esc(ws.path + '/' + avatar)}" class="new-chat-avatar-img">`
+  item.innerHTML = `${avatarHtml}<div class="new-chat-info"><div class="new-chat-name">${esc(ws.identity.name)}</div>${ws.identity.description ? `<div class="new-chat-desc">${esc(ws.identity.description)}</div>` : ''}</div>`
+  item.onclick = onclick
+  return item
 }
 
 async function deleteSession(id) {
@@ -1223,7 +1257,7 @@ async function openPeopleManager() {
     // Header
     const header = document.createElement('div')
     header.className = 'people-header'
-    header.innerHTML = `<span>管理人员</span><button class="icon-btn" onclick="document.getElementById('peopleOverlay')?.remove()">✕</button>`
+    header.innerHTML = `<span>Agents</span><button class="icon-btn" onclick="document.getElementById('peopleOverlay')?.remove()">✕</button>`
     panel.appendChild(header)
 
     // List
@@ -1262,7 +1296,7 @@ async function openPeopleManager() {
     if (workspaces.length === 0) {
       const empty = document.createElement('div')
       empty.className = 'people-empty'
-      empty.textContent = '还没有添加任何人员'
+      empty.textContent = '还没有添加任何 Agent'
       listEl.appendChild(empty)
     }
 
@@ -1297,18 +1331,43 @@ async function addExistingWorkspace() {
 }
 
 async function createNewWorkspace() {
-  const name = prompt('新人员名称:')
-  if (!name) return
-  const result = await window.api.createWorkspace({ name })
-  if (result?.ok) {
-    document.getElementById('peopleOverlay')?.remove()
-    await openPeopleManager()
-    await refreshSessionList()
-  } else if (result?.error === 'cancelled') {
-    // user cancelled folder selection
-  } else {
-    alert('创建失败: ' + (result?.error || 'unknown'))
+  // Replace footer with inline form instead of using prompt()
+  const overlay = document.getElementById('peopleOverlay')
+  const panel = overlay?.querySelector('.people-panel')
+  if (!panel) return
+  const footer = panel.querySelector('.people-footer')
+  if (!footer) return
+  footer.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:8px;width:100%">
+      <label style="font-size:12px;color:#888">Agent 名称</label>
+      <input type="text" id="newWsNameInput" placeholder="例如：小助手" style="background:#111;color:#e0e0e0;border:1px solid #333;border-radius:4px;padding:6px 8px;font-size:13px">
+      <div style="display:flex;gap:8px">
+        <button class="primary-btn" id="newWsConfirmBtn">创建</button>
+        <button class="secondary-btn" id="newWsCancelBtn">取消</button>
+      </div>
+    </div>
+  `
+  const nameInput = footer.querySelector('#newWsNameInput')
+  nameInput.focus()
+  footer.querySelector('#newWsCancelBtn').onclick = () => {
+    openPeopleManager() // re-render
   }
+  const doCreate = async () => {
+    const name = nameInput.value.trim()
+    if (!name) return
+    const result = await window.api.createWorkspace({ name })
+    if (result?.ok) {
+      overlay.remove()
+      await openPeopleManager()
+      await refreshSessionList()
+    } else if (result?.error === 'cancelled') {
+      // user cancelled folder selection
+    } else {
+      alert('创建失败: ' + (result?.error || 'unknown'))
+    }
+  }
+  footer.querySelector('#newWsConfirmBtn').onclick = doCreate
+  nameInput.onkeydown = (e) => { if (e.key === 'Enter') doCreate() }
 }
 
 function editWorkspace(ws, overlay, renderCallback) {
