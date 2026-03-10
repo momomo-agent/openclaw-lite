@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('api', {
+  getFeatureFlags: () => ipcRenderer.invoke('get-feature-flags'),
   getPrefs: () => ipcRenderer.invoke('get-prefs'),
   createClawDir: () => ipcRenderer.invoke('create-claw-dir'),
   selectClawDir: () => ipcRenderer.invoke('select-claw-dir'),

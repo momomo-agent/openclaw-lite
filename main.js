@@ -19,6 +19,9 @@ const { fetchWithRetry } = require('./core/api-retry')
 const { enforceContextBudget } = require('./core/context-guard')
 const { sanitizeTranscript } = require('./core/transcript-repair')
 
+// ── Feature flags ──
+const LEGACY_AGENT_FEATURES = false  // M19 lightweight agents, task bar, auto-rotate (M32: disabled, not deleted)
+
 // ── Helper functions (must be defined early) ──
 let _activeRequestId = null
 let _activeAbortController = null
@@ -186,9 +189,13 @@ function getAnthropicToolsArray() {
   return getAnthropicTools();
 }
 
-const TOOLS = getAnthropicToolsArray();
+// Gate legacy agent/task tools when feature flag is off
+const LEGACY_TOOL_NAMES = new Set(['task_create', 'task_update', 'task_list', 'send_message', 'create_agent', 'remove_agent'])
+const TOOLS = LEGACY_AGENT_FEATURES
+  ? getAnthropicToolsArray()
+  : getAnthropicToolsArray().filter(t => !LEGACY_TOOL_NAMES.has(t.name));
 
-// Agent tool filtering: lightweight agents get a subset of tools
+// Agent tool filtering: lightweight agents get a subset of tools (legacy)
 const AGENT_ALLOWED_TOOLS = new Set([
   'ui_status_set', 'memory_search', 'memory_get',
   'task_create', 'task_update', 'task_list', 'send_message',
@@ -497,9 +504,10 @@ ipcMain.handle('agent-delete', (_, id) => {
   try { fs.unlinkSync(p); return true } catch { return false }
 })
 
-// ── IPC: Session members ──
+// ── IPC: Session members (legacy, gated by LEGACY_AGENT_FEATURES) ──
 
 ipcMain.handle('session-add-member', (_, { sessionId, agentId }) => {
+  if (!LEGACY_AGENT_FEATURES) return false
   const s = loadSession(sessionId)
   if (!s) return false
   if (!s.members) s.members = ['user']
@@ -509,6 +517,7 @@ ipcMain.handle('session-add-member', (_, { sessionId, agentId }) => {
 })
 
 ipcMain.handle('session-remove-member', (_, { sessionId, agentId }) => {
+  if (!LEGACY_AGENT_FEATURES) return false
   const s = loadSession(sessionId)
   if (!s || !s.members) return false
   s.members = s.members.filter(m => m !== agentId)
@@ -516,9 +525,10 @@ ipcMain.handle('session-remove-member', (_, { sessionId, agentId }) => {
   return true
 })
 
-// ── IPC: Session Agents (M19: lightweight agents) ──
+// ── IPC: Session Agents (M19: lightweight agents, gated) ──
 
 ipcMain.handle('session-create-agent', (_, { sessionId, name, role }) => {
+  if (!LEGACY_AGENT_FEATURES) return null
   if (!clawDir || !sessionId) return null
   const existing = sessionStore.findSessionAgentByName(clawDir, sessionId, name)
   if (existing) return { error: `Agent "${name}" already exists in this session` }
@@ -528,22 +538,30 @@ ipcMain.handle('session-create-agent', (_, { sessionId, name, role }) => {
 })
 
 ipcMain.handle('session-list-agents', (_, sessionId) => {
+  if (!LEGACY_AGENT_FEATURES) return []
   if (!clawDir) return []
   return sessionStore.listSessionAgents(clawDir, sessionId)
 })
 
 ipcMain.handle('session-delete-agent', (_, agentId) => {
+  if (!LEGACY_AGENT_FEATURES) return false
   if (!clawDir) return false
   const result = sessionStore.deleteSessionAgent(clawDir, agentId)
   if (result && currentSessionId) mainWindow?.webContents.send('session-agents-changed', currentSessionId)
   return result
 })
 
-// ── IPC: Tasks ──
+// ── IPC: Tasks (legacy, gated) ──
 ipcMain.handle('session-tasks', (_, sessionId) => {
+  if (!LEGACY_AGENT_FEATURES) return []
   if (!clawDir) return []
   return sessionStore.listTasks(clawDir, sessionId)
 })
+
+// ── IPC: Feature flags ──
+ipcMain.handle('get-feature-flags', () => ({
+  legacyAgentFeatures: LEGACY_AGENT_FEATURES,
+}))
 
 // ── IPC: Build system prompt from directories ──
 
@@ -626,10 +644,10 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
   }
   _sessionExpiry.touch()
 
-  // Resolve agent: lightweight (session-level) or template (agents/ directory)
+  // Resolve agent: lightweight (session-level, legacy) or template (agents/ directory)
   let agent = null
   let isLightweight = false
-  if (agentId && agentId.startsWith('a') && clawDir && currentSessionId) {
+  if (LEGACY_AGENT_FEATURES && agentId && agentId.startsWith('a') && clawDir && currentSessionId) {
     // Try lightweight agent first
     const sessionAgent = sessionStore.getSessionAgent(clawDir, agentId)
     if (sessionAgent) {
@@ -767,8 +785,9 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
   }
 })
 
-// ── IPC: Route message to determine respondents ──
+// ── IPC: Route message to determine respondents (legacy, gated) ──
 ipcMain.handle('chat-route', async (_, { prompt, history, sessionId }) => {
+  if (!LEGACY_AGENT_FEATURES) return { respondents: [{ name: 'Main', focus: '' }] }
   if (!clawDir) return { respondents: [{ name: 'Main', focus: '' }] }
   if (sessionId) { currentSessionId = sessionId; syncState() }
   const config = (() => {

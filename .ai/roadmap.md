@@ -1,112 +1,103 @@
-# M21: 核心体验打磨 — Roadmap
+# M32: 多 Workspace IM 体验 — Roadmap
 
 ## 目标
-
-CC 和多 agent 标 TBD。先把单 agent 对话体验做到"想用"的程度。
-四个方向：UI 打磨、工具反馈透明化、session 管理、设置体验。
+Paw 从单 workspace 工具变成多 workspace IM。MVP = P0 + P1（F160-F168）。
 
 ---
 
-## Phase 1: UI 打磨
+## Phase 0: 旧功能关闭
 
-**F075: Scrollbar + 防溢出**
-- [ ] 全局 scrollbar 已有基础样式，检查 chat-history 是否生效
-- [ ] 代码块 `pre/code` 加 `overflow-x: auto; max-width: 100%` 防水平溢出
-- [ ] 长 URL / 长单词加 `word-break: break-word`
-- [ ] 验证：粘贴超长代码块、超长 URL，不出横向滚动条
-
-**F076: 排版与对比度**
-- [ ] 检查深色主题下所有文字对比度 ≥ 4.5:1（WCAG AA）
-- [ ] 消息气泡间距、行高、字号统一审查
-- [ ] 代码块样式：背景色区分、圆角、padding、语法高亮颜色
-- [ ] timestamp 和 metadata 用更淡的颜色，不抢主要内容
-- [ ] 验证：截图逐项审查
-
-**F077: 输入区优化**
-- [ ] textarea 自动增高（最多 6 行），超过后内部滚动
-- [ ] Shift+Enter 换行，Enter 发送
-- [ ] 发送按钮状态：空内容 disabled、发送中 loading
-- [ ] 验证：多行输入、快捷键
+**F160: Feature flag 关闭旧功能**
+- [ ] 添加 config flag `legacyAgentFeatures: false`
+- [ ] Members panel（👥 按钮）：flag 关闭时隐藏入口
+- [ ] Task bar：flag 关闭时不渲染
+- [ ] Auto-rotate：flag 关闭时跳过 `onAutoRotate` 逻辑
+- [ ] Session agent 相关 IPC：flag 关闭时返回空/noop
+- [ ] 验证：启动后看不到 Members 按钮、Task bar，对话功能正常
 
 ---
 
-## Phase 2: 工具调用反馈透明化
+## Phase 1: Workspace 身份
 
-**F078: 多轮进度指示**
-- [ ] 当前在第几轮 / 最多几轮（如 "工具调用 2/5"）
-- [ ] 每轮调用了什么工具、输入摘要
-- [ ] 预计耗时（基于历史平均，可选）
-- [ ] 验证：触发多轮工具调用，观察进度更新
+**F161: Workspace identity**
+- [ ] 定义 `identity.json` schema：`{ name, avatar, description }`
+- [ ] workspace 文件夹内创建 `identity.json`，avatar 为相对路径指向同目录图片
+- [ ] 读取逻辑：`loadWorkspaceIdentity(workspacePath)` → 返回 name/avatar/description
+- [ ] 默认值：无 identity.json 时用文件夹名作为 name，默认 emoji 作为 avatar
+- [ ] 验证：读取已有 workspace 的 identity
 
-**F079: 工具步骤 UX 升级**
-- [ ] 展开/折叠动画平滑（CSS transition）
-- [ ] 失败步骤红色标记 + 错误摘要
-- [ ] 成功步骤绿色 ✓ + 结果预览（truncated）
-- [ ] 长输出折叠，点击展开全文
-- [ ] 验证：成功/失败/长输出三种场景
+**F162: Workspace 注册表**
+- [ ] App 级配置存储 workspace 路径列表（`~/.paw/workspaces.json` 或 app-level config）
+- [ ] 启动时扫描所有 workspace 路径，预加载 identity + config
+- [ ] 添加 workspace：选择文件夹 → 验证结构（有 SOUL.md 或 identity.json）→ 加入列表
+- [ ] 移除 workspace：从列表移除（不删除文件夹）
+- [ ] 新建 workspace：创建文件夹 + 脚手架文件（identity.json + SOUL.md + MEMORY.md）
+- [ ] IPC：`workspaces-list` / `workspace-add` / `workspace-remove` / `workspace-create`
+- [ ] 验证：添加/移除/列出多个 workspace
 
----
+**F163: 状态隔离**
+- [ ] 定义 `WorkspaceState` 结构：`{ id, path, identity, config, systemPrompt, sessionStore }`
+- [ ] main.js：`workspaces = new Map()` 替代单例 `clawDir` / `config`
+- [ ] `buildSystemPrompt(workspaceId)` — 按 workspace 加载 SOUL/MEMORY/skills
+- [ ] `getApiKey(workspaceId)` — 每个 workspace 可有独立 API key（fallback 到全局）
+- [ ] chat IPC：接受 `workspaceId` 参数，用对应 workspace 的 context
+- [ ] 验证：两个 workspace 各自的 SOUL.md 不互相干扰
 
-## Phase 3: Session 管理
-
-**F080: Session 基础操作**
-- [ ] 右键菜单：重命名、删除、归档
-- [ ] 双击 session 名称 inline 编辑
-- [ ] 删除确认弹窗
-- [ ] 验证：CRUD 操作
-
-**F081: Session 搜索**
-- [ ] sidebar 顶部搜索框
-- [ ] 搜索 session 名称（实时过滤）
-- [ ] 搜索消息内容（SQLite LIKE）
-- [ ] 验证：有 10+ session 时搜索体验
-
-**F082: Session 排序与分组**
-- [ ] 默认按最近活跃排序
-- [ ] 可选：按创建时间、按名称
-- [ ] 可选：分组（今天 / 昨天 / 更早）
-- [ ] 验证：时间分组显示
+**F164: Session-Workspace 关联**
+- [ ] session store schema 增加 `workspace_id` 列（TEXT，可空，兼容旧数据）
+- [ ] session store schema 增加 `owner_id` 列（TEXT，可空，默认 = workspace_id）
+- [ ] `session-create` IPC：接受 `workspaceId` 参数
+- [ ] `sessions-list` IPC：支持按 `workspaceId` 过滤
+- [ ] 旧 session 迁移：无 workspace_id 的 session 归入当前默认 workspace
+- [ ] 验证：创建 session 时关联 workspace，列表可按 workspace 过滤
 
 ---
 
-## Phase 4: 设置体验
+## Phase 2: IM 体验
 
-**F083: 设置面板重构**
-- [ ] 从当前 inline 设置改为独立设置页面或 modal
-- [ ] 分 tab：General / Model / Tools / About
-- [ ] General：工作区路径、主题（暂时只有 dark）
-- [ ] Model：provider 选择、API key 输入（密码模式）、模型选择、温度等参数
-- [ ] Tools：已启用工具列表、开关
-- [ ] About：版本号、GitHub 链接
-- [ ] 验证：所有设置项可正常读写
+**F165: Sidebar 按 workspace 分组**
+- [ ] sidebar 渲染按 workspace 分组：每组显示头像 + 名称（可折叠）
+- [ ] 组内 session 列表按最近活跃排序
+- [ ] 无 workspace 的旧 session 归入"默认"分组
+- [ ] workspace 头像显示：优先 identity.json 的 avatar 图片，fallback emoji
+- [ ] 验证：多个 workspace 各自有 session，sidebar 正确分组
 
-**F084: 模型切换体验**
-- [ ] 下拉选择模型（支持自定义输入）
-- [ ] 切换后立刻生效，不需重启
-- [ ] 显示当前模型名称在 header 或 status bar
-- [ ] 验证：Anthropic ↔ OpenAI 切换
+**F166: 新建对话选择器**
+- [ ] 点"+"弹出选择 overlay：
+  - 📁 Workspace 列表（头像 + 名称）
+  - 💻 Coding Agent（选 agent 类型 + 项目文件夹）
+- [ ] 选择 workspace 后创建 session，绑定 workspaceId
+- [ ] 选择 coding agent 后创建 session，绑定项目路径 + agent 类型
+- [ ] 验证：新建对话后 sidebar 正确归组
+
+**F167: 切换 session 自动切换 context**
+- [ ] switchSession 时读取 session 的 workspaceId
+- [ ] 自动加载对应 workspace 的 system prompt / config
+- [ ] chat header 显示当前 workspace 名称
+- [ ] 验证：连续切换不同 workspace 的 session，context 正确
+
+**F168: 人员管理页**
+- [ ] 新 overlay：列出所有 workspace（头像 + 名称 + 简介预览）
+- [ ] 编辑：点击进入编辑模式，可改名字、上传头像、编辑简介（SOUL.md）
+- [ ] 添加：选择已有文件夹 或 新建（输入名字 → 自动创建文件夹 + 脚手架）
+- [ ] 移除：从列表移除（确认弹窗，不删除文件夹）
+- [ ] 保存：写回 identity.json + SOUL.md
+- [ ] 验证：增删改查，重启后数据保持
 
 ---
 
-## TBD（暂不排期）
+## 实施顺序
 
-- Claude Code 集成重做（作为 agent 而非 tool）
-- 多 agent 体系重新设计
-- Onboarding 引导
+F160 → F161 → F162 → F163 → F164 → F165 → F166 → F167 → F168
 
----
-
-## 实现顺序
-
-F075 → F076 → F077 → F078 → F079 → F080 → F081 → F082 → F083 → F084
-
-每个 feature 做完自验证 + 截图对照，过了再下一个。
+每个 feature 做完：`node --check main.js` + 功能验证 + 截图确认。
 
 ## 成功标准
 
-- [ ] F075-F084 全部实现
-- [ ] UI 对比度 WCAG AA
-- [ ] 工具调用时用户知道在干什么
-- [ ] Session 可搜索、可重命名、可删除
-- [ ] 设置面板顺滑，模型切换不重启
-- [ ] 现有功能无回归
+- [ ] F160-F168 全部实现
+- [ ] 旧功能已关闭，不可见
+- [ ] 可同时加载 2+ workspace，sidebar 按人分组
+- [ ] 新建对话时选择跟谁说话
+- [ ] 切换 session 时 context 自动切换，无感
+- [ ] 可编辑 workspace 的名字、头像、简介
+- [ ] 现有单 workspace 对话功能无回归

@@ -1,5 +1,8 @@
 // Paw — Renderer App
 
+// ── Feature flags (loaded at init) ──
+let _featureFlags = { legacyAgentFeatures: false }
+
 // ── Per-Session Status ──
 const sessionStatus = new Map() // sessionId -> { level, text, aiAuthored }
 
@@ -183,6 +186,8 @@ let currentSessionId = null
 // ── Setup screen ──
 
 async function init() {
+  // Load feature flags
+  try { _featureFlags = await window.api.getFeatureFlags() || _featureFlags } catch {}
   const prefs = await window.api.getPrefs()
   if (prefs.clawDir) enterChat()
 }
@@ -205,6 +210,14 @@ async function openExisting() {
 async function enterChat() {
   document.getElementById('setupScreen').style.display = 'none'
   document.getElementById('chatScreen').style.display = 'flex'
+  // Hide legacy UI when feature flag is off
+  if (!_featureFlags.legacyAgentFeatures) {
+    // Hide Members button (👥)
+    const membersBtn = document.querySelector('.header-actions .icon-btn[onclick="toggleMembers()"]')
+    if (membersBtn) membersBtn.style.display = 'none'
+    // Hide Task bar
+    document.getElementById('taskBar').style.display = 'none'
+  }
   await refreshSessionList()
   // Auto-create first session if none exist
   const sessions = await window.api.listSessions()
@@ -307,7 +320,7 @@ async function switchSession(id) {
     if (m.role === 'assistant' && history.length) history[history.length - 1].answer = m.content
   }
   await refreshSessionList()
-  await refreshTaskBar()
+  if (_featureFlags.legacyAgentFeatures) await refreshTaskBar()
 }
 
 async function newSession() {
@@ -756,8 +769,9 @@ async function send() {
   pendingFiles = []
   renderAttachPreview()
 
-  // Detect @mention to pick specific agent
+  // Detect @mention to pick specific agent (legacy agent features)
   let targetAgentId = null, targetAgentName = 'Assistant'
+  if (_featureFlags.legacyAgentFeatures) {
   const mention = text.match(/^@(\S+)[\s，,]/)
   if (mention && sendSessionId) {
     const q = mention[1].toLowerCase()
@@ -775,6 +789,7 @@ async function send() {
       if (tFound) { targetAgentId = tFound.id; targetAgentName = tFound.name }
     }
   }
+  } // end legacyAgentFeatures gate
 
   // Show user message with attachments
   const attachHtml = files.map(f => f.type.startsWith('image/') ? `<img src="${f.data}" style="max-height:120px;border-radius:6px;margin-top:4px">` : `<div class="attach-chip">📄 ${esc(f.name)}</div>`).join('')
@@ -1226,41 +1241,44 @@ function toggleTaskBar() {
   document.getElementById('taskListUI').className = taskBarCollapsed ? 'task-list-ui collapsed' : 'task-list-ui'
 }
 
-window.api.onTasksChanged((sid) => {
-  if (sid === currentSessionId) refreshTaskBar()
-})
+// Legacy event handlers (gated by feature flag)
+if (_featureFlags.legacyAgentFeatures) {
+  window.api.onTasksChanged((sid) => {
+    if (sid === currentSessionId) refreshTaskBar()
+  })
 
-window.api.onSessionAgentsChanged((sid) => {
-  if (sid === currentSessionId) refreshMemberList()
-})
+  window.api.onSessionAgentsChanged((sid) => {
+    if (sid === currentSessionId) refreshMemberList()
+  })
 
-window.api.onAgentMessage(async ({ from, to, message, sessionId }) => {
-  if (sessionId !== currentSessionId) return
-  addCard('agent-to-agent', message, `${from} → ${to}`)
+  window.api.onAgentMessage(async ({ from, to, message, sessionId }) => {
+    if (sessionId !== currentSessionId) return
+    addCard('agent-to-agent', message, `${from} → ${to}`)
 
-  // Auto-trigger target agent to respond
-  const sessionAgents = await window.api.listSessionAgents(currentSessionId)
-  const target = sessionAgents.find(a => a.name === to)
-  if (!target) return
+    // Auto-trigger target agent to respond
+    const sessionAgents = await window.api.listSessionAgents(currentSessionId)
+    const target = sessionAgents.find(a => a.name === to)
+    if (!target) return
 
-  // Fire and forget — don't await, allow parallel responses when Main delegates to multiple agents
-  triggerAgentResponse(target.id, target.name, message, currentSessionId)
-})
+    // Fire and forget — don't await, allow parallel responses when Main delegates to multiple agents
+    triggerAgentResponse(target.id, target.name, message, currentSessionId)
+  })
 
-window.api.onAutoRotate(async ({ sessionId, completedBy, nextTask }) => {
-  if (sessionId !== currentSessionId) return
-  // Find agent assigned to next task (auto-assigned by main.js)
-  const sessionAgents = await window.api.listSessionAgents(currentSessionId)
-  let targetAgent = null
-  if (nextTask.assignee) {
-    targetAgent = sessionAgents.find(a => a.name === nextTask.assignee)
-  }
-  if (!targetAgent) return
-  const sysMsg = `Task "${nextTask.title}" is now unblocked (completed by ${completedBy}). Please claim and work on it.`
-  addCard('agent-to-agent', sysMsg, `System → ${targetAgent.name}`)
-  // Auto-trigger the agent
-  await triggerAgentResponse(targetAgent.id, targetAgent.name, sysMsg, currentSessionId)
-})
+  window.api.onAutoRotate(async ({ sessionId, completedBy, nextTask }) => {
+    if (sessionId !== currentSessionId) return
+    // Find agent assigned to next task (auto-assigned by main.js)
+    const sessionAgents = await window.api.listSessionAgents(currentSessionId)
+    let targetAgent = null
+    if (nextTask.assignee) {
+      targetAgent = sessionAgents.find(a => a.name === nextTask.assignee)
+    }
+    if (!targetAgent) return
+    const sysMsg = `Task "${nextTask.title}" is now unblocked (completed by ${completedBy}). Please claim and work on it.`
+    addCard('agent-to-agent', sysMsg, `System → ${targetAgent.name}`)
+    // Auto-trigger the agent
+    await triggerAgentResponse(targetAgent.id, targetAgent.name, sysMsg, currentSessionId)
+  })
+} // end legacyAgentFeatures event handlers
 
 // Init
 init()
