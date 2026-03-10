@@ -13,22 +13,12 @@
 （无）
 
 ### 🟢 已完成
-（无）
+- [x] F092 — 冷启动修复
+- [x] F093 — Session Pruning
+- [x] F094 — Compaction 升级
+- [x] F095 — Loop Detection
+- [x] F096 — edit 工具
 
-## 执行顺序
+## P0 完成度：5/5 ✅
 
-```
-F092 冷启动修复      ──→ F096 edit 工具
-                          ↓
-F093 Session Pruning ──→ F094 Compaction 升级
-                          ↓
-F095 Loop Detection  ──→ F097 Exec 安全分层
-                          ↓
-                     F098 Session 生命周期
-                          ↓
-                     F099 Heartbeat 隔离
-                          ↓
-                     F100 Scrollbar + F101 Badge
-```
-
-P0 先做（F092-F096），P1 次之（F097-F099），P2 最后（F100-F101）。
+P1 和 P2 待做。
