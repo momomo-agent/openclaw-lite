@@ -767,10 +767,18 @@ async function send() {
     try {
       const result = await window.api.chat(chatParams)
       const finalText = getFullText() || result?.answer || ''
-      finalizeCard(card, myRequestId, finalText)
 
-      if (!finalText.trim()) {
-        firstTextEl.innerHTML = '<span style="color:#666;font-style:italic">（无文本回复）</span>'
+      // NO_REPLY filtering — suppress silent replies (OpenClaw-aligned)
+      const isNoReply = finalText.trim() === 'NO_REPLY'
+      if (isNoReply) {
+        card.remove()
+        // Don't save NO_REPLY to history
+      } else {
+        finalizeCard(card, myRequestId, finalText)
+
+        if (!finalText.trim()) {
+          firstTextEl.innerHTML = '<span style="color:#666;font-style:italic">（无文本回复）</span>'
+        }
       }
 
       const curStatus = sessionStatus.get(sendSessionId)

@@ -5,13 +5,21 @@ const path = require('path');
 
 registerTool({
   name: 'file_read',
-  description: 'Read the contents of a file',
+  description: 'Read the contents of a file. Use offset/limit for large files to read specific line ranges.',
   parameters: {
     type: 'object',
     properties: {
       path: {
         type: 'string',
         description: 'Path to the file to read'
+      },
+      offset: {
+        type: 'number',
+        description: 'Line number to start reading from (1-indexed)'
+      },
+      limit: {
+        type: 'number',
+        description: 'Maximum number of lines to read'
       }
     },
     required: ['path']
@@ -22,6 +30,29 @@ registerTool({
     
     try {
       const content = await fs.readFile(filePath, 'utf8');
+      
+      if (args.offset || args.limit) {
+        const lines = content.split('\n');
+        const start = Math.max(0, (args.offset || 1) - 1);
+        const count = args.limit || lines.length;
+        const slice = lines.slice(start, start + count);
+        const remaining = lines.length - start - slice.length;
+        let result = slice.join('\n');
+        if (remaining > 0) {
+          result += `\n\n[${remaining} more lines in file. Use offset=${start + slice.length + 1} to continue.]`;
+        }
+        return result;
+      }
+      
+      // For large files, truncate and suggest using offset/limit
+      const MAX_CHARS = 100000;
+      if (content.length > MAX_CHARS) {
+        const lines = content.split('\n');
+        let truncated = content.slice(0, MAX_CHARS);
+        const truncLines = truncated.split('\n').length;
+        return truncated + `\n\n...[truncated at ${MAX_CHARS} chars, ${lines.length} total lines. Use offset/limit for the rest.]`;
+      }
+      
       return content;
     } catch (error) {
       return `Error reading file: ${error.message}`;

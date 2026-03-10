@@ -15,8 +15,10 @@ const { estimateTokens: coreEstimateTokens, estimateMessagesTokens: coreEstimate
 const { pruneToolResults } = require('./core/session-pruning')
 const { LoopDetector } = require('./core/loop-detection')
 const { FailoverManager } = require('./core/failover')
+const { fetchWithRetry } = require('./core/api-retry')
 
 const failoverManager = new FailoverManager()
+let _lastAnthropicCallTime = 0
 
 // Tool result truncation — cap before storing in session history
 const TOOL_RESULT_MAX_CHARS = 50000
@@ -602,17 +604,19 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
   userContent.push({ type: 'text', text: textWithContext || '(attached files)' })
   messages.push({ role: 'user', content: userContent })
 
-  // Session pruning — trim old tool results before token counting (in-memory only)
-  const prunedMessages = pruneToolResults(messages)
+  // Session pruning — trim old tool results before token counting (cache-TTL aware)
+  const prunedMessages = pruneToolResults(messages, { lastCallTime: _lastAnthropicCallTime, provider })
 
   // Context compaction - auto-compress if history too long (model-aware threshold)
   const compactThreshold = getCompactThreshold(model)
   const totalTokens = estimateMessagesTokens(prunedMessages)
   let finalMessages = prunedMessages
+  let compacted = false
   if (totalTokens > compactThreshold && prunedMessages.length > COMPACT_KEEP_RECENT * 2 + 2) {
     console.log(`[compaction] ${totalTokens} tokens exceeds threshold ${compactThreshold} (model: ${model}), compacting...`)
     mainWindow?.webContents.send('chat-status', { text: '压缩历史对话...', requestId })
     finalMessages = await compactHistory(prunedMessages, { apiKey, baseUrl, model, provider })
+    compacted = true
   }
 
   // Model fallback list with cooldown management
@@ -636,6 +640,7 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
       const streamConfig = { apiKey, baseUrl, model: target.model, tavilyKey: config.tavilyKey, maxToolRounds: config.maxToolRounds, maxTokens: config.maxTokens }
       if (target.provider === 'anthropic') {
         result = await streamAnthropic(finalMessages, systemPrompt, streamConfig, mainWindow, requestId, chatTools)
+        _lastAnthropicCallTime = Date.now()
       } else {
         result = await streamOpenAI(finalMessages, systemPrompt, streamConfig, mainWindow, requestId, chatTools)
       }
@@ -730,7 +735,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
       messages: cachedMsgs, tools: cachedTools,
     }
     console.log(`[Paw] streamAnthropic round=${round} endpoint=${endpoint} model=${body.model} msgCount=${msgs.length} toolCount=${activeTools.length}`)
-    const res = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body), signal: _activeAbortController?.signal })
+    const res = await fetchWithRetry(endpoint, { method: 'POST', headers, body: JSON.stringify(body), signal: _activeAbortController?.signal })
     console.log(`[Paw] streamAnthropic response status=${res.status}`)
     if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${await res.text()}`)
 
@@ -843,7 +848,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
     if (round > 0) win.webContents.send('chat-text-start', { requestId })
     pushStatus(win, 'thinking', 'Thinking...')
 
-    const res = await fetch(endpoint, {
+    const res = await fetchWithRetry(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getApiKey(config)}` },
       body: JSON.stringify({ model: config.model || 'gpt-4o', messages: msgs, stream: true, stream_options: { include_usage: true }, tools: oaiTools }),

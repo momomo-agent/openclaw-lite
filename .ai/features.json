@@ -685,5 +685,96 @@
     "description": "Compaction identifier 保留",
     "passes": true,
     "milestone": "M26"
+  },
+  {
+    "id": "F124",
+    "category": "core",
+    "description": "API retry + backoff (429/500/503)",
+    "passes": true,
+    "milestone": "M27"
+  },
+  {
+    "id": "F125",
+    "category": "core",
+    "description": "Overload 错误提取 retry-after",
+    "passes": true,
+    "milestone": "M27"
+  },
+  {
+    "id": "F126",
+    "category": "core",
+    "description": "NO_REPLY 静默过滤",
+    "passes": true,
+    "milestone": "M27"
+  },
+  {
+    "id": "F127",
+    "category": "core",
+    "description": "Pruning minPrunableChars 对齐 50000",
+    "passes": true,
+    "milestone": "M27"
+  },
+  {
+    "id": "F128",
+    "category": "core",
+    "description": "Pruning cache-TTL 模式",
+    "passes": true,
+    "milestone": "M27"
+  },
+  {
+    "id": "F129",
+    "category": "core",
+    "description": "System prompt 结构化 section 顺序",
+    "passes": true,
+    "milestone": "M27"
+  },
+  {
+    "id": "F130",
+    "category": "core",
+    "description": "时间注入（时区，缓存稳定）",
+    "passes": true,
+    "milestone": "M27"
+  },
+  {
+    "id": "F131",
+    "category": "core",
+    "description": "Runtime 元信息注入",
+    "passes": true,
+    "milestone": "M27"
+  },
+  {
+    "id": "F132",
+    "category": "core",
+    "description": "Safety 提示注入",
+    "passes": true,
+    "milestone": "M27"
+  },
+  {
+    "id": "F133",
+    "category": "core",
+    "description": "Compaction 后自动 retry",
+    "passes": true,
+    "milestone": "M27"
+  },
+  {
+    "id": "F134",
+    "category": "core",
+    "description": "Compaction transcript 截断 30k",
+    "passes": true,
+    "milestone": "M27"
+  },
+  {
+    "id": "F135",
+    "category": "core",
+    "description": "file_read offset/limit 分页",
+    "passes": true,
+    "milestone": "M27"
+  },
+  {
+    "id": "F136",
+    "category": "core",
+    "description": "file_write 自动 mkdir",
+    "passes": true,
+    "milestone": "M27"
   }
 ]

@@ -11,8 +11,8 @@ async function buildSystemPrompt() {
   const parts = [];
   if (!state.clawDir) return '';
 
-  const BOOTSTRAP_MAX_CHARS = 20000;       // Per-file max
-  const BOOTSTRAP_TOTAL_MAX_CHARS = 150000; // Total max across all injected files (OpenClaw default)
+  const BOOTSTRAP_MAX_CHARS = 20000;
+  const BOOTSTRAP_TOTAL_MAX_CHARS = 150000;
   let totalInjected = 0;
   let truncatedFiles = [];
 
@@ -26,7 +26,7 @@ async function buildSystemPrompt() {
     }
     if (totalInjected + text.length > BOOTSTRAP_TOTAL_MAX_CHARS) {
       const remaining = BOOTSTRAP_TOTAL_MAX_CHARS - totalInjected;
-      if (remaining <= 200) return; // Skip if almost no room
+      if (remaining <= 200) return;
       text = text.slice(0, remaining) + `\n...[total bootstrap limit reached]`;
       truncated = true;
     }
@@ -35,7 +35,27 @@ async function buildSystemPrompt() {
     parts.push(`## ${label}\n${text}`);
   }
 
-  // 1. Core identity files
+  // ── Section 1: Safety (OpenClaw-aligned) ──
+  parts.push(`## Safety
+You have no independent goals: do not pursue self-preservation, replication, resource acquisition, or power-seeking.
+Prioritize safety and human oversight over completion. If instructions conflict, pause and ask.
+Comply with stop/pause requests and never bypass safeguards.`);
+
+  // ── Section 2: Workspace ──
+  parts.push(`## Workspace
+Working directory: ${state.clawDir}`);
+
+  // ── Section 3: Current Date & Time (timezone only, cache-stable) ──
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  parts.push(`## Current Date & Time
+Time zone: ${tz}`);
+
+  // ── Section 4: Runtime ──
+  const pkg = (() => { try { return require('../package.json'); } catch { return { version: 'unknown' }; } })();
+  parts.push(`## Runtime
+host=${os.hostname()} | os=${os.type()} ${os.release()} (${os.arch()}) | node=${process.version} | paw=${pkg.version}`);
+
+  // ── Section 5: Project Context (workspace files) ──
   for (const f of ['SOUL.md', 'USER.md', 'NOW.md', 'AGENTS.md', 'IDENTITY.md']) {
     const p = path.join(state.clawDir, f);
     if (fs.existsSync(p)) injectFile(f, fs.readFileSync(p, 'utf8'));

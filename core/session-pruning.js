@@ -7,7 +7,8 @@ const SOFT_TRIM_HEAD = 1500;           // Keep first N chars
 const SOFT_TRIM_TAIL = 1500;           // Keep last N chars
 const HARD_CLEAR_RATIO = 0.5;          // Hard-clear results in oldest 50% of messages
 const HARD_CLEAR_PLACEHOLDER = '[Old tool result content cleared]';
-const MIN_PRUNABLE_CHARS = 500;        // Don't bother pruning results smaller than this
+const MIN_PRUNABLE_CHARS = 50000;      // Don't prune results smaller than this (OpenClaw default)
+const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes (Anthropic cache TTL)
 
 /**
  * Prune old tool results from messages before sending to LLM.
@@ -15,9 +16,18 @@ const MIN_PRUNABLE_CHARS = 500;        // Don't bother pruning results smaller t
  * 1. Hard-clear: oldest messages get tool results completely replaced
  * 2. Soft-trim: middle messages get head+tail preserved
  * 3. Recent messages: untouched
+ *
+ * Cache-TTL mode: only prune when cache has expired (Anthropic prompt caching)
+ * @param {object} [opts] - { lastCallTime, provider }
  */
-function pruneToolResults(messages) {
+function pruneToolResults(messages, opts = {}) {
   if (!messages || messages.length <= PRUNE_KEEP_RECENT * 2) return messages;
+
+  // Cache-TTL mode: skip pruning if within TTL window
+  if (opts.lastCallTime && opts.provider === 'anthropic') {
+    const elapsed = Date.now() - opts.lastCallTime;
+    if (elapsed < DEFAULT_CACHE_TTL_MS) return messages;
+  }
 
   // Count assistant messages to find cutoff points
   let assistantCount = 0;
