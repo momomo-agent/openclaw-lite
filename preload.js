@@ -2,6 +2,12 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('api', {
   getFeatureFlags: () => ipcRenderer.invoke('get-feature-flags'),
+  // Workspace registry (M32/F162)
+  listWorkspaces: () => ipcRenderer.invoke('workspaces-list'),
+  addWorkspace: (wsPath) => ipcRenderer.invoke('workspace-add', wsPath),
+  removeWorkspace: (id) => ipcRenderer.invoke('workspace-remove', id),
+  createWorkspace: (opts) => ipcRenderer.invoke('workspace-create', opts),
+  updateWorkspaceIdentity: (opts) => ipcRenderer.invoke('workspace-update-identity', opts),
   getPrefs: () => ipcRenderer.invoke('get-prefs'),
   createClawDir: () => ipcRenderer.invoke('create-claw-dir'),
   selectClawDir: () => ipcRenderer.invoke('select-claw-dir'),

@@ -18,6 +18,7 @@ const { FailoverManager } = require('./core/failover')
 const { fetchWithRetry } = require('./core/api-retry')
 const { enforceContextBudget } = require('./core/context-guard')
 const { sanitizeTranscript } = require('./core/transcript-repair')
+const workspaceRegistry = require('./core/workspace-registry')
 
 // ── Feature flags ──
 const LEGACY_AGENT_FEATURES = false  // M19 lightweight agents, task bar, auto-rotate (M32: disabled, not deleted)
@@ -290,6 +291,9 @@ app.whenReady().then(() => {
   // Initialize acpx
   acpx.init()
 
+  // Initialize workspace registry
+  workspaceRegistry.initRegistry(app.getPath('userData'))
+
   // Support --claw-dir CLI arg
   const clawDirArg = process.argv.find(a => a.startsWith('--claw-dir='))
   if (clawDirArg) {
@@ -301,6 +305,8 @@ app.whenReady().then(() => {
   if (clawDir) {
     startMemoryWatch()
     sessionStore.migrateFromJson(clawDir)
+    // Auto-register current workspace if not already
+    workspaceRegistry.addWorkspace(clawDir)
   }
 
   // App menu with New Window
@@ -562,6 +568,34 @@ ipcMain.handle('session-tasks', (_, sessionId) => {
 ipcMain.handle('get-feature-flags', () => ({
   legacyAgentFeatures: LEGACY_AGENT_FEATURES,
 }))
+
+// ── IPC: Workspace registry (M32/F162) ──
+
+ipcMain.handle('workspaces-list', () => workspaceRegistry.listWorkspaces())
+
+ipcMain.handle('workspace-add', async (_, wsPath) => {
+  if (!wsPath) {
+    const result = await dialog.showOpenDialog({ properties: ['openDirectory'], title: '选择 Workspace 文件夹' })
+    if (result.canceled || !result.filePaths[0]) return { ok: false, error: 'cancelled' }
+    wsPath = result.filePaths[0]
+  }
+  return workspaceRegistry.addWorkspace(wsPath)
+})
+
+ipcMain.handle('workspace-remove', (_, id) => workspaceRegistry.removeWorkspace(id))
+
+ipcMain.handle('workspace-create', async (_, { name, parentDir, avatar, description } = {}) => {
+  if (!parentDir) {
+    const result = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'], title: '选择存放位置' })
+    if (result.canceled || !result.filePaths[0]) return { ok: false, error: 'cancelled' }
+    parentDir = result.filePaths[0]
+  }
+  return workspaceRegistry.createWorkspace(parentDir, name, { avatar, description })
+})
+
+ipcMain.handle('workspace-update-identity', (_, { id, name, avatar, description }) => {
+  return workspaceRegistry.updateWorkspaceIdentity(id, { name, avatar, description })
+})
 
 // ── IPC: Build system prompt from directories ──
 
