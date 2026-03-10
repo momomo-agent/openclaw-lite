@@ -271,6 +271,14 @@ button:hover { background: #2a2a2a; }
 .new-chat-info { flex: 1; min-width: 0; }
 .new-chat-name { font-size: 14px; color: #e0e0e0; font-weight: 500; }
 .new-chat-desc { font-size: 11px; color: #666; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.new-chat-actions { display: flex; gap: 4px; margin-left: auto; }
+.new-chat-mode-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 6px; cursor: pointer;
+  font-size: 14px; transition: background 0.15s; opacity: 0.5;
+}
+.new-chat-mode-btn:hover { background: #ffffff1a; opacity: 1; }
+.group-ws-check { accent-color: #fbbf24; }
 
 /* Sidebar footer (M32) */
 .sidebar-footer {

@@ -318,7 +318,9 @@ function renderSessionItem(s) {
   el.dataset.id = s.id
   const st = sessionStatus.get(s.id) || { level: 'idle', text: '' }
   const statusText = (st.level === 'idle' || st.level === 'done') ? (s.lastMessage || '') : (st.text || s.lastMessage || '')
-  el.innerHTML = `<div class="session-item-main"><span class="session-title">${esc(s.title)}</span></div><div class="session-item-meta"><span class="session-status-dot ${st.level}"></span><span class="session-status-text">${esc(statusText)}</span><span class="del-btn" onclick="event.stopPropagation();deleteSession('${s.id}')">✕</span></div>`
+  const modeIcon = s.mode === 'coding' ? '⌨ ' : ''
+  const groupIcon = (s.participants?.length > 1) ? '👥 ' : ''
+  el.innerHTML = `<div class="session-item-main"><span class="session-title">${groupIcon}${modeIcon}${esc(s.title)}</span></div><div class="session-item-meta"><span class="session-status-dot ${st.level}"></span><span class="session-status-text">${esc(statusText)}</span><span class="del-btn" onclick="event.stopPropagation();deleteSession('${s.id}')">✕</span></div>`
   let clickTimer = null
   el.onclick = () => {
     if (clickTimer) clearTimeout(clickTimer)
@@ -343,7 +345,7 @@ async function switchSession(id) {
   currentSessionId = id
   history = []
   messages.innerHTML = ''
-  // Show workspace name in header if session has participants
+  // Show workspace name in header + coding mode badge
   let titleText = session.title
   if (session.participants && session.participants.length > 0) {
     try {
@@ -352,10 +354,20 @@ async function switchSession(id) {
       if (ws) titleText = `${ws.identity.name} · ${session.title}`
     } catch {}
   }
+  if (session.mode === 'coding') titleText = `⌨ ${titleText}`
   document.getElementById('sessionTitle').textContent = titleText
+  // Resolve owner name for assistant messages
+  let ownerName = 'Assistant'
+  if (session.participants && session.participants.length > 0) {
+    try {
+      const workspaces = await window.api.listWorkspaces()
+      const ownerWs = workspaces.find(w => w.id === session.participants[0])
+      if (ownerWs?.identity?.name) ownerName = ownerWs.identity.name
+    } catch {}
+  }
   const agents = await window.api.listAgents()
   for (const m of session.messages) {
-    const sender = m.sender || (m.role === 'user' ? 'You' : 'Assistant')
+    const sender = m.sender || (m.role === 'user' ? 'You' : ownerName)
     addCard(m.role, m.content, sender, false, m.toolSteps)
     if (m.role === 'user') history.push({ prompt: m.content, answer: '' })
     if (m.role === 'assistant' && history.length) history[history.length - 1].answer = m.content
@@ -374,13 +386,16 @@ async function newSession() {
   await createNewSession()
 }
 
-async function createNewSession(workspaceId) {
-  const opts = workspaceId ? { title: 'New Chat', participants: [workspaceId] } : 'New Chat'
+async function createNewSession(workspaceId, mode) {
+  const opts = workspaceId
+    ? { title: mode === 'coding' ? 'Coding' : 'New Chat', participants: [workspaceId], mode: mode || 'chat' }
+    : 'New Chat'
   const session = await window.api.createSession(opts)
   currentSessionId = session.id
   history = []
   messages.innerHTML = ''
-  document.getElementById('sessionTitle').textContent = session.title
+  const titleDisplay = session.mode === 'coding' ? `⌨ ${session.title}` : session.title
+  document.getElementById('sessionTitle').textContent = titleDisplay
   await refreshSessionList()
 }
 
@@ -405,12 +420,89 @@ function showNewChatSelector(workspaces) {
     const avatar = ws.identity.avatar || '🤖'
     const isEmoji = avatar.length <= 4 && !avatar.includes('.')
     const avatarHtml = isEmoji ? `<span class="new-chat-avatar">${avatar}</span>` : `<img src="file://${esc(ws.path + '/' + avatar)}" class="new-chat-avatar-img">`
-    item.innerHTML = `${avatarHtml}<div class="new-chat-info"><div class="new-chat-name">${esc(ws.identity.name)}</div>${ws.identity.description ? `<div class="new-chat-desc">${esc(ws.identity.description)}</div>` : ''}</div>`
+    item.innerHTML = `${avatarHtml}<div class="new-chat-info"><div class="new-chat-name">${esc(ws.identity.name)}</div>${ws.identity.description ? `<div class="new-chat-desc">${esc(ws.identity.description)}</div>` : ''}</div><div class="new-chat-actions"><span class="new-chat-mode-btn" data-mode="chat" title="对话">💬</span><span class="new-chat-mode-btn" data-mode="coding" title="Coding">⌨</span></div>`
+    item.querySelector('[data-mode="chat"]').onclick = (e) => {
+      e.stopPropagation()
+      overlay.remove()
+      createNewSession(ws.id, 'chat')
+    }
+    item.querySelector('[data-mode="coding"]').onclick = (e) => {
+      e.stopPropagation()
+      overlay.remove()
+      createNewSession(ws.id, 'coding')
+    }
     item.onclick = () => {
       overlay.remove()
       createNewSession(ws.id)
     }
     listEl.appendChild(item)
+  }
+
+  // Group chat option
+  if (workspaces.length > 1) {
+    const divider = document.createElement('div')
+    divider.style.cssText = 'border-top:1px solid #222;margin:8px 0'
+    listEl.appendChild(divider)
+
+    const groupItem = document.createElement('div')
+    groupItem.className = 'new-chat-item'
+    groupItem.innerHTML = `<span class="new-chat-avatar">👥</span><div class="new-chat-info"><div class="new-chat-name">群聊</div><div class="new-chat-desc">多个 workspace 协作</div></div>`
+    groupItem.onclick = () => {
+      overlay.remove()
+      showGroupChatCreator(workspaces)
+    }
+    listEl.appendChild(groupItem)
+  }
+
+  overlay.appendChild(panel)
+  document.body.appendChild(overlay)
+}
+
+function showGroupChatCreator(workspaces) {
+  const overlay = document.createElement('div')
+  overlay.id = 'newChatOverlay'
+  overlay.className = 'overlay-backdrop'
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove() }
+
+  const panel = document.createElement('div')
+  panel.className = 'new-chat-panel'
+  panel.innerHTML = `<div class="new-chat-header">新建群聊</div><div class="new-chat-list" style="margin-bottom:12px"></div><div style="padding:0 16px 16px"><button class="primary-btn" id="createGroupBtn" disabled>创建群聊</button></div>`
+
+  const listEl = panel.querySelector('.new-chat-list')
+  const selected = new Set()
+
+  for (const ws of workspaces) {
+    const item = document.createElement('div')
+    item.className = 'new-chat-item'
+    const avatar = ws.identity.avatar || '🤖'
+    const isEmoji = avatar.length <= 4 && !avatar.includes('.')
+    const avatarHtml = isEmoji ? `<span class="new-chat-avatar">${avatar}</span>` : `<img src="file://${esc(ws.path + '/' + avatar)}" class="new-chat-avatar-img">`
+    item.innerHTML = `<input type="checkbox" class="group-ws-check" data-id="${esc(ws.id)}" style="margin-right:8px">${avatarHtml}<div class="new-chat-info"><div class="new-chat-name">${esc(ws.identity.name)}</div></div>`
+    item.onclick = (e) => {
+      if (e.target.tagName === 'INPUT') return
+      const cb = item.querySelector('input')
+      cb.checked = !cb.checked
+      cb.dispatchEvent(new Event('change'))
+    }
+    item.querySelector('input').onchange = (e) => {
+      if (e.target.checked) selected.add(ws.id)
+      else selected.delete(ws.id)
+      panel.querySelector('#createGroupBtn').disabled = selected.size < 2
+    }
+    listEl.appendChild(item)
+  }
+
+  panel.querySelector('#createGroupBtn').onclick = async () => {
+    if (selected.size < 2) return
+    const participantIds = [...selected]
+    const opts = { title: 'Group Chat', participants: participantIds }
+    const session = await window.api.createSession(opts)
+    currentSessionId = session.id
+    history = []
+    messages.innerHTML = ''
+    document.getElementById('sessionTitle').textContent = session.title
+    overlay.remove()
+    await refreshSessionList()
   }
 
   overlay.appendChild(panel)
@@ -854,27 +946,56 @@ async function send() {
   pendingFiles = []
   renderAttachPreview()
 
-  // Detect @mention to pick specific agent (legacy agent features)
-  let targetAgentId = null, targetAgentName = 'Assistant'
-  if (_featureFlags.legacyAgentFeatures) {
+  // Detect @mention — route to workspace participant or legacy agent
+  let targetAgentId = null, targetAgentName = 'Assistant', targetWorkspaceId = null
   const mention = text.match(/^@(\S+)[\s，,]/)
   if (mention && sendSessionId) {
     const q = mention[1].toLowerCase()
-    // Fuzzy match: @架构师 matches agent "架构", @设计 matches "设计师"
-    const fuzzyFind = (list) => list.find(a => {
-      const n = a.name.toLowerCase()
-      return n === q || n.startsWith(q) || q.startsWith(n)
-    })
-    const sessionAgents = await window.api.listSessionAgents(sendSessionId)
-    const sFound = fuzzyFind(sessionAgents)
-    if (sFound) { targetAgentId = sFound.id; targetAgentName = sFound.name }
-    if (!sFound) {
-      const agents = await window.api.listAgents()
-      const tFound = fuzzyFind(agents)
-      if (tFound) { targetAgentId = tFound.id; targetAgentName = tFound.name }
+    // First try workspace participants
+    try {
+      const participants = await window.api.getParticipants(sendSessionId)
+      if (participants.length > 1) {
+        const workspaces = await window.api.listWorkspaces()
+        const fuzzyWs = workspaces.find(w => {
+          if (!participants.includes(w.id)) return false
+          const n = (w.identity?.name || '').toLowerCase()
+          return n === q || n.startsWith(q) || q.startsWith(n)
+        })
+        if (fuzzyWs) {
+          targetWorkspaceId = fuzzyWs.id
+          targetAgentName = fuzzyWs.identity?.name || 'Assistant'
+        }
+      }
+    } catch {}
+
+    // Fallback: legacy agent features
+    if (!targetWorkspaceId && _featureFlags.legacyAgentFeatures) {
+      const fuzzyFind = (list) => list.find(a => {
+        const n = a.name.toLowerCase()
+        return n === q || n.startsWith(q) || q.startsWith(n)
+      })
+      const sessionAgents = await window.api.listSessionAgents(sendSessionId)
+      const sFound = fuzzyFind(sessionAgents)
+      if (sFound) { targetAgentId = sFound.id; targetAgentName = sFound.name }
+      if (!sFound) {
+        const agents = await window.api.listAgents()
+        const tFound = fuzzyFind(agents)
+        if (tFound) { targetAgentId = tFound.id; targetAgentName = tFound.name }
+      }
     }
   }
-  } // end legacyAgentFeatures gate
+
+  // Resolve default respondent name (owner = participants[0])
+  if (targetAgentName === 'Assistant' && !targetAgentId && !targetWorkspaceId && sendSessionId) {
+    try {
+      const participants = await window.api.getParticipants(sendSessionId)
+      if (participants.length > 0) {
+        const workspaces = await window.api.listWorkspaces()
+        const ownerWs = workspaces.find(w => w.id === participants[0])
+        if (ownerWs?.identity?.name) targetAgentName = ownerWs.identity.name
+      }
+    } catch {}
+  }
 
   // Show user message with attachments
   const attachHtml = files.map(f => f.type.startsWith('image/') ? `<img src="${f.data}" style="max-height:120px;border-radius:6px;margin-top:4px">` : `<div class="attach-chip">📄 ${esc(f.name)}</div>`).join('')
@@ -891,7 +1012,7 @@ async function send() {
       const rawMessages = buildAgentContext(sessionData?.messages || [], targetAgentName, false)
       chatParams = { prompt: text, rawMessages, agentId: targetAgentId, files, sessionId: sendSessionId, requestId: null }
     } else {
-      chatParams = { prompt: text, history, agentId: null, files, sessionId: sendSessionId, requestId: null }
+      chatParams = { prompt: text, history, agentId: null, files, sessionId: sendSessionId, requestId: null, targetWorkspaceId: targetWorkspaceId || null }
     }
 
     const { card, flowContainer, firstTextEl } = createStreamingCard(targetAgentName)
@@ -929,7 +1050,7 @@ async function send() {
         const s = await window.api.loadSession(sendSessionId)
         if (s) {
           const toolSteps = getToolSteps()
-          const assistantMsg = { role: 'assistant', content: finalText, sender: targetAgentName }
+          const assistantMsg = { role: 'assistant', content: finalText, sender: targetAgentName, senderWorkspaceId: targetWorkspaceId || null }
           if (toolSteps.length) assistantMsg.toolSteps = toolSteps
           s.messages.push(
             { role: 'user', content: text, sender: 'You' },
@@ -1296,8 +1417,48 @@ async function refreshMemberList() {
   if (!currentSessionId) return
   const sessionAgents = await window.api.listSessionAgents(currentSessionId)
   const templateAgents = await window.api.listAgents()
+  const workspaces = await window.api.listWorkspaces()
+  const participants = await window.api.getParticipants(currentSessionId)
   const list = document.getElementById('memberList')
   list.innerHTML = ''
+
+  // Show workspace participants
+  if (participants.length > 0) {
+    for (let i = 0; i < participants.length; i++) {
+      const ws = workspaces.find(w => w.id === participants[i])
+      if (!ws) continue
+      const el = document.createElement('div')
+      el.className = 'member-item'
+      const avatar = ws.identity?.avatar || '🤖'
+      const isEmoji = avatar.length <= 4 && !avatar.includes('.')
+      const avatarHtml = isEmoji ? avatar : `<img src="file://${esc(ws.path + '/' + avatar)}" style="width:16px;height:16px;border-radius:50%">`
+      const ownerBadge = i === 0 ? ' <span class="hint" style="font-size:10px">(群主)</span>' : ''
+      const removeBtn = i > 0 ? `<span class="del-btn" onclick="removeParticipant('${esc(ws.id)}')">✕</span>` : ''
+      el.innerHTML = `<span>${avatarHtml} ${esc(ws.identity?.name || ws.id)}${ownerBadge}</span>${removeBtn}`
+      list.appendChild(el)
+    }
+
+    // Add participant button
+    const nonParticipants = workspaces.filter(w => !participants.includes(w.id))
+    if (nonParticipants.length > 0) {
+      const addEl = document.createElement('div')
+      addEl.className = 'member-item'
+      addEl.style.cssText = 'margin-top:4px'
+      let optionsHtml = '<option value="">添加成员...</option>'
+      for (const w of nonParticipants) {
+        optionsHtml += `<option value="${esc(w.id)}">${esc(w.identity?.name || w.id)}</option>`
+      }
+      addEl.innerHTML = `<select id="addParticipantSelect" style="flex:1;background:#111;color:#e0e0e0;border:1px solid #333;border-radius:4px;padding:4px;font-size:12px">${optionsHtml}</select><button onclick="addParticipantFromSelect()" style="margin-left:4px" class="icon-btn">+</button>`
+      list.appendChild(addEl)
+    }
+
+    if (participants.length > 0) {
+      const hr = document.createElement('hr')
+      hr.style.cssText = 'border-color:#1a1a1a;margin:8px 0'
+      list.appendChild(hr)
+    }
+  }
+
   // Always show user
   const userEl = document.createElement('div')
   userEl.className = 'member-item'
@@ -1317,6 +1478,22 @@ async function refreshMemberList() {
   for (const a of templateAgents) {
     if (!sessionNames.has(a.name)) select.innerHTML += `<option value="${a.id}">${esc(a.name)}</option>`
   }
+}
+
+async function addParticipantFromSelect() {
+  const select = document.getElementById('addParticipantSelect')
+  const wsId = select?.value
+  if (!wsId || !currentSessionId) return
+  await window.api.addParticipant(currentSessionId, wsId)
+  await refreshMemberList()
+  await refreshSessionList()
+}
+
+async function removeParticipant(wsId) {
+  if (!currentSessionId) return
+  await window.api.removeParticipant(currentSessionId, wsId)
+  await refreshMemberList()
+  await refreshSessionList()
 }
 
 async function createLightweightAgent() {

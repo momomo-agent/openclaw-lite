@@ -50,9 +50,13 @@ contextBridge.exposeInMainWorld('api', {
   deleteAgent: (id) => ipcRenderer.invoke('agent-delete', id),
   resetClawDir: () => ipcRenderer.invoke('reset-claw-dir'),
   openClawDir: () => ipcRenderer.invoke('open-claw-dir'),
-  // Session members
+  // Session members (legacy)
   addMember: (sessionId, agentId) => ipcRenderer.invoke('session-add-member', { sessionId, agentId }),
   removeMember: (sessionId, agentId) => ipcRenderer.invoke('session-remove-member', { sessionId, agentId }),
+  // Session participants (M32 group chat)
+  addParticipant: (sessionId, workspaceId) => ipcRenderer.invoke('session-add-participant', { sessionId, workspaceId }),
+  removeParticipant: (sessionId, workspaceId) => ipcRenderer.invoke('session-remove-participant', { sessionId, workspaceId }),
+  getParticipants: (sessionId) => ipcRenderer.invoke('session-get-participants', sessionId),
   // Session agents (M19: lightweight agents)
   createSessionAgent: (sessionId, opts) => ipcRenderer.invoke('session-create-agent', { sessionId, ...opts }),
   listSessionAgents: (sessionId) => ipcRenderer.invoke('session-list-agents', sessionId),

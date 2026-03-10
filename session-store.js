@@ -26,6 +26,7 @@ function ensureSchema(db) {
       title TEXT NOT NULL DEFAULT 'New Chat',
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
+      mode TEXT DEFAULT 'chat',
       status_level TEXT DEFAULT 'idle',
       status_text TEXT DEFAULT '',
       input_tokens INTEGER DEFAULT 0,
@@ -71,6 +72,8 @@ function ensureSchema(db) {
     )
   `)
   db.exec(`CREATE INDEX IF NOT EXISTS idx_session_agents_session ON session_agents(session_id)`)
+  // Migration: add mode column if missing
+  try { db.exec(`ALTER TABLE sessions ADD COLUMN mode TEXT DEFAULT 'chat'`) } catch {}
 }
 
 function _parseParticipants(raw) {
@@ -83,7 +86,7 @@ function listSessions(clawDir, { workspaceId } = {}) {
   if (!d) return []
   const sessions = d.prepare(`
     SELECT s.id, s.title, s.created_at as createdAt, s.updated_at as updatedAt,
-           s.status_level as statusLevel, s.status_text as statusText, s.participants,
+           s.mode, s.status_level as statusLevel, s.status_text as statusText, s.participants,
            (SELECT substr(m.content, 1, 60) FROM messages m WHERE m.session_id = s.id ORDER BY m.id DESC LIMIT 1) as lastMessage
     FROM sessions s ORDER BY s.updated_at DESC
   `).all()
@@ -99,7 +102,7 @@ function listSessions(clawDir, { workspaceId } = {}) {
 function loadSession(clawDir, id) {
   const d = getDb(clawDir)
   if (!d) return null
-  const session = d.prepare('SELECT id, title, created_at as createdAt, updated_at as updatedAt, participants FROM sessions WHERE id = ?').get(id)
+  const session = d.prepare('SELECT id, title, mode, created_at as createdAt, updated_at as updatedAt, participants FROM sessions WHERE id = ?').get(id)
   if (!session) return null
   session.participants = _parseParticipants(session.participants)
   const rows = d.prepare('SELECT role, content, timestamp, metadata FROM messages WHERE session_id = ? ORDER BY id').all(id)
@@ -117,8 +120,9 @@ function saveSession(clawDir, session) {
   const now = Date.now()
   session.updatedAt = now
   const participants = JSON.stringify(session.participants || [])
-  d.prepare('INSERT INTO sessions (id, title, created_at, updated_at, participants) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET title=excluded.title, updated_at=excluded.updated_at, participants=excluded.participants')
-    .run(session.id, session.title || 'New Chat', session.createdAt || now, now, participants)
+  const mode = session.mode || 'chat'
+  d.prepare('INSERT INTO sessions (id, title, mode, created_at, updated_at, participants) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET title=excluded.title, mode=excluded.mode, updated_at=excluded.updated_at, participants=excluded.participants')
+    .run(session.id, session.title || 'New Chat', mode, session.createdAt || now, now, participants)
   // Replace all messages
   d.prepare('DELETE FROM messages WHERE session_id = ?').run(session.id)
   const insert = d.prepare('INSERT INTO messages (session_id, role, content, timestamp, metadata) VALUES (?, ?, ?, ?, ?)')
@@ -138,11 +142,11 @@ function deleteSession(clawDir, id) {
   d.prepare('DELETE FROM sessions WHERE id = ?').run(id)
 }
 
-function createSession(clawDir, title, { participants } = {}) {
+function createSession(clawDir, title, { participants, mode } = {}) {
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
   const now = Date.now()
   const wsIds = participants || []
-  const session = { id, title: title || 'New Chat', messages: [], createdAt: now, updatedAt: now, participants: wsIds }
+  const session = { id, title: title || 'New Chat', messages: [], createdAt: now, updatedAt: now, participants: wsIds, mode: mode || 'chat' }
   saveSession(clawDir, session)
   return session
 }
@@ -290,6 +294,21 @@ function isSessionStale(clawDir, sessionId, resetConfig = {}) {
   return false
 }
 
+// ── Session mode ──
+
+function getSessionMode(clawDir, sessionId) {
+  const d = getDb(clawDir)
+  if (!d) return 'chat'
+  const row = d.prepare('SELECT mode FROM sessions WHERE id = ?').get(sessionId)
+  return row?.mode || 'chat'
+}
+
+function setSessionMode(clawDir, sessionId, mode) {
+  const d = getDb(clawDir)
+  if (!d) return
+  d.prepare('UPDATE sessions SET mode = ? WHERE id = ?').run(mode || 'chat', sessionId)
+}
+
 // ── Session participants ──
 
 function getSessionParticipants(clawDir, sessionId) {
@@ -317,4 +336,4 @@ function removeSessionParticipant(clawDir, sessionId, workspaceId) {
   return true
 }
 
-module.exports = { getDb, listSessions, loadSession, saveSession, deleteSession, createSession, closeDb, createTask, updateTask, listTasks, updateSessionStatus, getSessionStatus, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, addSessionParticipant, removeSessionParticipant, getSessionParticipants }
+module.exports = { getDb, listSessions, loadSession, saveSession, deleteSession, createSession, closeDb, createTask, updateTask, listTasks, updateSessionStatus, getSessionStatus, getSessionMode, setSessionMode, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, addSessionParticipant, removeSessionParticipant, getSessionParticipants }

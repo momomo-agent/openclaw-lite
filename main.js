@@ -26,6 +26,7 @@ const LEGACY_AGENT_FEATURES = false  // M19 lightweight agents, task bar, auto-r
 // ── Helper functions (must be defined early) ──
 let _activeRequestId = null
 let _activeAbortController = null
+let _activeCodingProcess = null
 
 function pushStatus(win, state, detail) {
   win?.webContents?.send('agent-status', { state, detail })
@@ -119,6 +120,7 @@ const { buildSystemPrompt: coreBuildSystemPrompt, buildAgentPrompt: coreBuildAge
 const { routeMessage: coreRouteMessage } = require('./core/router')
 const { streamAnthropicRaw: coreLlmAnthropicRaw, streamOpenAIRaw: coreLlmOpenAIRaw } = require('./core/llm-raw')
 const acpx = require('./core/acpx')
+const codingAgents = require('./core/coding-agents')
 
 // Legacy globals - kept for backward compat, synced to state via syncState()
 let mainWindow
@@ -289,8 +291,9 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  // Initialize acpx
+  // Initialize acpx + coding agents
   acpx.init()
+  codingAgents.init()
 
   // Initialize workspace registry
   workspaceRegistry.initRegistry(app.getPath('userData'))
@@ -462,8 +465,8 @@ ipcMain.handle('session-load', (_, id) => loadSession(id))
 ipcMain.handle('session-save', (_, session) => { saveSession(session); return true })
 ipcMain.handle('session-create', (_, opts) => {
   if (typeof opts === 'string') return createSession(opts)
-  const { title, participants } = opts || {}
-  return createSession(title, { participants })
+  const { title, participants, mode } = opts || {}
+  return createSession(title, { participants, mode })
 })
 ipcMain.handle('session-delete', (_, id) => {
   try { deleteSessionById(id); return true } catch { return false }
@@ -516,6 +519,23 @@ ipcMain.handle('session-remove-member', (_, { sessionId, agentId }) => {
   s.members = s.members.filter(m => m !== agentId)
   saveSession(s)
   return true
+})
+
+// ── IPC: Session Participants (M32 group chat) ──
+
+ipcMain.handle('session-add-participant', (_, { sessionId, workspaceId }) => {
+  if (!clawDir || !sessionId || !workspaceId) return false
+  return sessionStore.addSessionParticipant(clawDir, sessionId, workspaceId)
+})
+
+ipcMain.handle('session-remove-participant', (_, { sessionId, workspaceId }) => {
+  if (!clawDir || !sessionId || !workspaceId) return false
+  return sessionStore.removeSessionParticipant(clawDir, sessionId, workspaceId)
+})
+
+ipcMain.handle('session-get-participants', (_, sessionId) => {
+  if (!clawDir || !sessionId) return []
+  return sessionStore.getSessionParticipants(clawDir, sessionId)
 })
 
 // ── IPC: Session Agents (M19: lightweight agents, gated) ──
@@ -640,7 +660,7 @@ ipcMain.handle('chat-prepare', () => {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
 })
 
-ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files, sessionId, requestId: paramRequestId, focus }) => {
+ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files, sessionId, requestId: paramRequestId, focus, targetWorkspaceId }) => {
   const requestId = paramRequestId || Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
   // Sync sessionId from renderer
   if (sessionId) { currentSessionId = sessionId; syncState() }
@@ -664,6 +684,23 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
     mainWindow.webContents.send('session-expired', { reason: expiryReason })
   }
   _sessionExpiry.touch()
+
+  // ── Coding agent routing ──
+  // Check session mode or workspace codingAgent config
+  const sessionMode = sessionId ? getSessionMode(sessionId) : null
+  if (sessionMode === 'coding') {
+    const codingAgentId = config.defaultCodingAgent || 'claude'
+    if (codingAgents.isAvailable(codingAgentId)) {
+      const wsPath = getSessionWorkspacePath()
+      const result = await streamCodingAgent(codingAgentId, prompt, {
+        cwd: wsPath || clawDir || process.cwd(),
+        sessionId,
+        requestId,
+        win: mainWindow,
+      })
+      return result
+    }
+  }
 
   // Resolve agent: lightweight (session-level, legacy) or template (agents/ directory)
   let agent = null
@@ -695,11 +732,28 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
     systemPrompt = coreBuildAgentPrompt(agent, focus || '', sessionAgents)
     chatTools = getToolsForAgent()
   } else {
-    systemPrompt = await buildSystemPrompt()
+    systemPrompt = await buildSystemPrompt(targetWorkspaceId || null)
     if (agent?.soul) {
       // Template agent: soul takes priority
       systemPrompt = agent.soul + '\n\n---\n\n' + systemPrompt
     }
+  }
+
+  // Group chat: inject participant roster into system prompt
+  if (currentSessionId && clawDir) {
+    try {
+      const participants = sessionStore.getSessionParticipants(clawDir, currentSessionId)
+      if (participants.length > 1) {
+        const names = participants.map(pid => {
+          const w = workspaceRegistry.getWorkspace(pid)
+          return w?.identity?.name || pid
+        })
+        const currentWsId = targetWorkspaceId || participants[0]
+        const currentWs = workspaceRegistry.getWorkspace(currentWsId)
+        const myName = currentWs?.identity?.name || 'Assistant'
+        systemPrompt += `\n\n---\n\n## Group Chat\nYou are **${myName}** in a group conversation.\nParticipants: ${names.join(', ')}.\nMessages from other participants are prefixed with [Name]. Reply as yourself (${myName}).`
+      }
+    } catch {}
   }
 
   // F046: Inject other agents' recent messages for visibility
@@ -723,10 +777,29 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
   if (rawMessages?.length) {
     messages.push(...rawMessages)
   } else if (history?.length) {
-    for (const h of history) {
-      messages.push({ role: 'user', content: h.prompt })
-      if (h.answer && h.answer.trim()) {
-        messages.push({ role: 'assistant', content: h.answer })
+    // Group chat: load from DB to get sender metadata
+    const participants = sessionId && clawDir ? sessionStore.getSessionParticipants(clawDir, sessionId) : []
+    const isGroupChat = participants.length > 1
+    if (isGroupChat && sessionId && clawDir) {
+      // Load full session to get sender info per message
+      const fullSession = sessionStore.loadSession(clawDir, sessionId)
+      if (fullSession?.messages?.length) {
+        for (const m of fullSession.messages) {
+          if (m.role === 'user') {
+            messages.push({ role: 'user', content: m.content })
+          } else if (m.role === 'assistant') {
+            // Annotate who said it so the current responder knows
+            const senderLabel = m.sender && m.sender !== 'Assistant' ? `[${m.sender}]: ` : ''
+            messages.push({ role: 'assistant', content: senderLabel + (m.content || '') })
+          }
+        }
+      }
+    } else {
+      for (const h of history) {
+        messages.push({ role: 'user', content: h.prompt })
+        if (h.answer && h.answer.trim()) {
+          messages.push({ role: 'assistant', content: h.answer })
+        }
       }
     }
   }
@@ -824,14 +897,25 @@ ipcMain.handle('chat-route', async (_, { prompt, history, sessionId }) => {
 })
 
 // Helper: reuse build-system-prompt logic (workspace-aware via F167)
-async function buildSystemPrompt() {
+async function buildSystemPrompt(overrideWorkspaceId) {
   syncState()
-  // Resolve workspace path for current session
-  const wsPath = getSessionWorkspacePath()
+  // Resolve workspace path for current session (or explicit override for @mention)
+  const wsPath = getSessionWorkspacePath(overrideWorkspaceId)
   return coreBuildSystemPrompt(wsPath)
 }
 
-function getSessionWorkspacePath() {
+function getSessionMode(sessionId) {
+  if (!clawDir || !sessionId) return 'chat'
+  return sessionStore.getSessionMode(clawDir, sessionId)
+}
+
+function getSessionWorkspacePath(workspaceId) {
+  // If explicit workspaceId provided, use it directly
+  if (workspaceId) {
+    const wsObj = workspaceRegistry.getWorkspace(workspaceId)
+    if (wsObj?.path) return wsObj.path
+  }
+  // Otherwise resolve from session participants (owner = participants[0])
   if (!currentSessionId || !clawDir) return null
   try {
     const participants = sessionStore.getSessionParticipants(clawDir, currentSessionId)
@@ -841,6 +925,37 @@ function getSessionWorkspacePath() {
     }
   } catch {}
   return null  // fallback to default clawDir in prompt-builder
+}
+
+// ── Coding Agent Streaming ──
+
+async function streamCodingAgent(agentId, prompt, { cwd, sessionId, requestId, win }) {
+  _activeRequestId = requestId
+  _activeCodingProcess = null
+
+  pushStatus(win, 'running', `${agentId} working...`)
+  win?.webContents?.send('chat-text-start', { requestId })
+
+  try {
+    const result = await codingAgents.run(agentId, prompt, {
+      cwd,
+      session: sessionId ? `paw-${sessionId}` : undefined,
+      onOutput(chunk) {
+        win?.webContents?.send('chat-token', { token: chunk, requestId })
+      },
+      onProcess(proc) {
+        _activeCodingProcess = proc
+      },
+    })
+
+    _activeCodingProcess = null
+    pushStatus(win, 'idle', '')
+    return { answer: result.stdout, mode: 'coding', agentId }
+  } catch (err) {
+    _activeCodingProcess = null
+    pushStatus(win, 'error', err.message?.slice(0, 80))
+    throw err
+  }
 }
 
 // ── Anthropic Streaming ──
@@ -1263,6 +1378,13 @@ function updateTrayMenu() {
 // requestId is optional - when provided, renderer routes to per-card status
 
 ipcMain.handle('chat-cancel', () => {
+  // Kill active coding agent process
+  if (_activeCodingProcess && !_activeCodingProcess.killed) {
+    _activeCodingProcess.kill('SIGTERM')
+    setTimeout(() => { if (_activeCodingProcess && !_activeCodingProcess.killed) _activeCodingProcess.kill('SIGKILL') }, 2000)
+    _activeCodingProcess = null
+    return true
+  }
   if (_activeAbortController) {
     _activeAbortController.abort()
     _activeAbortController = null
