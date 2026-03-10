@@ -125,7 +125,13 @@ function sanitizeTranscript(messages, opts = {}) {
     result = removeOrphanedTrailingUser(result);
   }
 
-  // 4. Validate Anthropic turn ordering
+  // 4. Drop thinking blocks from assistant messages (OpenClaw-aligned)
+  result = dropThinkingBlocks(result);
+
+  // 5. Prune image payloads from already-processed user messages (OpenClaw-aligned)
+  pruneProcessedHistoryImages(result);
+
+  // 6. Validate Anthropic turn ordering
   if (opts.provider === 'anthropic') {
     result = validateAnthropicTurns(result);
   }
@@ -133,10 +139,70 @@ function sanitizeTranscript(messages, opts = {}) {
   return result;
 }
 
+const PRUNED_IMAGE_MARKER = '[image data removed - already processed by model]';
+
+/**
+ * Drop thinking blocks from assistant messages.
+ * Some providers reject persisted thinking blocks on re-send.
+ */
+function dropThinkingBlocks(messages) {
+  let touched = false;
+  const out = [];
+  for (const msg of messages) {
+    if (msg.role !== 'assistant' || !Array.isArray(msg.content)) {
+      out.push(msg);
+      continue;
+    }
+    const nextContent = [];
+    let changed = false;
+    for (const block of msg.content) {
+      if (block && typeof block === 'object' && block.type === 'thinking') {
+        touched = true;
+        changed = true;
+        continue;
+      }
+      nextContent.push(block);
+    }
+    if (!changed) { out.push(msg); continue; }
+    const content = nextContent.length > 0 ? nextContent : [{ type: 'text', text: '' }];
+    out.push({ ...msg, content });
+  }
+  return touched ? out : messages;
+}
+
+/**
+ * Replace image blocks in already-answered user messages with a text marker.
+ * Saves context tokens on re-send. Mutates in-place, returns true if changed.
+ */
+function pruneProcessedHistoryImages(messages) {
+  let lastAssistantIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === 'assistant') { lastAssistantIndex = i; break; }
+  }
+  if (lastAssistantIndex < 0) return false;
+
+  let didMutate = false;
+  for (let i = 0; i < lastAssistantIndex; i++) {
+    const msg = messages[i];
+    if (!msg || msg.role !== 'user' || !Array.isArray(msg.content)) continue;
+    for (let j = 0; j < msg.content.length; j++) {
+      const block = msg.content[j];
+      if (block && typeof block === 'object' && block.type === 'image') {
+        msg.content[j] = { type: 'text', text: PRUNED_IMAGE_MARKER };
+        didMutate = true;
+      }
+    }
+  }
+  return didMutate;
+}
+
 module.exports = {
   validateAnthropicTurns,
   repairToolUseResultPairing,
   removeOrphanedTrailingUser,
   limitHistoryTurns,
+  dropThinkingBlocks,
+  pruneProcessedHistoryImages,
   sanitizeTranscript,
+  PRUNED_IMAGE_MARKER,
 };

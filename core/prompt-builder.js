@@ -19,11 +19,12 @@ async function buildSystemPrompt() {
   const BOOTSTRAP_MAX_CHARS = 20000;
   const BOOTSTRAP_TOTAL_MAX_CHARS = 150000;
   let totalInjected = 0;
-  let truncatedFiles = [];
+  let truncatedFiles = [];  // { name, rawChars, injectedChars, truncated }
 
   function injectFile(label, content) {
     if (!content) return;
     let text = content;
+    const rawChars = content.length;
     let truncated = false;
     if (text.length > BOOTSTRAP_MAX_CHARS) {
       text = text.slice(0, BOOTSTRAP_MAX_CHARS) + `\n\n...[truncated, was ${content.length} chars]`;
@@ -35,7 +36,8 @@ async function buildSystemPrompt() {
       text = text.slice(0, remaining) + `\n...[total bootstrap limit reached]`;
       truncated = true;
     }
-    if (truncated) truncatedFiles.push(label);
+    const injectedChars = text.length;
+    if (truncated) truncatedFiles.push({ name: label, rawChars, injectedChars, truncated });
     totalInjected += text.length;
     parts.push(`## ${label}\n${text}`);
   }
@@ -203,7 +205,8 @@ host=${os.hostname()} | os=${os.type()} ${os.release()} (${os.arch()}) | node=${
 
   // ── Truncation warning ──
   if (truncatedFiles.length > 0) {
-    parts.push(`## ⚠️ Bootstrap Truncation Warning\nThe following workspace files were truncated to fit context limits: ${truncatedFiles.join(', ')}. Use file_read to access full content when needed. Per-file limit: ${BOOTSTRAP_MAX_CHARS} chars, total limit: ${BOOTSTRAP_TOTAL_MAX_CHARS} chars.`);
+    const fileList = truncatedFiles.map(f => `- **${f.name}**: ${f.rawChars} → ${f.injectedChars} chars`).join('\n');
+    parts.push(`## ⚠️ Bootstrap Truncation Warning\nThe following workspace files were truncated to fit context limits:\n${fileList}\n\nUse file_read to access full content when needed. Per-file limit: ${BOOTSTRAP_MAX_CHARS} chars, total limit: ${BOOTSTRAP_TOTAL_MAX_CHARS} chars.`);
   }
 
   return parts.join('\n\n---\n\n');

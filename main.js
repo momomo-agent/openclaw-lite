@@ -19,6 +19,7 @@ const { fetchWithRetry } = require('./core/api-retry')
 const { enforceContextBudget } = require('./core/context-guard')
 const { sanitizeTranscript } = require('./core/transcript-repair')
 const { resolveContextWindow } = require('./core/model-context')
+const { SessionExpiry } = require('./core/session-expiry')
 
 const failoverManager = new FailoverManager()
 let _lastAnthropicCallTime = 0
@@ -586,6 +587,21 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
     if (!p) return {}
     try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch { return {} }
   })()
+
+  // Session auto-expiry check (OpenClaw-aligned)
+  if (!_sessionExpiry) {
+    _sessionExpiry = new SessionExpiry({
+      dailyResetHour: config.dailyResetHour ?? 4,
+      idleMinutes: config.idleMinutes ?? 180,
+    })
+  }
+  const expiryReason = _sessionExpiry.shouldReset()
+  if (expiryReason && mainWindow) {
+    console.log(`[Paw] Session expired: ${expiryReason}`)
+    _sessionExpiry.reset()
+    mainWindow.webContents.send('session-expired', { reason: expiryReason })
+  }
+  _sessionExpiry.touch()
 
   // Resolve agent: lightweight (session-level) or template (agents/ directory)
   let agent = null
@@ -1180,6 +1196,7 @@ function updateTrayMenu() {
 // requestId is optional - when provided, renderer routes to per-card status
 let _activeRequestId = null
 let _activeAbortController = null
+let _sessionExpiry = null  // Initialized when config loads
 
 ipcMain.handle('chat-cancel', () => {
   if (_activeAbortController) {

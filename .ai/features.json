@@ -858,7 +858,7 @@
     "id": "F148",
     "category": "core",
     "description": "Session 自动过期 (daily reset + idle timeout)",
-    "passes": false,
+    "passes": true,
     "milestone": "M28"
   },
   {
@@ -937,5 +937,33 @@
     "description": "Usage cacheRead/cacheWrite 追踪",
     "passes": true,
     "milestone": "M30"
+  },
+  {
+    "id": "F160",
+    "category": "core",
+    "description": "Command poll backoff (5s→10s→30s→60s 指数退避)",
+    "passes": true,
+    "milestone": "M31"
+  },
+  {
+    "id": "F161",
+    "category": "core",
+    "description": "Bootstrap budget 统计 (per-file rawChars/injectedChars/truncated)",
+    "passes": true,
+    "milestone": "M31"
+  },
+  {
+    "id": "F162",
+    "category": "core",
+    "description": "Thinking block 清理 (发送前 drop thinking blocks)",
+    "passes": true,
+    "milestone": "M31"
+  },
+  {
+    "id": "F163",
+    "category": "core",
+    "description": "Image block 清理 (已回复的 user 消息中清除 image payload)",
+    "passes": true,
+    "milestone": "M31"
   }
 ]
