@@ -36,10 +36,10 @@ contextBridge.exposeInMainWorld('api', {
   onChatDone: (cb) => ipcRenderer.on('chat-done', (_, r) => cb(r)),
   onChatError: (cb) => ipcRenderer.on('chat-error', (_, e) => cb(e)),
   // Sessions
-  listSessions: () => ipcRenderer.invoke('sessions-list'),
+  listSessions: (opts) => ipcRenderer.invoke('sessions-list', opts),
   loadSession: (id) => ipcRenderer.invoke('session-load', id),
   saveSession: (s) => ipcRenderer.invoke('session-save', s),
-  createSession: (t) => ipcRenderer.invoke('session-create', t),
+  createSession: (opts) => ipcRenderer.invoke('session-create', opts),
   deleteSession: (id) => ipcRenderer.invoke('session-delete', id),
   exportSession: (id) => ipcRenderer.invoke('session-export', id),
   // Agents

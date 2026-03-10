@@ -72,14 +72,27 @@ function ensureSchema(db) {
   try { db.exec(`ALTER TABLE sessions ADD COLUMN status_text TEXT DEFAULT ''`) } catch {}
   try { db.exec(`ALTER TABLE sessions ADD COLUMN input_tokens INTEGER DEFAULT 0`) } catch {}
   try { db.exec(`ALTER TABLE sessions ADD COLUMN output_tokens INTEGER DEFAULT 0`) } catch {}
+  // M32/F164: workspace association
+  try { db.exec(`ALTER TABLE sessions ADD COLUMN workspace_id TEXT DEFAULT NULL`) } catch {}
+  try { db.exec(`ALTER TABLE sessions ADD COLUMN owner_id TEXT DEFAULT NULL`) } catch {}
 }
 
-function listSessions(clawDir) {
+function listSessions(clawDir, { workspaceId } = {}) {
   const d = getDb(clawDir)
   if (!d) return []
+  if (workspaceId) {
+    return d.prepare(`
+      SELECT s.id, s.title, s.created_at as createdAt, s.updated_at as updatedAt,
+             s.status_level as statusLevel, s.status_text as statusText,
+             s.workspace_id as workspaceId, s.owner_id as ownerId,
+             (SELECT substr(m.content, 1, 60) FROM messages m WHERE m.session_id = s.id ORDER BY m.id DESC LIMIT 1) as lastMessage
+      FROM sessions s WHERE s.workspace_id = ? ORDER BY s.updated_at DESC
+    `).all(workspaceId)
+  }
   return d.prepare(`
     SELECT s.id, s.title, s.created_at as createdAt, s.updated_at as updatedAt,
            s.status_level as statusLevel, s.status_text as statusText,
+           s.workspace_id as workspaceId, s.owner_id as ownerId,
            (SELECT substr(m.content, 1, 60) FROM messages m WHERE m.session_id = s.id ORDER BY m.id DESC LIMIT 1) as lastMessage
     FROM sessions s ORDER BY s.updated_at DESC
   `).all()
@@ -88,7 +101,7 @@ function listSessions(clawDir) {
 function loadSession(clawDir, id) {
   const d = getDb(clawDir)
   if (!d) return null
-  const session = d.prepare('SELECT id, title, created_at as createdAt, updated_at as updatedAt FROM sessions WHERE id = ?').get(id)
+  const session = d.prepare('SELECT id, title, created_at as createdAt, updated_at as updatedAt, workspace_id as workspaceId, owner_id as ownerId FROM sessions WHERE id = ?').get(id)
   if (!session) return null
   const rows = d.prepare('SELECT role, content, timestamp, metadata FROM messages WHERE session_id = ? ORDER BY id').all(id)
   session.messages = rows.map(r => {
@@ -126,12 +139,20 @@ function deleteSession(clawDir, id) {
   d.prepare('DELETE FROM sessions WHERE id = ?').run(id)
 }
 
-function createSession(clawDir, title) {
+function createSession(clawDir, title, { workspaceId, ownerId } = {}) {
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
   const now = Date.now()
   const session = { id, title: title || 'New Chat', messages: [], createdAt: now, updatedAt: now }
   saveSession(clawDir, session)
-  return session
+  // Set workspace association
+  if (workspaceId) {
+    const d = getDb(clawDir)
+    if (d) {
+      d.prepare('UPDATE sessions SET workspace_id = ?, owner_id = ? WHERE id = ?')
+        .run(workspaceId, ownerId || workspaceId, id)
+    }
+  }
+  return { ...session, workspaceId, ownerId: ownerId || workspaceId }
 }
 
 // ── Tasks CRUD ──
@@ -319,4 +340,20 @@ function isSessionStale(clawDir, sessionId, resetConfig = {}) {
   return false;
 }
 
-module.exports = { getDb, listSessions, loadSession, saveSession, deleteSession, createSession, migrateFromJson, closeDb, createTask, updateTask, listTasks, updateSessionStatus, getSessionStatus, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage }
+// M32/F164: Set workspace for existing sessions (migration)
+function setSessionWorkspace(clawDir, sessionId, workspaceId, ownerId) {
+  const d = getDb(clawDir)
+  if (!d) return false
+  d.prepare('UPDATE sessions SET workspace_id = ?, owner_id = ? WHERE id = ?')
+    .run(workspaceId, ownerId || workspaceId, sessionId)
+  return true
+}
+
+function getSessionWorkspace(clawDir, sessionId) {
+  const d = getDb(clawDir)
+  if (!d) return null
+  const row = d.prepare('SELECT workspace_id as workspaceId, owner_id as ownerId FROM sessions WHERE id = ?').get(sessionId)
+  return row || null
+}
+
+module.exports = { getDb, listSessions, loadSession, saveSession, deleteSession, createSession, migrateFromJson, closeDb, createTask, updateTask, listTasks, updateSessionStatus, getSessionStatus, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, setSessionWorkspace, getSessionWorkspace }

@@ -172,10 +172,10 @@ function stopMemoryWatch() { coreStopMemoryWatch(); }
 // ── Session helpers (SQLite backend) ──
 const sessionStore = require('./session-store')
 
-function listSessions() { return sessionStore.listSessions(clawDir) }
+function listSessions(opts) { return sessionStore.listSessions(clawDir, opts) }
 function loadSession(id) { return sessionStore.loadSession(clawDir, id) }
 function saveSession(session) { sessionStore.saveSession(clawDir, session) }
-function createSession(title) { return sessionStore.createSession(clawDir, title) }
+function createSession(title, opts) { return sessionStore.createSession(clawDir, title, opts) }
 function deleteSessionById(id) { sessionStore.deleteSession(clawDir, id) }
 
 function agentsDir() { syncState(); return coreAgentsDir(); }
@@ -474,10 +474,14 @@ ipcMain.handle('set-coding-agent', (_, agent) => {
 
 // ── IPC: Sessions ──
 
-ipcMain.handle('sessions-list', () => listSessions())
+ipcMain.handle('sessions-list', (_, opts) => listSessions(opts))
 ipcMain.handle('session-load', (_, id) => loadSession(id))
 ipcMain.handle('session-save', (_, session) => { saveSession(session); return true })
-ipcMain.handle('session-create', (_, title) => createSession(title))
+ipcMain.handle('session-create', (_, opts) => {
+  if (typeof opts === 'string') return createSession(opts)  // backward compat
+  const { title, workspaceId, ownerId } = opts || {}
+  return createSession(title, { workspaceId, ownerId })
+})
 ipcMain.handle('session-delete', (_, id) => {
   try { deleteSessionById(id); return true } catch { return false }
 })
