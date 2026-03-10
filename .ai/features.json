@@ -501,21 +501,21 @@
     "id": "F097",
     "category": "core",
     "description": "Exec 安全分层 — allowlist + PATH 注入拒绝",
-    "passes": false,
+    "passes": true,
     "milestone": "M23"
   },
   {
     "id": "F098",
     "category": "core",
     "description": "Session 生命周期 — daily reset / idle reset 可配置",
-    "passes": false,
+    "passes": true,
     "milestone": "M23"
   },
   {
     "id": "F099",
     "category": "core",
     "description": "Heartbeat requestId 隔离",
-    "passes": false,
+    "passes": true,
     "milestone": "M23"
   },
   {
