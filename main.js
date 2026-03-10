@@ -847,7 +847,9 @@ function startHeartbeat() {
       const sp = await buildSystemPrompt()
       const msgs = [{ role: 'user', content: prompt }]
       const fn = (c.provider || 'anthropic') === 'anthropic' ? streamAnthropic : streamOpenAI
-      const r = await fn(msgs, sp, c, mainWindow)
+      // Use a dedicated heartbeat requestId to avoid hijacking active user chats
+      const hbRequestId = 'hb-' + Date.now().toString(36)
+      const r = await fn(msgs, sp, c, mainWindow, hbRequestId)
       if (r?.answer && !r.answer.includes('HEARTBEAT_OK')) {
         sendNotification('Paw', r.answer.slice(0, 200))
         mainWindow?.webContents.send('heartbeat-result', r.answer)

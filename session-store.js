@@ -261,4 +261,46 @@ function findSessionAgentByName(clawDir, sessionId, name) {
   return d.prepare('SELECT id, session_id as sessionId, name, role, created_at as createdAt FROM session_agents WHERE session_id = ? AND name = ?').get(sessionId, name)
 }
 
-module.exports = { getDb, listSessions, loadSession, saveSession, deleteSession, createSession, migrateFromJson, closeDb, createTask, updateTask, listTasks, updateSessionStatus, getSessionStatus, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName }
+/**
+ * Check if a session is stale and should be reset.
+ * @param {string} clawDir
+ * @param {string} sessionId
+ * @param {object} resetConfig - { dailyResetHour, idleMinutes }
+ * @returns {boolean}
+ */
+function isSessionStale(clawDir, sessionId, resetConfig = {}) {
+  const d = getDb(clawDir);
+  if (!d) return false;
+  const session = d.prepare('SELECT updated_at as updatedAt FROM sessions WHERE id = ?').get(sessionId);
+  if (!session) return false;
+
+  const lastUpdate = session.updatedAt;
+  const now = Date.now();
+
+  // Daily reset: check if last update was before today's reset hour
+  const dailyHour = resetConfig.dailyResetHour ?? 4; // Default 4 AM
+  if (dailyHour >= 0) {
+    const resetTime = new Date();
+    resetTime.setHours(dailyHour, 0, 0, 0);
+    if (resetTime.getTime() > now) {
+      // If reset time is in the future today, use yesterday's reset
+      resetTime.setDate(resetTime.getDate() - 1);
+    }
+    if (lastUpdate < resetTime.getTime()) {
+      return true;
+    }
+  }
+
+  // Idle reset: check if session has been idle too long
+  const idleMinutes = resetConfig.idleMinutes;
+  if (idleMinutes && idleMinutes > 0) {
+    const idleMs = idleMinutes * 60 * 1000;
+    if (now - lastUpdate > idleMs) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+module.exports = { getDb, listSessions, loadSession, saveSession, deleteSession, createSession, migrateFromJson, closeDb, createTask, updateTask, listTasks, updateSessionStatus, getSessionStatus, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale }
