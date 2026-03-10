@@ -536,42 +536,42 @@
     "id": "F102",
     "category": "core",
     "description": "Bootstrap 文件大小限制 — system prompt 注入截断",
-    "passes": false,
+    "passes": true,
     "milestone": "M24"
   },
   {
     "id": "F103",
     "category": "core",
     "description": "Tool result 入库截断",
-    "passes": false,
+    "passes": true,
     "milestone": "M24"
   },
   {
     "id": "F104",
     "category": "ux",
     "description": "Slash 命令: /new /status /compact",
-    "passes": false,
+    "passes": true,
     "milestone": "M24"
   },
   {
     "id": "F105",
     "category": "core",
     "description": "Background exec + process 管理",
-    "passes": false,
+    "passes": true,
     "milestone": "M24"
   },
   {
     "id": "F106",
     "category": "core",
     "description": "Token 使用追踪",
-    "passes": false,
+    "passes": true,
     "milestone": "M24"
   },
   {
     "id": "F107",
     "category": "core",
     "description": "Anthropic Prompt Caching",
-    "passes": false,
+    "passes": true,
     "milestone": "M24"
   }
 ]
