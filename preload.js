@@ -74,6 +74,9 @@ contextBridge.exposeInMainWorld('api', {
   notify: (title, body) => ipcRenderer.invoke('notify', { title, body }),
   // Status persistence
   updateSessionStatus: (sessionId, level, text) => ipcRenderer.invoke('update-session-status', { sessionId, level, text }),
+  // Coding agent
+  getCodingAgent: () => ipcRenderer.invoke('get-coding-agent'),
+  setCodingAgent: (agent) => ipcRenderer.invoke('set-coding-agent', agent),
   // Claude Code
   onCcStatus: (cb) => { ipcRenderer.removeAllListeners('cc-status'); ipcRenderer.on('cc-status', (_, d) => cb(d)) },
   onCcOutput: (cb) => { ipcRenderer.removeAllListeners('cc-output'); ipcRenderer.on('cc-output', (_, d) => cb(d)) },

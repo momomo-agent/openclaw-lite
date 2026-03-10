@@ -904,7 +904,7 @@ function esc(s) {
 async function openSettings() {
   const config = await window.api.getConfig() || {}
   const prefs = await window.api.getPrefs()
-  const codingAgent = await window.api.invoke('get-coding-agent')
+  const codingAgent = await window.api.getCodingAgent()
   document.getElementById('cfgProvider').value = config.provider || 'anthropic'
   document.getElementById('cfgApiKey').value = config.apiKey || ''
   document.getElementById('cfgBaseUrl').value = config.baseUrl || ''
@@ -955,7 +955,7 @@ async function saveSettings() {
   }
   const codingAgent = document.getElementById('cfgCodingAgent').value
   await window.api.saveConfig(config)
-  await window.api.invoke('set-coding-agent', codingAgent)
+  await window.api.setCodingAgent(codingAgent)
   if (config.heartbeat.enabled) await window.api.heartbeatStart()
   else await window.api.heartbeatStop()
   closeSettings()

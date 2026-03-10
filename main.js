@@ -122,6 +122,15 @@ function syncState() {
 let memoryWatcher = null
 let _sessionExpiry = null
 
+// ── Notification helpers (must be before first usage in chat/stream) ──
+function pushStatus(win, st, detail) {
+  win?.webContents?.send('agent-status', { state: st, detail })
+  if (tray) tray.setToolTip(`Paw - ${detail || st}`)
+}
+function sendNotification(title, body) {
+  if (Notification.isSupported()) new Notification({ title, body }).show()
+}
+
 // ── Delegated to core/ modules ──
 function configPath() { syncState(); return coreConfigPath(); }
 
@@ -959,6 +968,8 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
   pushStatus(win, 'done', 'Done')
   clearTimeout(timeoutId)
   return { answer: fullText, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput, cacheRead: totalCacheRead, cacheWrite: totalCacheWrite, lastInputTokens: lastUsageInput, lastCacheRead, lastCacheWrite } }
+}
+
 // ── OpenAI Streaming ──
 
 async function streamOpenAI(messages, systemPrompt, config, win, requestId, tools) {
@@ -1164,16 +1175,7 @@ function stopHeartbeat() { if (heartbeatTimer) { clearInterval(heartbeatTimer); 
 ipcMain.handle('heartbeat-start', () => { startHeartbeat(); return true })
 ipcMain.handle('heartbeat-stop', () => { stopHeartbeat(); return true })
 
-// ── M8-04: Notification ──
-
-function pushStatus(win, state, detail) {
-  win?.webContents?.send('agent-status', { state, detail })
-  if (tray) tray.setToolTip(`Paw - ${detail || state}`)
-}
-
-function sendNotification(title, body) {
-  if (Notification.isSupported()) new Notification({ title, body }).show()
-}
+// ── M8-04: Notification (moved to top, see line ~126) ──
 
 // ── Tray Menu (AI Native) ──
 let _trayStatusText = '空闲待命中'
@@ -1242,4 +1244,3 @@ ipcMain.handle('cc-stop', () => {
   try { require('./tools/claude-code').ccStop() } catch {}
   return true
 })
-}
