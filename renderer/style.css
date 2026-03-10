@@ -246,6 +246,32 @@ button:hover { background: #2a2a2a; }
 .settings-body input:focus, .settings-body select:focus { border-color: #444; }
 .settings-body .primary-btn { margin-top: 12px; }
 
+/* New chat selector (M32/F166) */
+.overlay-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+  display: flex; justify-content: center; align-items: center; z-index: 200;
+}
+.new-chat-panel {
+  background: #111; border: 1px solid #222; border-radius: 12px;
+  width: 340px; max-height: 70vh; overflow-y: auto;
+}
+.new-chat-header {
+  padding: 14px 18px; border-bottom: 1px solid #1a1a1a;
+  font-weight: 600; font-size: 14px; color: #e0e0e0;
+}
+.new-chat-list { padding: 8px; }
+.new-chat-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: 8px; cursor: pointer;
+  transition: background 0.15s;
+}
+.new-chat-item:hover { background: #ffffff0d; }
+.new-chat-avatar { font-size: 24px; line-height: 1; width: 32px; text-align: center; }
+.new-chat-avatar-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
+.new-chat-info { flex: 1; min-width: 0; }
+.new-chat-name { font-size: 14px; color: #e0e0e0; font-weight: 500; }
+.new-chat-desc { font-size: 11px; color: #666; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 /* Member list */
 .member-item {
   display: flex; justify-content: space-between; align-items: center;

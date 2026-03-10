@@ -355,12 +355,56 @@ async function switchSession(id) {
 }
 
 async function newSession() {
-  const session = await window.api.createSession('New Chat')
+  const workspaces = await window.api.listWorkspaces()
+  if (workspaces.length > 0) {
+    showNewChatSelector(workspaces)
+    return
+  }
+  // No workspaces registered — create ungrouped session
+  await createNewSession()
+}
+
+async function createNewSession(workspaceId) {
+  const opts = workspaceId ? { title: 'New Chat', workspaceId } : 'New Chat'
+  const session = await window.api.createSession(opts)
   currentSessionId = session.id
   history = []
   messages.innerHTML = ''
   document.getElementById('sessionTitle').textContent = session.title
   await refreshSessionList()
+}
+
+function showNewChatSelector(workspaces) {
+  // Remove existing overlay if any
+  document.getElementById('newChatOverlay')?.remove()
+
+  const overlay = document.createElement('div')
+  overlay.id = 'newChatOverlay'
+  overlay.className = 'overlay-backdrop'
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove() }
+
+  const panel = document.createElement('div')
+  panel.className = 'new-chat-panel'
+  panel.innerHTML = `<div class="new-chat-header">新建对话</div><div class="new-chat-list"></div>`
+
+  const listEl = panel.querySelector('.new-chat-list')
+
+  for (const ws of workspaces) {
+    const item = document.createElement('div')
+    item.className = 'new-chat-item'
+    const avatar = ws.identity.avatar || '🤖'
+    const isEmoji = avatar.length <= 4 && !avatar.includes('.')
+    const avatarHtml = isEmoji ? `<span class="new-chat-avatar">${avatar}</span>` : `<img src="file://${esc(ws.path + '/' + avatar)}" class="new-chat-avatar-img">`
+    item.innerHTML = `${avatarHtml}<div class="new-chat-info"><div class="new-chat-name">${esc(ws.identity.name)}</div>${ws.identity.description ? `<div class="new-chat-desc">${esc(ws.identity.description)}</div>` : ''}</div>`
+    item.onclick = () => {
+      overlay.remove()
+      createNewSession(ws.id)
+    }
+    listEl.appendChild(item)
+  }
+
+  overlay.appendChild(panel)
+  document.body.appendChild(overlay)
 }
 
 async function deleteSession(id) {
