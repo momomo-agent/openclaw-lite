@@ -776,5 +776,89 @@
     "description": "file_write 自动 mkdir",
     "passes": true,
     "milestone": "M27"
+  },
+  {
+    "id": "F137",
+    "category": "core",
+    "description": "Tool result 大小限制: 30% context window + head+tail 截断",
+    "passes": true,
+    "milestone": "M28"
+  },
+  {
+    "id": "F138",
+    "category": "core",
+    "description": "Context window guard: 发送前检查总量 + 自动压缩",
+    "passes": true,
+    "milestone": "M28"
+  },
+  {
+    "id": "F139",
+    "category": "core",
+    "description": "Loop detection 阈值对齐 OpenClaw: 10/20/30",
+    "passes": true,
+    "milestone": "M28"
+  },
+  {
+    "id": "F140",
+    "category": "core",
+    "description": "API 错误分类 + context overflow 自动 compaction+retry",
+    "passes": false,
+    "milestone": "M28"
+  },
+  {
+    "id": "F141",
+    "category": "core",
+    "description": "Tool call 稳定哈希 (stable-stringify + SHA256)",
+    "passes": true,
+    "milestone": "M28"
+  },
+  {
+    "id": "F142",
+    "category": "core",
+    "description": "System prompt section 顺序完全对齐 OpenClaw",
+    "passes": false,
+    "milestone": "M28"
+  },
+  {
+    "id": "F143",
+    "category": "core",
+    "description": "HEARTBEAT_OK 精准检测 (leading/trailing)",
+    "passes": true,
+    "milestone": "M28"
+  },
+  {
+    "id": "F144",
+    "category": "core",
+    "description": "Tool Call Style section (routine 不解释)",
+    "passes": false,
+    "milestone": "M28"
+  },
+  {
+    "id": "F145",
+    "category": "core",
+    "description": "Context overflow 自动 compaction + retry",
+    "passes": false,
+    "milestone": "M28"
+  },
+  {
+    "id": "F146",
+    "category": "core",
+    "description": "多轮 usage 累积统计",
+    "passes": false,
+    "milestone": "M28"
+  },
+  {
+    "id": "F147",
+    "category": "core",
+    "description": "Anthropic magic string scrub",
+    "passes": false,
+    "milestone": "M28"
+  },
+  {
+    "id": "F148",
+    "category": "core",
+    "description": "Session 自动过期 (daily reset + idle timeout)",
+    "passes": false,
+    "milestone": "M28"
   }
 ]

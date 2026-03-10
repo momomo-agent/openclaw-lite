@@ -1,13 +1,28 @@
 // core/loop-detection.js — Detect repetitive tool call patterns
 // OpenClaw-aligned: warning → critical → circuit-breaker + knownPollNoProgress
 
-const DEFAULT_WARNING_THRESHOLD = 3;
-const DEFAULT_CRITICAL_THRESHOLD = 5;
-const DEFAULT_CIRCUIT_BREAKER_THRESHOLD = 8;
+const crypto = require('crypto');
+
+const DEFAULT_WARNING_THRESHOLD = 10;
+const DEFAULT_CRITICAL_THRESHOLD = 20;
+const DEFAULT_CIRCUIT_BREAKER_THRESHOLD = 30;
 const DEFAULT_HISTORY = 30;
 
 // Known polling tools that often get stuck
 const POLL_TOOLS = new Set(['process', 'shell_exec']);
+
+function stableStringify(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  const keys = Object.keys(value).sort();
+  return `{${keys.map(k => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`;
+}
+
+function hashToolCall(name, input) {
+  const serialized = stableStringify(input);
+  const hash = crypto.createHash('sha256').update(serialized).digest('hex');
+  return `${name}:${hash}`;
+}
 
 class LoopDetector {
   constructor(opts = {}) {
@@ -28,7 +43,7 @@ class LoopDetector {
    * @returns {{ blocked: boolean, warning: boolean, reason?: string }}
    */
   check(name, input, lastOutput) {
-    const key = name + ':' + JSON.stringify(input);
+    const key = hashToolCall(name, input);
     this.history.push({ key, name, output: lastOutput });
     this.globalCallCount++;
     if (this.history.length > this.historySize) this.history.shift();
