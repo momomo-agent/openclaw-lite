@@ -802,7 +802,7 @@
     "id": "F140",
     "category": "core",
     "description": "API 错误分类 + context overflow 自动 compaction+retry",
-    "passes": false,
+    "passes": true,
     "milestone": "M28"
   },
   {
@@ -816,7 +816,7 @@
     "id": "F142",
     "category": "core",
     "description": "System prompt section 顺序完全对齐 OpenClaw",
-    "passes": false,
+    "passes": true,
     "milestone": "M28"
   },
   {
@@ -830,28 +830,28 @@
     "id": "F144",
     "category": "core",
     "description": "Tool Call Style section (routine 不解释)",
-    "passes": false,
+    "passes": true,
     "milestone": "M28"
   },
   {
     "id": "F145",
     "category": "core",
     "description": "Context overflow 自动 compaction + retry",
-    "passes": false,
+    "passes": true,
     "milestone": "M28"
   },
   {
     "id": "F146",
     "category": "core",
     "description": "多轮 usage 累积统计",
-    "passes": false,
+    "passes": true,
     "milestone": "M28"
   },
   {
     "id": "F147",
     "category": "core",
     "description": "Anthropic magic string scrub",
-    "passes": false,
+    "passes": true,
     "milestone": "M28"
   },
   {

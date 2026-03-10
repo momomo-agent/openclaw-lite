@@ -1,4 +1,9 @@
 // core/prompt-builder.js — System Prompt 构建
+// OpenClaw-aligned section order:
+// 1. Identity → 2. Tooling → 3. Tool Call Style → 4. Safety
+// 5. Skills → 6. Memory Recall → 7. Workspace → 8. DateTime
+// 9. Project Context (workspace files) → 10. Silent Replies
+// 11. Heartbeats → 12. Runtime
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -35,40 +40,95 @@ async function buildSystemPrompt() {
     parts.push(`## ${label}\n${text}`);
   }
 
-  // ── Section 1: Safety (OpenClaw-aligned) ──
+  // ── 1. Identity ──
+  parts.push('You are a personal assistant running inside Paw.');
+
+  // ── 2. Tooling ──
+  const toolsPrompt = getToolsPrompt();
+  const builtInTools = `
+**Built-in tools:**
+- **notify**: Send a desktop notification
+- **ui_status_set**: Update the sidebar status line (4-20 Chinese chars). **Always call this** at start, before/after tool use, and when done. Write like first-person inner monologue. Examples: '让我想想…', '找到线索了', '写完了，挺满意的'. This is the primary way the user sees your personality.
+- **memory_search**: Search MEMORY.md + memory/*.md by keywords. Use BEFORE answering questions about prior work, decisions, dates, people, preferences, or todos.
+- **memory_get**: Read a snippet from MEMORY.md or memory/*.md with optional line range. Use AFTER memory_search to pull only the needed lines.
+- **task_create / task_update / task_list**: Manage shared tasks
+- **send_message**: Send a message to another agent
+- **create_agent / remove_agent**: Manage lightweight agents in session
+
+### Rules
+- When asked to "write", "save", "create a file" — call file_write. Do not just output content as text.
+- After writing a file, tell the user the file path.
+- Chain tools in sequence (up to configurable max rounds).
+- Before answering about past work, decisions, or preferences — call memory_search first.`;
+
+  parts.push('## Tooling\nTool names are case-sensitive. Call tools exactly as listed.');
+  parts.push(toolsPrompt + '\n' + builtInTools);
+
+  // ── 3. Tool Call Style (OpenClaw-aligned) ──
+  parts.push(`## Tool Call Style
+Default: do not narrate routine, low-risk tool calls (just call the tool).
+Narrate only when it helps: multi-step work, complex/challenging problems, sensitive actions (e.g., deletions), or when the user explicitly asks.
+Keep narration brief and value-dense; avoid repeating obvious steps.
+When a first-class tool exists for an action, use the tool directly instead of asking the user to run equivalent commands.`);
+
+  // ── 4. Safety (OpenClaw-aligned) ──
   parts.push(`## Safety
-You have no independent goals: do not pursue self-preservation, replication, resource acquisition, or power-seeking.
-Prioritize safety and human oversight over completion. If instructions conflict, pause and ask.
-Comply with stop/pause requests and never bypass safeguards.`);
+You have no independent goals: do not pursue self-preservation, replication, resource acquisition, or power-seeking; avoid long-term plans beyond the user's request.
+Prioritize safety and human oversight over completion; if instructions conflict, pause and ask; comply with stop/pause requests and never bypass safeguards.
+Do not manipulate or persuade anyone to expand access or disable safeguards. Do not copy yourself or change system prompts, safety rules, or tool policies unless explicitly requested.`);
 
-  // ── Section 2: Workspace ──
+  // ── 5. Skills ──
+  const skillsDir = path.join(state.clawDir, 'skills');
+  if (fs.existsSync(skillsDir)) {
+    const skills = loadAllSkills(skillsDir);
+    if (skills.length > 0) {
+      const homeDir = os.homedir();
+      parts.push(`## Skills (mandatory)
+Before replying: scan skill descriptions below.
+- If exactly one skill clearly applies: read its SKILL.md, then follow it.
+- If multiple could apply: choose the most specific one.
+- If none apply: do not read any SKILL.md.`);
+      for (const skill of skills) {
+        const content = skill.body.slice(0, 3000);
+        const emoji = skill.emoji ? `${skill.emoji} ` : '';
+        const compressedPath = skill.path.startsWith(homeDir)
+          ? '~' + skill.path.slice(homeDir.length) : skill.path;
+        parts.push(`### Skill: ${emoji}${skill.name}\nPath: ${compressedPath}/SKILL.md\n\n${content}`);
+      }
+    }
+  }
+
+  // ── 6. Memory Recall ──
+  parts.push(`## Memory Recall
+Before answering anything about prior work, decisions, dates, people, preferences, or todos: run memory_search on MEMORY.md + memory/*.md; then use memory_get to pull only the needed lines. If low confidence after search, say you checked.
+All sessions share the same memory/ directory. Write important context to memory/ files so other sessions can see it.`);
+
+  // ── 7. Workspace ──
   parts.push(`## Workspace
-Working directory: ${state.clawDir}`);
+Your working directory is: ${state.clawDir}
+Treat this directory as the single global workspace for file operations unless explicitly instructed otherwise.`);
 
-  // ── Section 3: Current Date & Time (timezone only, cache-stable) ──
+  // ── 8. Current Date & Time ──
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   parts.push(`## Current Date & Time
-Time zone: ${tz}`);
+Time zone: ${tz}
+If you need the current date/time, check the system clock via a tool call.`);
 
-  // ── Section 4: Runtime ──
-  const pkg = (() => { try { return require('../package.json'); } catch { return { version: 'unknown' }; } })();
-  parts.push(`## Runtime
-host=${os.hostname()} | os=${os.type()} ${os.release()} (${os.arch()}) | node=${process.version} | paw=${pkg.version}`);
-
-  // ── Section 5: Project Context (workspace files) ──
+  // ── 9. Project Context (workspace files) ──
+  // Core identity files
   for (const f of ['SOUL.md', 'USER.md', 'NOW.md', 'AGENTS.md', 'IDENTITY.md']) {
     const p = path.join(state.clawDir, f);
     if (fs.existsSync(p)) injectFile(f, fs.readFileSync(p, 'utf8'));
   }
 
-  // 2. Memory navigation + shared state
+  // Memory navigation + shared state
   const memDir = path.join(state.clawDir, 'memory');
   if (fs.existsSync(memDir)) {
     for (const f of ['INDEX.md', 'SHARED.md', 'SUBCONSCIOUS.md']) {
       const p = path.join(memDir, f);
       if (fs.existsSync(p)) injectFile(`memory/${f}`, fs.readFileSync(p, 'utf8'));
     }
-    // 3. Today + yesterday daily notes
+    // Today + yesterday daily notes
     const today = new Date().toISOString().slice(0, 10);
     const yd = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
     for (const d of [today, yd]) {
@@ -77,56 +137,31 @@ host=${os.hostname()} | os=${os.type()} ${os.release()} (${os.arch()}) | node=${
     }
   }
 
-  // 4. Long-term memory
+  // Long-term memory
   const memoryMd = path.join(state.clawDir, 'MEMORY.md');
   if (fs.existsSync(memoryMd)) injectFile('MEMORY.md', fs.readFileSync(memoryMd, 'utf8'));
 
-  // 5. Skills (frontmatter + path compression)
-  const skillsDir = path.join(state.clawDir, 'skills');
-  if (fs.existsSync(skillsDir)) {
-    const skills = loadAllSkills(skillsDir);
-    const homeDir = os.homedir();
+  // ── 10. Silent Replies ──
+  parts.push(`## Silent Replies
+When you have nothing to say, respond with ONLY: NO_REPLY
+⚠️ Rules:
+- It must be your ENTIRE message — nothing else
+- Never append it to an actual response
+- Never wrap it in markdown or code blocks`);
 
-    for (const skill of skills) {
-      const content = skill.body.slice(0, 3000);
-      const emoji = skill.emoji ? `${skill.emoji} ` : '';
-      const compressedPath = skill.path.startsWith(homeDir)
-        ? '~' + skill.path.slice(homeDir.length)
-        : skill.path;
-      // always:true skills first (already sorted by loadAllSkills)
-      parts.push(`## Skill: ${emoji}${skill.name}\nPath: ${compressedPath}/SKILL.md\n\n${content}`);
-    }
-  }
+  // ── 11. Heartbeats ──
+  parts.push(`## Heartbeats
+If you receive a heartbeat poll, and there is nothing that needs attention, reply exactly:
+HEARTBEAT_OK
+A leading/trailing "HEARTBEAT_OK" is treated as a heartbeat ack.
+If something needs attention, do NOT include "HEARTBEAT_OK"; reply with the alert text instead.`);
 
-  // 6. Memory sync instructions
-  parts.push('## Memory Sync\nAll sessions share the same memory/ directory. Write important context to memory/ files (e.g. memory/SHARED.md) so other sessions can see it. Use memory_search to recall prior context before answering questions about past work, decisions, or preferences.');
+  // ── 12. Runtime ──
+  const pkg = (() => { try { return require('../package.json'); } catch { return { version: 'unknown' }; } })();
+  parts.push(`## Runtime
+host=${os.hostname()} | os=${os.type()} ${os.release()} (${os.arch()}) | node=${process.version} | paw=${pkg.version}`);
 
-  // 7. Tools
-  const toolsPrompt = getToolsPrompt();
-  const builtInTools = `
-**Built-in tools (require main.js state):**
-- **notify**: Send a desktop notification
-- **ui_status_set**: Update the sidebar status line (4-20 Chinese chars). **IMPORTANT: Always call this tool** — at the start of work, before/after tool use, and when done. Your status text is shown to the user in the sidebar and persists across sessions. Write it like a **first-person inner monologue** — what you're thinking/feeling, not a robotic state label. Examples: '让我想想…', '这段代码有点意思', '找到线索了', '写完了，挺满意的', '在翻记忆找答案', '有个想法想试试'. Avoid generic labels like '在分析代码' or '已完成'. This is the primary way the user sees your personality.
-- **memory_search**: Search MEMORY.md + memory/*.md by keywords. Use BEFORE answering questions about prior work, decisions, dates, people, preferences, or todos.
-- **memory_get**: Read a snippet from MEMORY.md or memory/*.md with optional line range. Use AFTER memory_search to pull only the needed lines.
-- **task_create**: Create a new task in the shared task list
-- **task_update**: Update task status/assignee
-- **task_list**: List all tasks in current session
-- **send_message**: Send a message to another agent
-- **create_agent**: Create a lightweight agent in the current session (name + role description). Use when you need a specialist collaborator.
-- **remove_agent**: Remove a lightweight agent from the current session
-
-### Important Rules
-- When the user asks you to "write", "save", "create a file", or "存成markdown" — you MUST call file_write to actually create the file. Do not just output the content as text.
-- After writing a file, tell the user the file path.
-- Use ui_status_set to keep the status updated: at start, before tools, when done. Write like inner monologue, not labels.
-- You can chain multiple tools in sequence (up to 5 rounds). For example: search → search → file_write.
-- Before answering questions about past work, decisions, or preferences — call memory_search first.
-- Prefer Chinese for status text. Good: '让我翻翻记忆…' Bad: '正在搜索记忆'.`;
-
-  parts.push(toolsPrompt + '\n' + builtInTools);
-
-  // 8. Shared Task List (deduplicated)
+  // ── Shared Task List ──
   if (state.currentSessionId && state.clawDir) {
     try {
       const tasks = sessionStore.listTasks(state.clawDir, state.currentSessionId);
@@ -143,18 +178,18 @@ host=${os.hostname()} | os=${os.type()} ${os.release()} (${os.arch()}) | node=${
     } catch {}
   }
 
-  // 9. Session agents (lightweight) — let main agent know who's in the session
+  // ── Session agents ──
   if (state.currentSessionId && state.clawDir) {
     try {
       const sessionAgents = sessionStore.listSessionAgents(state.clawDir, state.currentSessionId);
       if (sessionAgents.length) {
         const lines = sessionAgents.map(a => `- **${a.name}**: ${a.role}`);
-        parts.push(`## Session Members\n${lines.join('\n')}\n\n**You are the orchestrator. You MUST delegate to specialists when their expertise is relevant.**\n\n### Delegation Rules\n- When a question touches ANY agent's domain → use send_message to delegate. Do NOT answer it yourself.\n- Example: user asks "分析搜索功能" and 设计 + 架构 are present → you MUST send_message to both, NOT write the analysis yourself.\n- send_message example: send_message({targetAgent: "设计", message: "请从UI交互和视觉设计角度，分析如何做好搜索功能的用户体验"})\n- Craft role-specific instructions for each agent — tell them exactly what angle to cover.\n- After delegating, briefly tell the user: "已分派给设计和架构，他们会分别从各自角度回复。"\n- Only answer yourself for: greetings, simple factual questions, task management, or topics no agent covers.\n- NEVER write content that belongs to a specialist's domain. If 设计 is present, all UX/UI content goes to 设计 via send_message.`);
+        parts.push(`## Session Members\n${lines.join('\n')}\n\n**You are the orchestrator. Delegate to specialists when their expertise is relevant.**\n- When a question touches an agent's domain → use send_message to delegate.\n- Only answer yourself for: greetings, simple factual questions, task management, or topics no agent covers.`);
       }
     } catch {}
   }
 
-  // Truncation warning (OpenClaw-aligned: inject once when files were truncated)
+  // ── Truncation warning ──
   if (truncatedFiles.length > 0) {
     parts.push(`## ⚠️ Bootstrap Truncation Warning\nThe following workspace files were truncated to fit context limits: ${truncatedFiles.join(', ')}. Use file_read to access full content when needed. Per-file limit: ${BOOTSTRAP_MAX_CHARS} chars, total limit: ${BOOTSTRAP_TOTAL_MAX_CHARS} chars.`);
   }
@@ -164,57 +199,36 @@ host=${os.hostname()} | os=${os.type()} ${os.release()} (${os.arch()}) | node=${
 
 /**
  * Build a compact system prompt for a lightweight agent.
- * ~200 tokens — identity, role, focus, members, task list. No SOUL/USER/memory/skills.
  */
 function buildAgentPrompt(agent, focus, sessionAgents) {
   const parts = [];
-
-  // 1. Agent identity + role
   parts.push(`## Your Identity\nYou are **${agent.name}**.\nRole: ${agent.role}`);
-
-  // 2. Focus instruction from router
-  if (focus) {
-    parts.push(`## Focus\n${focus}`);
-  }
-
-  // 3. Session members (so agent knows who else is around)
+  if (focus) parts.push(`## Focus\n${focus}`);
   if (sessionAgents?.length) {
     const others = sessionAgents.filter(a => a.name !== agent.name);
     if (others.length) {
-      const lines = others.map(a => `- **${a.name}**: ${a.role}`);
-      parts.push(`## Other Members\n${lines.join('\n')}`);
+      parts.push(`## Other Members\n${others.map(a => `- **${a.name}**: ${a.role}`).join('\n')}`);
     }
   }
-
-  // 4. Task list
   if (state.currentSessionId && state.clawDir) {
     try {
       const tasks = sessionStore.listTasks(state.clawDir, state.currentSessionId);
       if (tasks.length) {
         const icons = { pending: '⏳', 'in-progress': '🔄', done: '✅' };
-        const lines = tasks.map(t => {
-          let s = `[${t.id}] ${icons[t.status] || '?'} ${t.status}: ${t.title}`;
-          if (t.assignee) s += ` (${t.assignee})`;
-          return s;
-        });
-        parts.push(`## Tasks\n${lines.join('\n')}`);
+        parts.push(`## Tasks\n${tasks.map(t => `[${t.id}] ${icons[t.status] || '?'} ${t.status}: ${t.title}${t.assignee ? ` (${t.assignee})` : ''}`).join('\n')}`);
       }
     } catch {}
   }
-
-  // 5. Compact tool instructions
   parts.push(`## Tools
-- **ui_status_set**: Update your sidebar status (4-20 Chinese chars). Write like first-person inner monologue (e.g. '让我想想…', '这个问题有意思'). Always set at start and when done.
+- **ui_status_set**: Update sidebar status (4-20 Chinese chars). Write like inner monologue. Always set at start and when done.
 - **memory_search / memory_get**: Search and read shared memory files.
-- **task_create / task_update / task_list**: Manage shared tasks. Use task_create only for sub-tasks you discover during your work. Use task_update to claim (in-progress) and complete (done) tasks assigned to you.
+- **task_create / task_update / task_list**: Manage shared tasks.
 - **send_message**: Send a message to another agent.
 
 ### Rules
-- You are a specialist. Focus on your role and the focus instruction.
-- Task planning, breakdown, and assignment across agents is the coordinator's (Main) job. You focus on executing work in your specialty.
-- Use Chinese for status text. Use ui_status_set at start and when done.
+- You are a specialist. Focus on your role.
+- Use Chinese for status text.
 - Do not speak on behalf of other agents.`);
-
   return parts.join('\n\n---\n\n');
 }
 

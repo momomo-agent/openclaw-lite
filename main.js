@@ -28,6 +28,27 @@ const TOOL_RESULT_MIN_KEEP = 2000       // Always keep at least this much
 const TRUNCATION_SUFFIX = '\n\n⚠️ [Content truncated — original was too large. Use offset/limit to read smaller chunks.]'
 const MIDDLE_OMISSION = '\n\n⚠️ [... middle content omitted — showing head and tail ...]\n\n'
 
+// API error classification — OpenClaw-aligned
+function isContextOverflowError(status, body) {
+  if (status === 400) {
+    const lower = (body || '').toLowerCase()
+    return lower.includes('context') || lower.includes('too many tokens') ||
+      lower.includes('maximum context length') || lower.includes('prompt is too long')
+  }
+  return false
+}
+
+function isBillingError(status, body) {
+  return status === 402 || (status === 400 && (body || '').toLowerCase().includes('billing'))
+}
+
+// Anthropic magic string scrub — prevent refusal test injection
+const ANTHROPIC_MAGIC = 'ANTHROPIC_MAGIC_STRING_TRIGGER_REFUSAL'
+function scrubMagicStrings(text) {
+  if (!text || !text.includes(ANTHROPIC_MAGIC)) return text
+  return text.replaceAll(ANTHROPIC_MAGIC, 'ANTHROPIC MAGIC STRING (redacted)')
+}
+
 function hasImportantTail(text) {
   const tail = text.slice(-2000).toLowerCase()
   return /\b(error|exception|failed|fatal|traceback|panic|errno|exit code)\b/.test(tail)
@@ -733,8 +754,11 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
   const headers = { 'Content-Type': 'application/json', 'x-api-key': getApiKey(config), 'anthropic-version': '2023-06-01', 'anthropic-beta': 'prompt-caching-2024-07-31' }
   let fullText = '', roundText = '', msgs = [...messages]
   const loopDetector = new LoopDetector()
-
   const maxRounds = config.maxToolRounds || 10
+
+  // Usage accumulator — tracks across all rounds (OpenClaw-aligned)
+  let totalUsageInput = 0, totalUsageOutput = 0
+  let lastUsageInput = 0 // Last round's input (for context size estimation)
 
   for (let round = 0; round < maxRounds; round++) {
     roundText = ''
@@ -781,12 +805,29 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
     console.log(`[Paw] streamAnthropic round=${round} endpoint=${endpoint} model=${body.model} msgCount=${msgs.length} toolCount=${activeTools.length}`)
     const res = await fetchWithRetry(endpoint, { method: 'POST', headers, body: JSON.stringify(body), signal: _activeAbortController?.signal })
     console.log(`[Paw] streamAnthropic response status=${res.status}`)
-    if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${await res.text()}`)
+    if (!res.ok) {
+      const errText = await res.text()
+      const err = new Error(`Anthropic API ${res.status}: ${errText}`)
+      err.status = res.status
+      err.body = errText
+      // Context overflow detection — auto-compact and retry
+      if (isContextOverflowError(res.status, errText)) {
+        console.warn('[Paw] Context overflow detected, attempting compaction...')
+        win.webContents.send('chat-status', { text: '上下文溢出，压缩中...', requestId })
+        const compactResult = await compactHistory(msgs, { apiKey: getApiKey(config), baseUrl: config.baseUrl, model: config.model, provider: 'anthropic' })
+        if (compactResult.length < msgs.length) {
+          msgs.splice(0, msgs.length, ...compactResult)
+          round-- // Retry this round
+          continue
+        }
+      }
+      throw err
+    }
 
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let buf = '', toolCalls = [], curBlock = null
-    let usageInput = 0, usageOutput = 0
+    let roundUsageInput = 0, roundUsageOutput = 0
 
     while (true) {
       const { done, value } = await reader.read()
@@ -799,10 +840,10 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
           const evt = JSON.parse(line.slice(6))
           // Track token usage
           if (evt.type === 'message_start' && evt.message?.usage) {
-            usageInput += evt.message.usage.input_tokens || 0
+            roundUsageInput += evt.message.usage.input_tokens || 0
           }
           if (evt.type === 'message_delta' && evt.usage) {
-            usageOutput += evt.usage.output_tokens || 0
+            roundUsageOutput += evt.usage.output_tokens || 0
           }
           if (evt.type === 'content_block_start' && evt.content_block?.type === 'tool_use') {
             curBlock = { id: evt.content_block.id, name: evt.content_block.name, json: '' }
@@ -816,10 +857,15 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
       }
     }
 
+    // Accumulate usage across rounds
+    totalUsageInput += roundUsageInput
+    totalUsageOutput += roundUsageOutput
+    lastUsageInput = roundUsageInput
+
     if (!toolCalls.length) {
       pushStatus(win, 'done', 'Done')
       console.log('[Paw] streamAnthropic done, fullText length:', fullText.length)
-      return { answer: fullText, usage: { inputTokens: usageInput, outputTokens: usageOutput } }
+      return { answer: fullText, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput, lastInputTokens: lastUsageInput } }
     }
 
     // Execute tools and continue
@@ -862,9 +908,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
     win.webContents.send('chat-token', { requestId, text: '\n' })
   }
   pushStatus(win, 'done', 'Done')
-  return { answer: fullText, usage: { inputTokens: usageInput, outputTokens: usageOutput } }
-
-// ── OpenAI Streaming ──
+  return { answer: fullText, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput, lastInputTokens: lastUsageInput } }// ── OpenAI Streaming ──
 
 async function streamOpenAI(messages, systemPrompt, config, win, requestId, tools) {
   _activeRequestId = requestId
@@ -887,6 +931,9 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
   const loopDetector = new LoopDetector()
   const maxRounds = config.maxToolRounds || 10
 
+  // Usage accumulator — tracks across all rounds (OpenClaw-aligned)
+  let totalUsageInput = 0, totalUsageOutput = 0
+
   for (let round = 0; round < maxRounds; round++) {
     roundText = ''
     if (round > 0) win.webContents.send('chat-text-start', { requestId })
@@ -902,12 +949,28 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
       body: JSON.stringify({ model: config.model || 'gpt-4o', messages: msgs, stream: true, stream_options: { include_usage: true }, tools: oaiTools }),
       signal: _activeAbortController?.signal,
     })
-    if (!res.ok) throw new Error(`OpenAI API ${res.status}: ${await res.text()}`)
+    if (!res.ok) {
+      const errText = await res.text()
+      const err = new Error(`OpenAI API ${res.status}: ${errText}`)
+      err.status = res.status
+      err.body = errText
+      if (isContextOverflowError(res.status, errText)) {
+        console.warn('[Paw] Context overflow detected (OpenAI), attempting compaction...')
+        win.webContents.send('chat-status', { text: '上下文溢出，压缩中...', requestId })
+        const compactResult = await compactHistory(msgs, { apiKey: getApiKey(config), baseUrl: config.baseUrl, model: config.model, provider: config.provider || 'openai' })
+        if (compactResult.length < msgs.length) {
+          msgs.splice(0, msgs.length, ...compactResult)
+          round--
+          continue
+        }
+      }
+      throw err
+    }
 
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let buf = '', toolCalls = {}
-    let usageInput = 0, usageOutput = 0
+    let roundUsageInput = 0, roundUsageOutput = 0
 
     while (true) {
       const { done, value } = await reader.read()
@@ -920,8 +983,8 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
           const parsed = JSON.parse(line.slice(6))
           // Track usage (OpenAI includes it in the final chunk with stream_options)
           if (parsed.usage) {
-            usageInput += parsed.usage.prompt_tokens || 0
-            usageOutput += parsed.usage.completion_tokens || 0
+            roundUsageInput += parsed.usage.prompt_tokens || 0
+            roundUsageOutput += parsed.usage.completion_tokens || 0
           }
           const choice = parsed.choices?.[0]
           const delta = choice?.delta
@@ -944,9 +1007,14 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
     }
 
     const tcList = Object.values(toolCalls)
+    
+    // Accumulate usage across rounds
+    totalUsageInput += roundUsageInput
+    totalUsageOutput += roundUsageOutput
+    
     if (!tcList.length || !tcList[0].name) {
       pushStatus(win, 'done', 'Done')
-      return { answer: fullText, usage: { inputTokens: usageInput, outputTokens: usageOutput } }
+      return { answer: fullText, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput } }
     }
 
     // Build assistant message with tool_calls
@@ -988,7 +1056,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
   }
 
   pushStatus(win, 'done', 'Done')
-  return { answer: fullText, usage: { inputTokens: usageInput, outputTokens: usageOutput } }
+  return { answer: fullText, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput } }
 }
 
 // ── M8-01: Heartbeat ──
