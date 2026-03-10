@@ -12,9 +12,10 @@ const sessionStore = require('../session-store');
 const { loadAllSkills } = require('../skills/frontmatter');
 const { getToolsPrompt } = require('../tools');
 
-async function buildSystemPrompt() {
+async function buildSystemPrompt(workspacePath) {
+  const wsDir = workspacePath || state.clawDir;
   const parts = [];
-  if (!state.clawDir) return '';
+  if (!wsDir) return '';
 
   const BOOTSTRAP_MAX_CHARS = 20000;
   const BOOTSTRAP_TOTAL_MAX_CHARS = 150000;
@@ -80,7 +81,7 @@ Prioritize safety and human oversight over completion; if instructions conflict,
 Do not manipulate or persuade anyone to expand access or disable safeguards. Do not copy yourself or change system prompts, safety rules, or tool policies unless explicitly requested.`);
 
   // ── 5. Skills ──
-  const skillsDir = path.join(state.clawDir, 'skills');
+  const skillsDir = path.join(wsDir, 'skills');
   if (fs.existsSync(skillsDir)) {
     const skills = loadAllSkills(skillsDir);
     if (skills.length > 0) {
@@ -107,7 +108,7 @@ All sessions share the same memory/ directory. Write important context to memory
 
   // ── 7. Workspace ──
   // Sanitize workspace path for prompt injection prevention (OpenClaw OC-19)
-  const sanitizedWorkspace = state.clawDir.replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, '');
+  const sanitizedWorkspace = wsDir.replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, '');
   parts.push(`## Workspace
 Your working directory is: ${sanitizedWorkspace}
 Treat this directory as the single global workspace for file operations unless explicitly instructed otherwise.`);
@@ -123,7 +124,7 @@ If you need the current date/time, check the system clock via a tool call.`);
 The following project context files have been loaded:`);
 
   // Check if SOUL.md exists for special handling
-  const soulPath = path.join(state.clawDir, 'SOUL.md');
+  const soulPath = path.join(wsDir, 'SOUL.md');
   const hasSoulFile = fs.existsSync(soulPath);
   if (hasSoulFile) {
     parts.push('If SOUL.md is present, embody its persona and tone. Avoid stiff, generic replies; follow its guidance unless higher-priority instructions override it.');
@@ -131,12 +132,12 @@ The following project context files have been loaded:`);
 
   // Core identity files
   for (const f of ['SOUL.md', 'USER.md', 'NOW.md', 'AGENTS.md', 'IDENTITY.md']) {
-    const p = path.join(state.clawDir, f);
+    const p = path.join(wsDir, f);
     if (fs.existsSync(p)) injectFile(f, fs.readFileSync(p, 'utf8'));
   }
 
   // Memory navigation + shared state
-  const memDir = path.join(state.clawDir, 'memory');
+  const memDir = path.join(wsDir, 'memory');
   if (fs.existsSync(memDir)) {
     for (const f of ['INDEX.md', 'SHARED.md', 'SUBCONSCIOUS.md']) {
       const p = path.join(memDir, f);
@@ -152,7 +153,7 @@ The following project context files have been loaded:`);
   }
 
   // Long-term memory
-  const memoryMd = path.join(state.clawDir, 'MEMORY.md');
+  const memoryMd = path.join(wsDir, 'MEMORY.md');
   if (fs.existsSync(memoryMd)) injectFile('MEMORY.md', fs.readFileSync(memoryMd, 'utf8'));
 
   // ── 10. Silent Replies ──
