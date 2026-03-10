@@ -1081,6 +1081,148 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
 }
 
+// ── People Manager (M32/F168) ──
+
+async function openPeopleManager() {
+  document.getElementById('peopleOverlay')?.remove()
+
+  const workspaces = await window.api.listWorkspaces()
+
+  const overlay = document.createElement('div')
+  overlay.id = 'peopleOverlay'
+  overlay.className = 'overlay-backdrop'
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove() }
+
+  const panel = document.createElement('div')
+  panel.className = 'people-panel'
+
+  function render() {
+    panel.innerHTML = ''
+    // Header
+    const header = document.createElement('div')
+    header.className = 'people-header'
+    header.innerHTML = `<span>管理人员</span><button class="icon-btn" onclick="document.getElementById('peopleOverlay')?.remove()">✕</button>`
+    panel.appendChild(header)
+
+    // List
+    const listEl = document.createElement('div')
+    listEl.className = 'people-list'
+
+    for (const ws of workspaces) {
+      const item = document.createElement('div')
+      item.className = 'people-item'
+      const avatar = ws.identity.avatar || '🤖'
+      const isEmoji = avatar.length <= 4 && !avatar.includes('.')
+      const avatarHtml = isEmoji ? `<span class="people-avatar">${avatar}</span>` : `<img src="file://${esc(ws.path + '/' + avatar)}" class="people-avatar-img">`
+      item.innerHTML = `
+        ${avatarHtml}
+        <div class="people-info">
+          <div class="people-name">${esc(ws.identity.name)}</div>
+          <div class="people-desc">${esc(ws.identity.description || ws.path)}</div>
+        </div>
+        <div class="people-actions">
+          <button class="icon-btn people-edit-btn" title="编辑">✏️</button>
+          <button class="icon-btn people-remove-btn" title="移除">✕</button>
+        </div>
+      `
+      item.querySelector('.people-edit-btn').onclick = () => editWorkspace(ws, overlay, render)
+      item.querySelector('.people-remove-btn').onclick = async () => {
+        if (!confirm(`确定要移除 "${ws.identity.name}" 吗？（不会删除文件夹）`)) return
+        await window.api.removeWorkspace(ws.id)
+        const idx = workspaces.findIndex(w => w.id === ws.id)
+        if (idx !== -1) workspaces.splice(idx, 1)
+        render()
+        refreshSessionList()
+      }
+      listEl.appendChild(item)
+    }
+
+    if (workspaces.length === 0) {
+      const empty = document.createElement('div')
+      empty.className = 'people-empty'
+      empty.textContent = '还没有添加任何人员'
+      listEl.appendChild(empty)
+    }
+
+    panel.appendChild(listEl)
+
+    // Actions
+    const actions = document.createElement('div')
+    actions.className = 'people-footer'
+    actions.innerHTML = `
+      <button class="primary-btn people-add-btn" onclick="addExistingWorkspace()">📁 添加已有</button>
+      <button class="primary-btn people-create-btn" onclick="createNewWorkspace()">✨ 新建</button>
+    `
+    panel.appendChild(actions)
+  }
+
+  render()
+  overlay.appendChild(panel)
+  document.body.appendChild(overlay)
+}
+
+async function addExistingWorkspace() {
+  const result = await window.api.addWorkspace()
+  if (result?.ok) {
+    document.getElementById('peopleOverlay')?.remove()
+    await openPeopleManager()
+    await refreshSessionList()
+  } else if (result?.error === 'not_a_workspace') {
+    alert('该文件夹不是有效的 workspace（缺少 SOUL.md 或 identity.json）')
+  } else if (result?.error === 'already_registered') {
+    alert('该 workspace 已添加')
+  }
+}
+
+async function createNewWorkspace() {
+  const name = prompt('新人员名称:')
+  if (!name) return
+  const result = await window.api.createWorkspace({ name })
+  if (result?.ok) {
+    document.getElementById('peopleOverlay')?.remove()
+    await openPeopleManager()
+    await refreshSessionList()
+  } else if (result?.error === 'cancelled') {
+    // user cancelled folder selection
+  } else {
+    alert('创建失败: ' + (result?.error || 'unknown'))
+  }
+}
+
+function editWorkspace(ws, overlay, renderCallback) {
+  // Replace overlay content with edit form
+  const panel = overlay.querySelector('.people-panel')
+  panel.innerHTML = `
+    <div class="people-header">
+      <span>编辑 · ${esc(ws.identity.name)}</span>
+      <button class="icon-btn" id="editBackBtn">←</button>
+    </div>
+    <div class="people-edit-form">
+      <label>名称</label>
+      <input type="text" id="editWsName" value="${esc(ws.identity.name)}">
+      <label>头像 (emoji)</label>
+      <input type="text" id="editWsAvatar" value="${esc(ws.identity.avatar || '')}" placeholder="🤖">
+      <label>简介</label>
+      <textarea id="editWsDesc" rows="3" placeholder="这个人员的角色和能力...">${esc(ws.identity.description || '')}</textarea>
+      <button class="primary-btn" id="editWsSave">保存</button>
+    </div>
+  `
+  document.getElementById('editBackBtn').onclick = () => renderCallback()
+  document.getElementById('editWsSave').onclick = async () => {
+    const updated = await window.api.updateWorkspaceIdentity({
+      id: ws.id,
+      name: document.getElementById('editWsName').value,
+      avatar: document.getElementById('editWsAvatar').value || null,
+      description: document.getElementById('editWsDesc').value,
+    })
+    if (updated) {
+      ws.identity = updated.identity || { name: document.getElementById('editWsName').value, avatar: document.getElementById('editWsAvatar').value, description: document.getElementById('editWsDesc').value }
+    }
+    renderCallback()
+    refreshSessionList()
+  }
+}
+
 async function openSettings() {
   const config = await window.api.getConfig() || {}
   const prefs = await window.api.getPrefs()

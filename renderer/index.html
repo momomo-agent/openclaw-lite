@@ -36,13 +36,16 @@
   <div id="chatScreen" class="screen" style="display:none">
     <div class="sidebar" id="sidebar">
       <div class="sidebar-header">
-        <span>Sessions</span>
+        <span>对话</span>
         <button class="icon-btn" onclick="newSession()">+</button>
       </div>
       <div class="sidebar-search">
         <input type="text" id="sessionSearch" placeholder="搜索对话..." oninput="filterSessions(this.value)">
       </div>
       <div id="sessionList" class="session-list"></div>
+      <div class="sidebar-footer">
+        <button class="sidebar-footer-btn" onclick="openPeopleManager()">👤 管理</button>
+      </div>
     </div>
     <div class="chat-main">
       <div class="chat-header">

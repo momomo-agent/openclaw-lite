@@ -272,6 +272,56 @@ button:hover { background: #2a2a2a; }
 .new-chat-name { font-size: 14px; color: #e0e0e0; font-weight: 500; }
 .new-chat-desc { font-size: 11px; color: #666; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+/* Sidebar footer (M32) */
+.sidebar-footer {
+  padding: 8px 10px; border-top: 1px solid #1a1a1a;
+}
+.sidebar-footer-btn {
+  background: none; border: none; color: #555; font-size: 12px;
+  cursor: pointer; padding: 4px 8px; border-radius: 4px; width: 100%;
+  text-align: left; font-family: inherit;
+}
+.sidebar-footer-btn:hover { color: #888; background: #ffffff08; }
+
+/* People manager (M32/F168) */
+.people-panel {
+  background: #111; border: 1px solid #222; border-radius: 12px;
+  width: 380px; max-height: 80vh; overflow-y: auto;
+}
+.people-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 18px; border-bottom: 1px solid #1a1a1a; font-weight: 600;
+}
+.people-list { padding: 8px 12px; }
+.people-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 8px; border-radius: 8px; border-bottom: 1px solid #1a1a1a;
+}
+.people-item:last-child { border-bottom: none; }
+.people-avatar { font-size: 24px; line-height: 1; width: 36px; text-align: center; }
+.people-avatar-img { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; }
+.people-info { flex: 1; min-width: 0; }
+.people-name { font-size: 14px; color: #e0e0e0; font-weight: 500; }
+.people-desc { font-size: 11px; color: #666; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.people-actions { display: flex; gap: 4px; }
+.people-actions .icon-btn { font-size: 12px; opacity: 0.5; }
+.people-actions .icon-btn:hover { opacity: 1; }
+.people-empty { padding: 20px; text-align: center; color: #555; font-size: 13px; }
+.people-footer {
+  display: flex; gap: 8px; padding: 12px 18px; border-top: 1px solid #1a1a1a;
+}
+.people-footer .primary-btn { flex: 1; font-size: 12px; }
+.people-edit-form {
+  padding: 18px; display: flex; flex-direction: column; gap: 8px;
+}
+.people-edit-form label { font-size: 12px; color: #888; margin-top: 4px; }
+.people-edit-form input, .people-edit-form textarea {
+  background: #0a0a0a; border: 1px solid #222; border-radius: 6px;
+  color: #e0e0e0; padding: 8px 10px; font-size: 13px; font-family: inherit;
+  outline: none; resize: vertical;
+}
+.people-edit-form input:focus, .people-edit-form textarea:focus { border-color: #444; }
+
 /* Member list */
 .member-item {
   display: flex; justify-content: space-between; align-items: center;
