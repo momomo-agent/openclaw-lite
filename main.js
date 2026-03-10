@@ -9,7 +9,7 @@ const { loadAllSkills } = require('./skills/frontmatter')
 
 // ── Core modules (M18 refactor) ──
 const state = require('./core/state')
-const { configPath: coreConfigPath, loadConfig: coreLoadConfig } = require('./core/config')
+const { initGlobalConfig, globalConfigPath, loadGlobalConfig, saveGlobalConfig, migrateWorkspaceToGlobal } = require('./core/config')
 const { getApiKey, rotateApiKey, recordKeyUsage } = require('./core/api-keys')
 const { estimateTokens: coreEstimateTokens, estimateMessagesTokens: coreEstimateMessagesTokens } = require('./core/compaction')
 const { pruneToolResults } = require('./core/session-pruning')
@@ -149,7 +149,8 @@ function sendNotification(title, body) {
 }
 
 // ── Delegated to core/ modules ──
-function configPath() { syncState(); return coreConfigPath(); }
+function configPath() { return globalConfigPath(); }
+function loadConfig() { return loadGlobalConfig(); }
 
 async function extractLinkContext(text, maxLinks, timeoutMs) { return coreExtractLinkContext(text, maxLinks, timeoutMs); }
 
@@ -291,7 +292,8 @@ app.whenReady().then(() => {
   // Initialize acpx
   acpx.init()
 
-  // Initialize workspace registry
+  // Initialize global config + workspace registry
+  initGlobalConfig(app.getPath('userData'))
   workspaceRegistry.initRegistry(app.getPath('userData'))
 
   // Support --claw-dir CLI arg
@@ -305,16 +307,18 @@ app.whenReady().then(() => {
   if (clawDir) {
     startMemoryWatch()
     sessionStore.migrateFromJson(clawDir)
+    // Migrate workspace config → global config (provider/apiKey/model)
+    migrateWorkspaceToGlobal(clawDir)
     // Auto-register current workspace if not already
     const regResult = workspaceRegistry.addWorkspace(clawDir)
-    // Migrate orphan sessions: assign workspace_id to sessions that don't have one
+    // Migrate orphan sessions: add current workspace as participant
     const ws = workspaceRegistry.getWorkspaceByPath(clawDir)
     if (ws) {
       try {
         const allSessions = sessionStore.listSessions(clawDir)
         for (const s of allSessions) {
-          if (!s.workspaceId) {
-            sessionStore.setSessionWorkspace(clawDir, s.id, ws.id, ws.id)
+          if (!s.participants || s.participants.length === 0) {
+            sessionStore.addSessionParticipant(clawDir, s.id, ws.id)
           }
         }
       } catch (e) { console.log('[Paw] session migration error:', e.message) }
@@ -403,10 +407,6 @@ ipcMain.handle('create-claw-dir', async () => {
   // Scaffold from templates/
   const pawDir = path.join(dir, '.paw')
   fs.mkdirSync(pawDir, { recursive: true })
-  const configPath = path.join(pawDir, 'config.json')
-  if (!fs.existsSync(configPath)) {
-    fs.writeFileSync(configPath, JSON.stringify({ provider: 'anthropic', apiKey: '', model: '' }, null, 2))
-  }
   const templatesDir = path.join(__dirname, 'templates')
   if (fs.existsSync(templatesDir)) {
     for (const f of fs.readdirSync(templatesDir)) {
@@ -451,37 +451,24 @@ ipcMain.handle('select-claw-dir', async () => {
 
 // ── IPC: Read config.json from data dir ──
 
-ipcMain.handle('get-config', () => {
-  const p = configPath()
-  if (!p) return null
-  try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch { return {} }
-})
+ipcMain.handle('get-config', () => loadGlobalConfig())
 
 ipcMain.handle('get-token-usage', (_, sessionId) => {
   if (!clawDir) return { inputTokens: 0, outputTokens: 0 }
   return sessionStore.getTokenUsage(clawDir, sessionId)
 })
 
-ipcMain.handle('save-config', (_, config) => {
-  const p = configPath()
-  if (!p) return false
-  fs.mkdirSync(path.dirname(p), { recursive: true })
-  fs.writeFileSync(p, JSON.stringify(config, null, 2))
-  return true
-})
+ipcMain.handle('save-config', (_, config) => saveGlobalConfig(config))
 
 ipcMain.handle('get-coding-agent', () => {
-  const config = coreLoadConfig()
+  const config = loadConfig()
   return config.defaultCodingAgent || 'claude'
 })
 
 ipcMain.handle('set-coding-agent', (_, agent) => {
-  const p = configPath()
-  if (!p) return false
-  const config = coreLoadConfig()
+  const config = loadGlobalConfig()
   config.defaultCodingAgent = agent
-  fs.writeFileSync(p, JSON.stringify(config, null, 2))
-  return true
+  return saveGlobalConfig(config)
 })
 
 // ── IPC: Sessions ──
@@ -491,8 +478,8 @@ ipcMain.handle('session-load', (_, id) => loadSession(id))
 ipcMain.handle('session-save', (_, session) => { saveSession(session); return true })
 ipcMain.handle('session-create', (_, opts) => {
   if (typeof opts === 'string') return createSession(opts)  // backward compat
-  const { title, workspaceId, ownerId } = opts || {}
-  return createSession(title, { workspaceId, ownerId })
+  const { title, workspaceId, participants } = opts || {}
+  return createSession(title, { workspaceId, participants })
 })
 ipcMain.handle('session-delete', (_, id) => {
   try { deleteSessionById(id); return true } catch { return false }
@@ -863,9 +850,9 @@ async function buildSystemPrompt() {
 function getSessionWorkspacePath() {
   if (!currentSessionId || !clawDir) return null
   try {
-    const ws = sessionStore.getSessionWorkspace(clawDir, currentSessionId)
-    if (ws?.workspaceId) {
-      const wsObj = workspaceRegistry.getWorkspace(ws.workspaceId)
+    const participants = sessionStore.getSessionParticipants(clawDir, currentSessionId)
+    if (participants.length > 0) {
+      const wsObj = workspaceRegistry.getWorkspace(participants[0])
       if (wsObj?.path) return wsObj.path
     }
   } catch {}

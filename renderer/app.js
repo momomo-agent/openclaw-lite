@@ -256,9 +256,9 @@ async function refreshSessionList() {
   const searchInput = document.getElementById('sessionSearch')
   if (searchInput) searchInput.value = ''
 
-  // Group sessions by workspace
+  // Group sessions by workspace (first participant)
   const wsMap = new Map()  // workspaceId -> { identity, sessions }
-  const ungrouped = []     // sessions without workspaceId
+  const ungrouped = []     // sessions without participants
 
   for (const ws of workspaces) {
     wsMap.set(ws.id, { identity: ws.identity, path: ws.path, sessions: [] })
@@ -268,8 +268,9 @@ async function refreshSessionList() {
     if (!sessionStatus.has(s.id) && s.statusLevel) {
       sessionStatus.set(s.id, { level: s.statusLevel, text: s.statusText || '' })
     }
-    if (s.workspaceId && wsMap.has(s.workspaceId)) {
-      wsMap.get(s.workspaceId).sessions.push(s)
+    const primaryWs = (s.participants && s.participants.length > 0) ? s.participants[0] : null
+    if (primaryWs && wsMap.has(primaryWs)) {
+      wsMap.get(primaryWs).sessions.push(s)
     } else {
       ungrouped.push(s)
     }
@@ -342,12 +343,12 @@ async function switchSession(id) {
   currentSessionId = id
   history = []
   messages.innerHTML = ''
-  // Show workspace name in header if session belongs to one
+  // Show workspace name in header if session has participants
   let titleText = session.title
-  if (session.workspaceId) {
+  if (session.participants && session.participants.length > 0) {
     try {
       const workspaces = await window.api.listWorkspaces()
-      const ws = workspaces.find(w => w.id === session.workspaceId)
+      const ws = workspaces.find(w => w.id === session.participants[0])
       if (ws) titleText = `${ws.identity.name} · ${session.title}`
     } catch {}
   }
@@ -374,7 +375,7 @@ async function newSession() {
 }
 
 async function createNewSession(workspaceId) {
-  const opts = workspaceId ? { title: 'New Chat', workspaceId } : 'New Chat'
+  const opts = workspaceId ? { title: 'New Chat', participants: [workspaceId] } : 'New Chat'
   const session = await window.api.createSession(opts)
   currentSessionId = session.id
   history = []

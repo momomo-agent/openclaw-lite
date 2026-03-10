@@ -1,61 +1,91 @@
-// core/workspace-identity.js — Workspace identity (M32/F161)
-// identity.json schema: { name: string, avatar: string|null, description: string }
-// avatar = relative path to image file in workspace folder, or emoji string
+// core/workspace-identity.js — Workspace identity (M32 refactor)
+// Identity lives in .paw/config.json: { id, name, avatar, description }
+// id = UUID, generated once, travels with the folder
 
 const path = require('path')
 const fs = require('fs')
+const crypto = require('crypto')
 
-const IDENTITY_FILE = 'identity.json'
+const CONFIG_DIR = '.paw'
+const CONFIG_FILE = 'config.json'
+
+function _configPath(workspacePath) {
+  return path.join(workspacePath, CONFIG_DIR, CONFIG_FILE)
+}
+
+function _readWsConfig(workspacePath) {
+  try {
+    return JSON.parse(fs.readFileSync(_configPath(workspacePath), 'utf8'))
+  } catch {
+    return {}
+  }
+}
+
+function _writeWsConfig(workspacePath, config) {
+  const dir = path.join(workspacePath, CONFIG_DIR)
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(_configPath(workspacePath), JSON.stringify(config, null, 2) + '\n', 'utf8')
+}
 
 /**
- * Load workspace identity from identity.json
- * Fallback: folder name as name, default emoji as avatar
+ * Load workspace identity from .paw/config.json
+ * Fallback: folder name as name, auto-generate id
+ * Also migrates from legacy identity.json if present
  */
 function loadWorkspaceIdentity(workspacePath) {
-  const defaults = {
-    name: path.basename(workspacePath),
-    avatar: null,   // null = use default emoji in renderer
-    description: '',
+  let config = _readWsConfig(workspacePath)
+
+  // Migrate from legacy identity.json
+  const legacyPath = path.join(workspacePath, 'identity.json')
+  if (fs.existsSync(legacyPath)) {
+    try {
+      const legacy = JSON.parse(fs.readFileSync(legacyPath, 'utf8'))
+      if (!config.name) config.name = legacy.name
+      if (!config.avatar) config.avatar = legacy.avatar
+      if (!config.description) config.description = legacy.description
+      _writeWsConfig(workspacePath, config)
+      fs.unlinkSync(legacyPath)  // remove legacy file after migration
+    } catch {}
   }
 
-  const idPath = path.join(workspacePath, IDENTITY_FILE)
-  try {
-    const raw = JSON.parse(fs.readFileSync(idPath, 'utf8'))
-    return {
-      name: raw.name || defaults.name,
-      avatar: raw.avatar || defaults.avatar,
-      description: raw.description || defaults.description,
-    }
-  } catch {
-    return defaults
+  // Ensure id exists
+  if (!config.id) {
+    config.id = crypto.randomUUID()
+    _writeWsConfig(workspacePath, config)
+  }
+
+  return {
+    id: config.id,
+    name: config.name || path.basename(workspacePath),
+    avatar: config.avatar || null,
+    description: config.description || '',
   }
 }
 
 /**
- * Save workspace identity to identity.json
+ * Save workspace identity fields to .paw/config.json
+ * Merges with existing config (preserves other fields)
  */
 function saveWorkspaceIdentity(workspacePath, identity) {
-  const idPath = path.join(workspacePath, IDENTITY_FILE)
-  const data = {
-    name: identity.name || path.basename(workspacePath),
-    avatar: identity.avatar || null,
-    description: identity.description || '',
+  const config = _readWsConfig(workspacePath)
+  if (identity.name !== undefined) config.name = identity.name
+  if (identity.avatar !== undefined) config.avatar = identity.avatar
+  if (identity.description !== undefined) config.description = identity.description
+  if (!config.id) config.id = crypto.randomUUID()
+  _writeWsConfig(workspacePath, config)
+  return {
+    id: config.id,
+    name: config.name || path.basename(workspacePath),
+    avatar: config.avatar || null,
+    description: config.description || '',
   }
-  fs.writeFileSync(idPath, JSON.stringify(data, null, 2) + '\n', 'utf8')
-  return data
 }
 
 /**
- * Resolve avatar to absolute path (if it's a relative file path, not emoji)
+ * Get workspace ID (reads from .paw/config.json, auto-creates if missing)
  */
-function resolveAvatarPath(workspacePath, avatar) {
-  if (!avatar) return null
-  // Emoji check: if it's very short and not a file extension pattern, treat as emoji
-  if (avatar.length <= 4 && !avatar.includes('.')) return avatar
-  // Resolve relative path
-  const abs = path.resolve(workspacePath, avatar)
-  if (fs.existsSync(abs)) return abs
-  return avatar  // return as-is if file not found
+function getWorkspaceId(workspacePath) {
+  return loadWorkspaceIdentity(workspacePath).id
 }
 
-module.exports = { loadWorkspaceIdentity, saveWorkspaceIdentity, resolveAvatarPath, IDENTITY_FILE }
+module.exports = { loadWorkspaceIdentity, saveWorkspaceIdentity, getWorkspaceId }
