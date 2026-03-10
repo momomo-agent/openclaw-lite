@@ -25,7 +25,11 @@ function ensureSchema(db) {
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL DEFAULT 'New Chat',
       created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      status_level TEXT DEFAULT 'idle',
+      status_text TEXT DEFAULT '',
+      input_tokens INTEGER DEFAULT 0,
+      output_tokens INTEGER DEFAULT 0
     )
   `)
   db.exec(`
@@ -67,15 +71,7 @@ function ensureSchema(db) {
     )
   `)
   db.exec(`CREATE INDEX IF NOT EXISTS idx_session_agents_session ON session_agents(session_id)`)
-  // Add status columns (safe migration for existing DBs)
-  try { db.exec(`ALTER TABLE sessions ADD COLUMN status_level TEXT DEFAULT 'idle'`) } catch {}
-  try { db.exec(`ALTER TABLE sessions ADD COLUMN status_text TEXT DEFAULT ''`) } catch {}
-  try { db.exec(`ALTER TABLE sessions ADD COLUMN input_tokens INTEGER DEFAULT 0`) } catch {}
-  try { db.exec(`ALTER TABLE sessions ADD COLUMN output_tokens INTEGER DEFAULT 0`) } catch {}
-  // M32/F164: workspace association (legacy columns, kept for migration)
-  try { db.exec(`ALTER TABLE sessions ADD COLUMN workspace_id TEXT DEFAULT NULL`) } catch {}
-  try { db.exec(`ALTER TABLE sessions ADD COLUMN owner_id TEXT DEFAULT NULL`) } catch {}
-  // M32 refactor: session participants (many-to-many)
+  // M32: session participants (many-to-many)
   db.exec(`
     CREATE TABLE IF NOT EXISTS session_participants (
       session_id TEXT NOT NULL,
@@ -100,11 +96,6 @@ function listSessions(clawDir, { workspaceId } = {}) {
   const stmtP = d.prepare('SELECT workspace_id FROM session_participants WHERE session_id = ?')
   for (const s of sessions) {
     s.participants = stmtP.all(s.id).map(r => r.workspace_id)
-    // Backward compat: also check legacy workspace_id column
-    if (s.participants.length === 0) {
-      const legacy = d.prepare('SELECT workspace_id FROM sessions WHERE id = ? AND workspace_id IS NOT NULL').get(s.id)
-      if (legacy?.workspace_id) s.participants = [legacy.workspace_id]
-    }
   }
   if (workspaceId) {
     return sessions.filter(s => s.participants.includes(workspaceId))
@@ -126,11 +117,6 @@ function loadSession(clawDir, id) {
   // Attach participants
   session.participants = d.prepare('SELECT workspace_id FROM session_participants WHERE session_id = ?')
     .all(id).map(r => r.workspace_id)
-  // Legacy fallback
-  if (session.participants.length === 0) {
-    const legacy = d.prepare('SELECT workspace_id FROM sessions WHERE id = ? AND workspace_id IS NOT NULL').get(id)
-    if (legacy?.workspace_id) session.participants = [legacy.workspace_id]
-  }
   return session
 }
 
@@ -172,8 +158,6 @@ function createSession(clawDir, title, { workspaceId, participants } = {}) {
   if (d && wsIds.length) {
     const stmt = d.prepare('INSERT OR IGNORE INTO session_participants (session_id, workspace_id, added_at) VALUES (?, ?, ?)')
     for (const wsId of wsIds) stmt.run(id, wsId, now)
-    // Also set legacy column for backward compat
-    d.prepare('UPDATE sessions SET workspace_id = ? WHERE id = ?').run(wsIds[0], id)
   }
   session.participants = wsIds
   return session
@@ -372,9 +356,6 @@ function addSessionParticipant(clawDir, sessionId, workspaceId) {
   if (!d) return false
   d.prepare('INSERT OR IGNORE INTO session_participants (session_id, workspace_id, added_at) VALUES (?, ?, ?)')
     .run(sessionId, workspaceId, Date.now())
-  // Also update legacy column (first participant)
-  d.prepare('UPDATE sessions SET workspace_id = COALESCE(workspace_id, ?) WHERE id = ?')
-    .run(workspaceId, sessionId)
   return true
 }
 
@@ -389,21 +370,8 @@ function removeSessionParticipant(clawDir, sessionId, workspaceId) {
 function getSessionParticipants(clawDir, sessionId) {
   const d = getDb(clawDir)
   if (!d) return []
-  const rows = d.prepare('SELECT workspace_id FROM session_participants WHERE session_id = ?').all(sessionId)
-  if (rows.length) return rows.map(r => r.workspace_id)
-  // Legacy fallback
-  const legacy = d.prepare('SELECT workspace_id FROM sessions WHERE id = ? AND workspace_id IS NOT NULL').get(sessionId)
-  return legacy?.workspace_id ? [legacy.workspace_id] : []
+  return d.prepare('SELECT workspace_id FROM session_participants WHERE session_id = ?')
+    .all(sessionId).map(r => r.workspace_id)
 }
 
-// Legacy compat wrappers
-function setSessionWorkspace(clawDir, sessionId, workspaceId) {
-  return addSessionParticipant(clawDir, sessionId, workspaceId)
-}
-
-function getSessionWorkspace(clawDir, sessionId) {
-  const participants = getSessionParticipants(clawDir, sessionId)
-  return participants.length ? { workspaceId: participants[0] } : null
-}
-
-module.exports = { getDb, listSessions, loadSession, saveSession, deleteSession, createSession, migrateFromJson, closeDb, createTask, updateTask, listTasks, updateSessionStatus, getSessionStatus, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, addSessionParticipant, removeSessionParticipant, getSessionParticipants, setSessionWorkspace, getSessionWorkspace }
+module.exports = { getDb, listSessions, loadSession, saveSession, deleteSession, createSession, migrateFromJson, closeDb, createTask, updateTask, listTasks, updateSessionStatus, getSessionStatus, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, addSessionParticipant, removeSessionParticipant, getSessionParticipants }

@@ -9,7 +9,7 @@ const { loadAllSkills } = require('./skills/frontmatter')
 
 // ── Core modules (M18 refactor) ──
 const state = require('./core/state')
-const { initGlobalConfig, globalConfigPath, loadGlobalConfig, saveGlobalConfig, migrateWorkspaceToGlobal } = require('./core/config')
+const { globalConfigPath, loadGlobalConfig, saveGlobalConfig } = require('./core/config')
 const { getApiKey, rotateApiKey, recordKeyUsage } = require('./core/api-keys')
 const { estimateTokens: coreEstimateTokens, estimateMessagesTokens: coreEstimateMessagesTokens } = require('./core/compaction')
 const { pruneToolResults } = require('./core/session-pruning')
@@ -292,8 +292,7 @@ app.whenReady().then(() => {
   // Initialize acpx
   acpx.init()
 
-  // Initialize global config + workspace registry
-  initGlobalConfig(app.getPath('userData'))
+  // Initialize workspace registry
   workspaceRegistry.initRegistry(app.getPath('userData'))
 
   // Support --claw-dir CLI arg
@@ -306,23 +305,8 @@ app.whenReady().then(() => {
   }
   if (clawDir) {
     startMemoryWatch()
-    sessionStore.migrateFromJson(clawDir)
-    // Migrate workspace config → global config (provider/apiKey/model)
-    migrateWorkspaceToGlobal(clawDir)
     // Auto-register current workspace if not already
-    const regResult = workspaceRegistry.addWorkspace(clawDir)
-    // Migrate orphan sessions: add current workspace as participant
-    const ws = workspaceRegistry.getWorkspaceByPath(clawDir)
-    if (ws) {
-      try {
-        const allSessions = sessionStore.listSessions(clawDir)
-        for (const s of allSessions) {
-          if (!s.participants || s.participants.length === 0) {
-            sessionStore.addSessionParticipant(clawDir, s.id, ws.id)
-          }
-        }
-      } catch (e) { console.log('[Paw] session migration error:', e.message) }
-    }
+    workspaceRegistry.addWorkspace(clawDir)
   }
 
   // App menu with New Window
@@ -414,7 +398,7 @@ ipcMain.handle('create-claw-dir', async () => {
       if (!fs.existsSync(dest)) fs.copyFileSync(path.join(templatesDir, f), dest)
     }
   }
-  for (const d of ['skills', 'memory', 'sessions', 'agents']) {
+  for (const d of ['skills', 'memory', 'agents']) {
     const p = path.join(dir, d)
     if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true })
   }
@@ -422,7 +406,7 @@ ipcMain.handle('create-claw-dir', async () => {
   clawDir = dir
   syncState()
   savePrefs({ clawDir })
-  sessionStore.migrateFromJson(clawDir)
+
   startMemoryWatch()
   buildMemoryIndex()
   return dir
@@ -442,7 +426,7 @@ ipcMain.handle('select-claw-dir', async () => {
       if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true })
     }
     startMemoryWatch()
-    sessionStore.migrateFromJson(clawDir)
+  
     buildMemoryIndex()
     return clawDir
   }
