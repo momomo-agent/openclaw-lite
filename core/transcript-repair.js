@@ -71,9 +71,11 @@ function repairToolUseResultPairing(messages) {
  * it would cause consecutive user turns. Remove it.
  */
 function removeOrphanedTrailingUser(messages) {
-  if (!messages || messages.length === 0) return messages;
+  if (!messages || messages.length <= 1) return messages;
   const last = messages[messages.length - 1];
-  if (last.role === 'user') {
+  // Only remove if there's an assistant message in history (not just user→user)
+  const hasAssistant = messages.some(m => m.role === 'assistant');
+  if (last.role === 'user' && hasAssistant) {
     return messages.slice(0, -1);
   }
   return messages;

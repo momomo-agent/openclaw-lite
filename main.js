@@ -785,7 +785,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
   msgs = sanitizeTranscript(msgs, {
     historyLimit: cfg.historyLimit,
     provider: 'anthropic',
-    removeTrailingUser: true,
+    removeTrailingUser: false,
   })
   const loopDetector = new LoopDetector()
   const maxRounds = config.maxToolRounds || 10
@@ -988,7 +988,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
   const sanitizedHistory = sanitizeTranscript([...messages], {
     historyLimit: config?.historyLimit,
     provider: (config?.provider || 'openai'),
-    removeTrailingUser: true,
+    removeTrailingUser: false,
   })
   msgs.push(...sanitizedHistory)
 

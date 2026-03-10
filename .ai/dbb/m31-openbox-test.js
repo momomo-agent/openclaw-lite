@@ -56,7 +56,7 @@ test('repairToolUseResultPairing removes orphaned tool_result', () => {
   assert.strictEqual(result.length, 2); // orphan removed
 });
 
-test('removeOrphanedTrailingUser removes last user msg', () => {
+test('removeOrphanedTrailingUser removes last user msg when history has assistant', () => {
   const msgs = [
     { role: 'user', content: 'hi' },
     { role: 'assistant', content: 'hello' },
@@ -64,6 +64,12 @@ test('removeOrphanedTrailingUser removes last user msg', () => {
   ];
   const result = removeOrphanedTrailingUser(msgs);
   assert.strictEqual(result.length, 2);
+});
+
+test('removeOrphanedTrailingUser preserves single user msg', () => {
+  const msgs = [{ role: 'user', content: 'hi' }];
+  const result = removeOrphanedTrailingUser(msgs);
+  assert.strictEqual(result.length, 1);
 });
 
 test('limitHistoryTurns keeps only N user turns', () => {
@@ -130,16 +136,16 @@ test('sanitizeTranscript full pipeline', () => {
     { role: 'assistant', content: 'a2' },
     { role: 'user', content: 'q3' },
     { role: 'assistant', content: 'a3' },
-    { role: 'user', content: 'orphan' },
+    { role: 'user', content: 'current prompt' },
   ];
   const result = sanitizeTranscript(msgs, {
     historyLimit: 2,
     provider: 'anthropic',
-    removeTrailingUser: true,
+    removeTrailingUser: false,
   });
   const users = result.filter(m => m.role === 'user');
-  assert.ok(users.length <= 2);
-  assert.strictEqual(result[result.length - 1].role, 'assistant');
+  assert.ok(users.length <= 3); // 2 history + 1 current
+  assert.strictEqual(result[result.length - 1].content, 'current prompt');
 });
 
 // ── TC02: Context Guard ──
