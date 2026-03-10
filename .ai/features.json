@@ -916,5 +916,26 @@
     "description": "截断 warning Bootstrap 列表格式",
     "passes": true,
     "milestone": "M29"
+  },
+  {
+    "id": "F157",
+    "category": "core",
+    "description": "Agent timeout (模型调用+工具执行超时保护 600s)",
+    "passes": true,
+    "milestone": "M30"
+  },
+  {
+    "id": "F158",
+    "category": "core",
+    "description": "Prompt literal 注入防护 (路径转义)",
+    "passes": true,
+    "milestone": "M30"
+  },
+  {
+    "id": "F159",
+    "category": "core",
+    "description": "Usage cacheRead/cacheWrite 追踪",
+    "passes": true,
+    "milestone": "M30"
   }
 ]

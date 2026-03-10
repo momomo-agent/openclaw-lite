@@ -750,6 +750,13 @@ async function buildSystemPrompt() { syncState(); return coreBuildSystemPrompt()
 async function streamAnthropic(messages, systemPrompt, config, win, requestId, tools) {
   _activeRequestId = requestId
   _activeAbortController = new AbortController()
+  // Agent timeout — prevent infinite waits (OpenClaw default: 600s)
+  const timeoutMs = (config.timeoutSeconds || 600) * 1000
+  const timeoutId = setTimeout(() => {
+    console.warn(`[Paw] Agent timeout after ${config.timeoutSeconds || 600}s`)
+    _activeAbortController?.abort(new Error('Agent timeout'))
+    win?.webContents?.send('chat-status', { text: '超时', requestId })
+  }, timeoutMs)
   const activeTools = tools || TOOLS
   const base = (config.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '')
   const endpoint = base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`
@@ -768,7 +775,8 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
 
   // Usage accumulator — tracks across all rounds (OpenClaw-aligned)
   let totalUsageInput = 0, totalUsageOutput = 0
-  let lastUsageInput = 0 // Last round's input (for context size estimation)
+  let totalCacheRead = 0, totalCacheWrite = 0
+  let lastUsageInput = 0, lastCacheRead = 0, lastCacheWrite = 0
 
   for (let round = 0; round < maxRounds; round++) {
     roundText = ''
@@ -856,9 +864,14 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
         if (!line.startsWith('data: ')) continue
         try {
           const evt = JSON.parse(line.slice(6))
-          // Track token usage
+          // Track token usage (including cache stats)
           if (evt.type === 'message_start' && evt.message?.usage) {
             roundUsageInput += evt.message.usage.input_tokens || 0
+            // Anthropic cache fields
+            if (evt.message.usage.cache_read_input_tokens) totalCacheRead += evt.message.usage.cache_read_input_tokens
+            if (evt.message.usage.cache_creation_input_tokens) totalCacheWrite += evt.message.usage.cache_creation_input_tokens
+            lastCacheRead = evt.message.usage.cache_read_input_tokens || 0
+            lastCacheWrite = evt.message.usage.cache_creation_input_tokens || 0
           }
           if (evt.type === 'message_delta' && evt.usage) {
             roundUsageOutput += evt.usage.output_tokens || 0
@@ -883,7 +896,8 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
     if (!toolCalls.length) {
       pushStatus(win, 'done', 'Done')
       console.log('[Paw] streamAnthropic done, fullText length:', fullText.length)
-      return { answer: fullText, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput, lastInputTokens: lastUsageInput } }
+      clearTimeout(timeoutId)
+      return { answer: fullText, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput, cacheRead: totalCacheRead, cacheWrite: totalCacheWrite, lastInputTokens: lastUsageInput, lastCacheRead, lastCacheWrite } }
     }
 
     // Execute tools and continue
@@ -926,11 +940,20 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
     win.webContents.send('chat-token', { requestId, text: '\n' })
   }
   pushStatus(win, 'done', 'Done')
-  return { answer: fullText, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput, lastInputTokens: lastUsageInput } }// ── OpenAI Streaming ──
+  clearTimeout(timeoutId)
+  return { answer: fullText, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput, cacheRead: totalCacheRead, cacheWrite: totalCacheWrite, lastInputTokens: lastUsageInput, lastCacheRead, lastCacheWrite } }
+// ── OpenAI Streaming ──
 
 async function streamOpenAI(messages, systemPrompt, config, win, requestId, tools) {
   _activeRequestId = requestId
   _activeAbortController = new AbortController()
+  // Agent timeout
+  const timeoutMs = (config.timeoutSeconds || 600) * 1000
+  const timeoutId = setTimeout(() => {
+    console.warn(`[Paw] Agent timeout after ${config.timeoutSeconds || 600}s`)
+    _activeAbortController?.abort(new Error('Agent timeout'))
+    win?.webContents?.send('chat-status', { text: '超时', requestId })
+  }, timeoutMs)
   const activeTools = tools || TOOLS
   const base = (config.baseUrl || 'https://api.openai.com').replace(/\/+$/, '')
   const endpoint = base.endsWith('/v1') ? `${base}/chat/completions` : `${base}/v1/chat/completions`
@@ -1039,6 +1062,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
     
     if (!tcList.length || !tcList[0].name) {
       pushStatus(win, 'done', 'Done')
+      clearTimeout(timeoutId)
       return { answer: fullText, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput } }
     }
 
@@ -1081,6 +1105,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
   }
 
   pushStatus(win, 'done', 'Done')
+  clearTimeout(timeoutId)
   return { answer: fullText, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput } }
 }
 

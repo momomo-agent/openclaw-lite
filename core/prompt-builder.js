@@ -104,8 +104,10 @@ Before answering anything about prior work, decisions, dates, people, preference
 All sessions share the same memory/ directory. Write important context to memory/ files so other sessions can see it.`);
 
   // ── 7. Workspace ──
+  // Sanitize workspace path for prompt injection prevention (OpenClaw OC-19)
+  const sanitizedWorkspace = state.clawDir.replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, '');
   parts.push(`## Workspace
-Your working directory is: ${state.clawDir}
+Your working directory is: ${sanitizedWorkspace}
 Treat this directory as the single global workspace for file operations unless explicitly instructed otherwise.`);
 
   // ── 8. Current Date & Time ──
