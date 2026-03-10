@@ -18,6 +18,19 @@ const { FailoverManager } = require('./core/failover')
 const { fetchWithRetry } = require('./core/api-retry')
 const { enforceContextBudget } = require('./core/context-guard')
 const { sanitizeTranscript } = require('./core/transcript-repair')
+
+// ── Helper functions (must be defined early) ──
+let _activeRequestId = null
+let _activeAbortController = null
+
+function pushStatus(win, state, detail) {
+  win?.webContents?.send('agent-status', { state, detail })
+  if (tray) tray.setToolTip(`Paw - ${detail || state}`)
+}
+
+function sendNotification(title, body) {
+  if (Notification.isSupported()) new Notification({ title, body }).show()
+}
 const { resolveContextWindow } = require('./core/model-context')
 const { SessionExpiry } = require('./core/session-expiry')
 
@@ -1191,8 +1204,6 @@ function updateTrayMenu() {
 }
 
 // requestId is optional - when provided, renderer routes to per-card status
-let _activeRequestId = null
-let _activeAbortController = null
 
 ipcMain.handle('chat-cancel', () => {
   if (_activeAbortController) {
