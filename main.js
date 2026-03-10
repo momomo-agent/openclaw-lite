@@ -120,6 +120,7 @@ function syncState() {
   state.tray = tray
 }
 let memoryWatcher = null
+let _sessionExpiry = null
 
 // ── Delegated to core/ modules ──
 function configPath() { syncState(); return coreConfigPath(); }
@@ -1196,7 +1197,6 @@ function updateTrayMenu() {
 // requestId is optional - when provided, renderer routes to per-card status
 let _activeRequestId = null
 let _activeAbortController = null
-let _sessionExpiry = null  // Initialized when config loads
 
 ipcMain.handle('chat-cancel', () => {
   if (_activeAbortController) {
