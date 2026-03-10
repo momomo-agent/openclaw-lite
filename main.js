@@ -12,6 +12,8 @@ const state = require('./core/state')
 const { configPath: coreConfigPath, loadConfig: coreLoadConfig } = require('./core/config')
 const { getApiKey, rotateApiKey, recordKeyUsage } = require('./core/api-keys')
 const { estimateTokens: coreEstimateTokens, estimateMessagesTokens: coreEstimateMessagesTokens } = require('./core/compaction')
+const { pruneToolResults } = require('./core/session-pruning')
+const { LoopDetector } = require('./core/loop-detection')
 const { extractLinkContext: coreExtractLinkContext } = require('./core/link-extract')
 const { listAgents: coreListAgents, loadAgent: coreLoadAgent, saveAgent: coreSaveAgent, createAgent: coreCreateAgent, agentsDir: coreAgentsDir } = require('./core/agents')
 const { pushStatus: corePushStatus, sendNotification: coreSendNotification, pushWatsonStatus: corePushWatsonStatus } = require('./core/notify')
@@ -568,13 +570,16 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
   userContent.push({ type: 'text', text: textWithContext || '(attached files)' })
   messages.push({ role: 'user', content: userContent })
 
+  // Session pruning — trim old tool results before token counting (in-memory only)
+  const prunedMessages = pruneToolResults(messages)
+
   // Context compaction - auto-compress if history too long
-  const totalTokens = estimateMessagesTokens(messages)
-  let finalMessages = messages
-  if (totalTokens > COMPACT_THRESHOLD && messages.length > COMPACT_KEEP_RECENT * 2 + 2) {
+  const totalTokens = estimateMessagesTokens(prunedMessages)
+  let finalMessages = prunedMessages
+  if (totalTokens > COMPACT_THRESHOLD && prunedMessages.length > COMPACT_KEEP_RECENT * 2 + 2) {
     console.log(`[compaction] ${totalTokens} tokens exceeds threshold ${COMPACT_THRESHOLD}, compacting...`)
     mainWindow?.webContents.send('chat-status', { text: '压缩历史对话...', requestId })
-    finalMessages = await compactHistory(messages, { apiKey, baseUrl, model, provider })
+    finalMessages = await compactHistory(prunedMessages, { apiKey, baseUrl, model, provider })
   }
 
   try {
@@ -619,6 +624,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
   const endpoint = base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`
   const headers = { 'Content-Type': 'application/json', 'x-api-key': getApiKey(config), 'anthropic-version': '2023-06-01' }
   let fullText = '', roundText = '', msgs = [...messages]
+  const loopDetector = new LoopDetector()
 
   for (let round = 0; round < 5; round++) {
     roundText = ''
@@ -674,8 +680,18 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
 
     const SILENT_TOOLS = ['ui_status_set', 'notify']
     const toolResults = []
+    let loopBlocked = false
     for (const tc of toolCalls) {
       const input = JSON.parse(tc.json || '{}')
+      // Loop detection
+      const loopCheck = loopDetector.check(tc.name, input)
+      if (loopCheck.blocked) {
+        console.warn(`[Paw] ${loopCheck.reason}`)
+        toolResults.push({ type: 'tool_result', tool_use_id: tc.id, content: loopCheck.reason })
+        win.webContents.send('chat-tool-step', { requestId, name: tc.name, output: loopCheck.reason })
+        loopBlocked = true
+        continue
+      }
       const silent = SILENT_TOOLS.includes(tc.name)
       if (!silent) pushStatus(win, 'tool', `Running ${tc.name}...`)
       const result = await executeTool(tc.name, input, config)
@@ -715,6 +731,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
   msgs.push(...messages)
 
   let fullText = '', roundText = ''
+  const loopDetector = new LoopDetector()
 
   for (let round = 0; round < 5; round++) {
     roundText = ''
@@ -777,6 +794,14 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
     for (const tc of tcList) {
       let input = {}
       try { input = JSON.parse(tc.args || '{}') } catch {}
+      // Loop detection
+      const loopCheck = loopDetector.check(tc.name, input)
+      if (loopCheck.blocked) {
+        console.warn(`[Paw] ${loopCheck.reason}`)
+        win.webContents.send('chat-tool-step', { requestId, name: tc.name, output: loopCheck.reason })
+        msgs.push({ role: 'tool', tool_call_id: tc.id, content: loopCheck.reason })
+        continue
+      }
       const silent = SILENT_TOOLS_OAI.includes(tc.name)
       if (!silent) pushStatus(win, 'tool', `Running ${tc.name}...`)
       const result = await executeTool(tc.name, input, config)
