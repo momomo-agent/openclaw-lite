@@ -1,52 +1,55 @@
-// core/acpx.js — acpx CLI wrapper
-const { spawn } = require('child_process');
+// core/acpx.js — Claude Code CLI wrapper (direct claude CLI, not acpx)
+const { spawn, execSync } = require('child_process');
 const path = require('path');
 
+let claudeBin = null;
 let acpxBin = null;
 
-// Detect acpx binary on startup
+// Detect claude binary on startup
 function init() {
   const fs = require('fs');
-  // Try node_modules/.bin/acpx first (most reliable for CLI packages)
+
+  // 1. Try claude CLI directly (preferred — supports --print --permission-mode)
+  try {
+    const which = execSync('which claude 2>/dev/null', { encoding: 'utf8' }).trim();
+    if (which && fs.existsSync(which)) {
+      claudeBin = which;
+      console.log('[acpx] claude CLI found at', claudeBin);
+      return;
+    }
+  } catch {}
+
+  // 2. Fallback: try acpx in node_modules
   const localBin = path.join(__dirname, '..', 'node_modules', '.bin', 'acpx');
   if (fs.existsSync(localBin)) {
     acpxBin = localBin;
-    console.log('[acpx] found at', acpxBin);
+    console.log('[acpx] acpx found at', acpxBin);
     return;
   }
-  // Fallback: try require.resolve
-  try {
-    const acpxPkg = require.resolve('acpx/package.json');
-    acpxBin = path.join(path.dirname(acpxPkg), 'node_modules', '.bin', 'acpx');
-    if (!fs.existsSync(acpxBin)) acpxBin = null;
-  } catch (e) {}
-  if (!acpxBin) {
-    console.warn('[acpx] not found in node_modules, acpx features disabled');
-  }
+
+  console.warn('[acpx] neither claude CLI nor acpx found, coding agent disabled');
 }
 
 function isAvailable() {
-  return acpxBin !== null;
+  return claudeBin !== null || acpxBin !== null;
 }
 
-// Execute acpx command with JSONL output parsing
-function runAcpx(args, options = {}) {
-  if (!isAvailable()) {
-    throw new Error('acpx not available');
-  }
-
+// Execute command with output streaming
+function runCommand(bin, args, options = {}) {
   const { cwd = process.cwd(), timeout = 300000, onOutput } = options;
-  const isJsonFormat = args.includes('--format') && args[args.indexOf('--format') + 1] === 'json';
+
+  console.log(`[acpx] spawning: ${bin} ${args.join(' ')}`);
 
   return new Promise((resolve, reject) => {
     let stdout = '';
     let stderr = '';
-    let lineBuffer = '';
 
-    const proc = spawn(acpxBin, args, {
+    const proc = spawn(bin, args, {
       cwd,
       env: { ...process.env, TERM: 'dumb' }
     });
+
+    console.log(`[acpx] spawned pid=${proc.pid}`);
 
     const timer = timeout ? setTimeout(() => {
       if (proc && !proc.killed) {
@@ -60,25 +63,7 @@ function runAcpx(args, options = {}) {
     proc.stdout.on('data', (data) => {
       const chunk = data.toString();
       stdout += chunk;
-
-      if (onOutput && isJsonFormat) {
-        lineBuffer += chunk;
-        const lines = lineBuffer.split('\n');
-        lineBuffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const obj = JSON.parse(line);
-            const text = obj.text || obj.result || '';
-            if (text) onOutput(text);
-          } catch (e) {
-            onOutput(line + '\n');
-          }
-        }
-      } else if (onOutput) {
-        onOutput(chunk);
-      }
+      if (onOutput) onOutput(chunk);
     });
 
     proc.stderr.on('data', (data) => {
@@ -87,12 +72,10 @@ function runAcpx(args, options = {}) {
 
     proc.on('close', (code) => {
       if (timer) clearTimeout(timer);
-
       if (code !== 0) {
-        reject(new Error(`acpx exited with code ${code}: ${stderr || stdout}`));
+        reject(new Error(`exited with code ${code}: ${(stderr || stdout).slice(0, 500)}`));
         return;
       }
-
       resolve({ stdout, stderr });
     });
 
@@ -103,71 +86,53 @@ function runAcpx(args, options = {}) {
   });
 }
 
-// Parse JSONL output
-function parseJsonl(text) {
-  const lines = text.trim().split('\n').filter(l => l.trim());
-  const lastLine = lines[lines.length - 1];
-  try {
-    return JSON.parse(lastLine);
-  } catch (e) {
-    throw new Error(`Failed to parse acpx JSON output: ${e.message}`);
-  }
-}
-
 // One-shot execution
 async function exec(agent, prompt, options = {}) {
-  const args = [agent, 'exec', prompt, '--format', 'json'];
-  if (options.approveAll) args.push('--approve-all');
+  if (claudeBin) {
+    // Direct claude CLI: --print for non-interactive, --permission-mode bypassPermissions for auto-approve
+    const args = ['--print', '--permission-mode', 'bypassPermissions', prompt];
+    const { stdout } = await runCommand(claudeBin, args, options);
+    return { text: stdout, cost: undefined, isError: false };
+  }
+
+  // Fallback: acpx
+  const args = [agent, 'exec', prompt];
   if (options.session) args.push('--session', options.session);
-
-  const { stdout } = await runAcpx(args, options);
-  const result = parseJsonl(stdout);
-
-  return {
-    text: result.result || stdout,
-    cost: result.total_cost_usd,
-    isError: !!result.is_error
-  };
+  const { stdout } = await runCommand(acpxBin, args, options);
+  return { text: stdout, cost: undefined, isError: false };
 }
 
 // Persistent session execution
 async function prompt(agent, promptText, options = {}) {
-  const args = [agent, 'prompt', promptText, '--format', 'json'];
-  if (options.approveAll) args.push('--approve-all');
+  if (claudeBin) {
+    // claude CLI with --print and session resume
+    const args = ['--print', '--permission-mode', 'bypassPermissions'];
+    if (options.session) args.push('--resume', options.session);
+    args.push(promptText);
+    const { stdout } = await runCommand(claudeBin, args, options);
+    return { text: stdout, cost: undefined, isError: false, sessionName: options.session };
+  }
+
+  // Fallback: acpx
+  const args = [agent, 'prompt', promptText];
   if (options.session) args.push('--session', options.session);
-
-  const { stdout } = await runAcpx(args, options);
-  const result = parseJsonl(stdout);
-
-  return {
-    text: result.result || stdout,
-    cost: result.total_cost_usd,
-    isError: !!result.is_error,
-    sessionName: result.session_id || options.session
-  };
+  const { stdout } = await runCommand(acpxBin, args, options);
+  return { text: stdout, cost: undefined, isError: false, sessionName: options.session };
 }
 
 // Cancel current task
 async function cancel(agent, options = {}) {
-  const args = [agent, 'cancel'];
-  if (options.session) args.push('--session', options.session);
-  await runAcpx(args, options);
+  // No-op for direct claude CLI (process gets killed)
 }
 
 // Get status
 async function status(agent, options = {}) {
-  const args = [agent, 'status', '--format', 'json'];
-  if (options.session) args.push('--session', options.session);
-
-  const { stdout } = await runAcpx(args, options);
-  return parseJsonl(stdout);
+  return { status: 'unknown' };
 }
 
 // Set mode
 async function setMode(agent, mode, options = {}) {
-  const args = [agent, 'set-mode', mode];
-  if (options.session) args.push('--session', options.session);
-  await runAcpx(args, options);
+  // No-op for direct claude CLI
 }
 
 module.exports = {

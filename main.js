@@ -238,7 +238,26 @@ async function openNewWindow() {
 
 // ── IPC: Directory selection ──
 
-ipcMain.handle('get-prefs', () => ({ clawDir }))
+ipcMain.handle('get-prefs', () => {
+  // Validate clawDir still exists on disk
+  if (clawDir && !fs.existsSync(clawDir)) {
+    console.log(`[Paw] clawDir gone: ${clawDir}, resetting`)
+    stopHeartbeat()
+    clawDir = null
+    syncState()
+    savePrefs({})
+  }
+  return { clawDir }
+})
+
+ipcMain.handle('reset-claw-dir', () => {
+  stopHeartbeat()
+  stopMemoryWatch()
+  clawDir = null
+  syncState()
+  savePrefs({})
+  return true
+})
 
 ipcMain.handle('create-claw-dir', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {

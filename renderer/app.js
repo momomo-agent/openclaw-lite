@@ -163,6 +163,11 @@ async function init() {
   if (prefs.clawDir) enterChat()
 }
 
+function showSetupScreen() {
+  document.getElementById('setupScreen').style.display = ''
+  document.getElementById('chatScreen').style.display = 'none'
+}
+
 async function createNew() {
   const dir = await window.api.createClawDir()
   if (dir) enterChat()

@@ -461,5 +461,75 @@
     "description": "M22 集成验证",
     "passes": false,
     "milestone": "M22"
+  },
+  {
+    "id": "F092",
+    "category": "core",
+    "description": "冷启动修复 — 没有文件夹时回到冷启动页面",
+    "passes": false,
+    "milestone": "M23"
+  },
+  {
+    "id": "F093",
+    "category": "core",
+    "description": "Session Pruning — 发 LLM 前裁剪旧 tool results（内存级）",
+    "passes": false,
+    "milestone": "M23"
+  },
+  {
+    "id": "F094",
+    "category": "core",
+    "description": "Compaction 升级 — 模型 context window 动态触发 + memory flush + /compact",
+    "passes": false,
+    "milestone": "M23"
+  },
+  {
+    "id": "F095",
+    "category": "core",
+    "description": "Loop Detection — 重复工具调用检测 + 可配置阈值",
+    "passes": false,
+    "milestone": "M23"
+  },
+  {
+    "id": "F096",
+    "category": "core",
+    "description": "edit 工具 — 精确文本替换（oldText→newText）",
+    "passes": false,
+    "milestone": "M23"
+  },
+  {
+    "id": "F097",
+    "category": "core",
+    "description": "Exec 安全分层 — allowlist + PATH 注入拒绝",
+    "passes": false,
+    "milestone": "M23"
+  },
+  {
+    "id": "F098",
+    "category": "core",
+    "description": "Session 生命周期 — daily reset / idle reset 可配置",
+    "passes": false,
+    "milestone": "M23"
+  },
+  {
+    "id": "F099",
+    "category": "core",
+    "description": "Heartbeat requestId 隔离",
+    "passes": false,
+    "milestone": "M23"
+  },
+  {
+    "id": "F100",
+    "category": "ux",
+    "description": "Scrollbar 美化 + 防水平溢出",
+    "passes": false,
+    "milestone": "M23"
+  },
+  {
+    "id": "F101",
+    "category": "ux",
+    "description": "未读消息计数（menubar badge）",
+    "passes": false,
+    "milestone": "M23"
   }
 ]
