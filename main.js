@@ -14,6 +14,15 @@ const { getApiKey, rotateApiKey, recordKeyUsage } = require('./core/api-keys')
 const { estimateTokens: coreEstimateTokens, estimateMessagesTokens: coreEstimateMessagesTokens } = require('./core/compaction')
 const { pruneToolResults } = require('./core/session-pruning')
 const { LoopDetector } = require('./core/loop-detection')
+
+// Tool result truncation — cap before storing in session history
+const TOOL_RESULT_MAX_CHARS = 50000
+
+function truncateToolResult(result) {
+  const s = String(result)
+  if (s.length <= TOOL_RESULT_MAX_CHARS) return s
+  return s.slice(0, TOOL_RESULT_MAX_CHARS) + `\n...[truncated, was ${s.length} chars]`
+}
 const { extractLinkContext: coreExtractLinkContext } = require('./core/link-extract')
 const { listAgents: coreListAgents, loadAgent: coreLoadAgent, saveAgent: coreSaveAgent, createAgent: coreCreateAgent, agentsDir: coreAgentsDir } = require('./core/agents')
 const { pushStatus: corePushStatus, sendNotification: coreSendNotification, pushWatsonStatus: corePushWatsonStatus } = require('./core/notify')
@@ -326,6 +335,11 @@ ipcMain.handle('get-config', () => {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch { return {} }
 })
 
+ipcMain.handle('get-token-usage', (_, sessionId) => {
+  if (!clawDir) return { inputTokens: 0, outputTokens: 0 }
+  return sessionStore.getTokenUsage(clawDir, sessionId)
+})
+
 ipcMain.handle('save-config', (_, config) => {
   const p = configPath()
   if (!p) return false
@@ -585,11 +599,17 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
 
   try {
     console.log(`[Paw] chat handler: provider=${provider} model=${model} msgs=${finalMessages.length} tools=${chatTools.length} reqId=${requestId}`)
+    let result
     if (provider === 'anthropic') {
-      return await streamAnthropic(finalMessages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow, requestId, chatTools)
+      result = await streamAnthropic(finalMessages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow, requestId, chatTools)
     } else {
-      return await streamOpenAI(finalMessages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow, requestId, chatTools)
+      result = await streamOpenAI(finalMessages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow, requestId, chatTools)
     }
+    // Track token usage
+    if (result?.usage && sessionId) {
+      sessionStore.addTokenUsage(clawDir, sessionId, result.usage.inputTokens, result.usage.outputTokens)
+    }
+    return result
   } catch (err) {
     console.error('[Paw] chat error:', err.message, err.stack?.split('\n')[1])
     pushStatus(mainWindow, 'error', err.message.slice(0, 80))
@@ -623,7 +643,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
   const activeTools = tools || TOOLS
   const base = (config.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '')
   const endpoint = base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`
-  const headers = { 'Content-Type': 'application/json', 'x-api-key': getApiKey(config), 'anthropic-version': '2023-06-01' }
+  const headers = { 'Content-Type': 'application/json', 'x-api-key': getApiKey(config), 'anthropic-version': '2023-06-01', 'anthropic-beta': 'prompt-caching-2024-07-31' }
   let fullText = '', roundText = '', msgs = [...messages]
   const loopDetector = new LoopDetector()
 
@@ -631,10 +651,16 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
     roundText = ''
     if (round > 0) win.webContents.send('chat-text-start', { requestId })
     pushStatus(win, 'thinking', 'Thinking...')
+
+    // Build system with cache_control for prompt caching
+    const systemContent = systemPrompt ? [
+      { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }
+    ] : undefined
+
     const body = {
       model: config.model || 'claude-sonnet-4-20250514',
       max_tokens: 4096, stream: true,
-      system: systemPrompt || undefined,
+      system: systemContent,
       messages: msgs, tools: activeTools,
     }
     console.log(`[Paw] streamAnthropic round=${round} endpoint=${endpoint} model=${body.model} msgCount=${msgs.length} toolCount=${activeTools.length}`)
@@ -645,6 +671,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let buf = '', toolCalls = [], curBlock = null
+    let usageInput = 0, usageOutput = 0
 
     while (true) {
       const { done, value } = await reader.read()
@@ -655,6 +682,13 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
         if (!line.startsWith('data: ')) continue
         try {
           const evt = JSON.parse(line.slice(6))
+          // Track token usage
+          if (evt.type === 'message_start' && evt.message?.usage) {
+            usageInput += evt.message.usage.input_tokens || 0
+          }
+          if (evt.type === 'message_delta' && evt.usage) {
+            usageOutput += evt.usage.output_tokens || 0
+          }
           if (evt.type === 'content_block_start' && evt.content_block?.type === 'tool_use') {
             curBlock = { id: evt.content_block.id, name: evt.content_block.name, json: '' }
           } else if (evt.type === 'content_block_delta') {
@@ -670,7 +704,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
     if (!toolCalls.length) {
       pushStatus(win, 'done', 'Done')
       console.log('[Paw] streamAnthropic done, fullText length:', fullText.length)
-      return { answer: fullText }
+      return { answer: fullText, usage: { inputTokens: usageInput, outputTokens: usageOutput } }
     }
 
     // Execute tools and continue
@@ -699,7 +733,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
       if (!silent) {
         win.webContents.send('chat-tool-step', { requestId, name: tc.name, output: String(result).slice(0, 500) })
       }
-      toolResults.push({ type: 'tool_result', tool_use_id: tc.id, content: String(result) })
+      toolResults.push({ type: 'tool_result', tool_use_id: tc.id, content: truncateToolResult(result) })
     }
     // Send round info to renderer
     if (toolCalls.length > 0) {
@@ -710,8 +744,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
     win.webContents.send('chat-token', { requestId, text: '\n' })
   }
   pushStatus(win, 'done', 'Done')
-  return { answer: fullText }
-}
+  return { answer: fullText, usage: { inputTokens: usageInput, outputTokens: usageOutput } }
 
 // ── OpenAI Streaming ──
 
@@ -809,7 +842,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
       if (!silent) {
         win.webContents.send('chat-tool-step', { requestId, name: tc.name, output: String(result).slice(0, 500) })
       }
-      msgs.push({ role: 'tool', tool_call_id: tc.id, content: String(result) })
+      msgs.push({ role: 'tool', tool_call_id: tc.id, content: truncateToolResult(result) })
     }
     // Send round info to renderer
     if (tcList.length > 0) {
@@ -928,3 +961,4 @@ ipcMain.handle('cc-stop', () => {
   try { require('./tools/claude-code').ccStop() } catch {}
   return true
 })
+}

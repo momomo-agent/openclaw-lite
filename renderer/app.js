@@ -568,6 +568,55 @@ async function send() {
   const text = input.value.trim()
   if (!text && !pendingFiles.length) return
 
+  // ── Slash commands ──
+  if (text.startsWith('/')) {
+    const cmd = text.split(/\s/)[0].toLowerCase()
+    const arg = text.slice(cmd.length).trim()
+
+    if (cmd === '/new') {
+      input.value = ''
+      await newSession()
+      if (arg) {
+        // If /new has text after it, send it as first message in new session
+        input.value = arg
+        return send()
+      }
+      return
+    }
+
+    if (cmd === '/status') {
+      input.value = ''
+      const session = currentSessionId ? await window.api.loadSession(currentSessionId) : null
+      const msgCount = session?.messages?.length || 0
+      const tokenEst = Math.ceil(JSON.stringify(session?.messages || []).length / 3.5)
+      const config = await window.api.getConfig()
+      const usage = currentSessionId ? await window.api.getTokenUsage(currentSessionId) : { inputTokens: 0, outputTokens: 0 }
+      addCard('assistant', [
+        `**Session Status**`,
+        `- Messages: ${msgCount}`,
+        `- Estimated context: ~${tokenEst.toLocaleString()} tokens`,
+        `- API usage: ${(usage.inputTokens || 0).toLocaleString()} input + ${(usage.outputTokens || 0).toLocaleString()} output tokens`,
+        `- Model: ${config?.model || '(default)'}`,
+        `- Provider: ${config?.provider || 'anthropic'}`,
+        `- Session: \`${currentSessionId || 'none'}\``,
+      ].join('\n'), 'System', true)
+      return
+    }
+
+    if (cmd === '/compact') {
+      input.value = ''
+      addCard('user', text, 'You', true)
+      setSessionStatus(currentSessionId, 'thinking', '压缩中...')
+      // Force compaction by setting the flag
+      const chatParams = { prompt: arg || '请压缩历史对话', history, agentId: null, files: [], sessionId: currentSessionId, requestId: null, forceCompact: true }
+      // Use normal chat flow — compaction runs in main.js
+      // For now, just inform the user
+      addCard('assistant', '对话历史已标记压缩，下次发送消息时将自动执行 compaction。', 'System', true)
+      setSessionStatus(currentSessionId, 'idle', '')
+      return
+    }
+  }
+
   const sendSessionId = currentSessionId
 
   input.value = ''

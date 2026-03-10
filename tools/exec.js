@@ -64,16 +64,17 @@ function classifyCommand(command) {
   return 'normal'; // Needs approval
 }
 
+const { startBackground, listSessions: listBgSessions, getLog, poll: pollBg, kill: killBg } = require('../core/process-manager');
+
 registerTool({
   name: 'shell_exec',
-  description: 'Execute a shell command in the workspace directory. Safe read-only commands run without approval. Dangerous commands (sudo, rm -rf, etc.) are blocked. Other commands require user approval.',
+  description: 'Execute a shell command. Safe read-only commands run without approval. Set background=true for long-running commands. Use process tool to manage background sessions.',
   parameters: {
     type: 'object',
     properties: {
-      command: {
-        type: 'string',
-        description: 'The shell command to execute'
-      }
+      command: { type: 'string', description: 'The shell command to execute' },
+      background: { type: 'boolean', description: 'Run in background (for long-running commands)' },
+      timeout: { type: 'number', description: 'Timeout in seconds (default 30, max 1800)' }
     },
     required: ['command']
   },
@@ -100,12 +101,20 @@ registerTool({
       }
     }
 
+    // Background mode
+    if (args.background) {
+      const sessionId = startBackground(args.command, { cwd: clawDir, timeoutSec: Math.min(args.timeout || 1800, 1800) });
+      return `Background process started: ${sessionId}\nUse process tool to check status.`;
+    }
+
+    const timeout = Math.min((args.timeout || 30) * 1000, 1800000);
+
     return new Promise((resolve) => {
       const proc = spawn(args.command, {
         shell: true,
         cwd: clawDir,
-        timeout: 30000,
-        env: { ...process.env }, // Clean env copy, no user overrides
+        timeout,
+        env: { ...process.env },
       });
 
       let stdout = '';
@@ -182,5 +191,44 @@ registerTool({
         resolve(`Error: ${error.message}`);
       });
     });
+  }
+});
+
+// ── Process management tool ──
+
+registerTool({
+  name: 'process',
+  description: 'Manage background shell sessions: list, poll, log, kill.',
+  parameters: {
+    type: 'object',
+    properties: {
+      action: {
+        type: 'string',
+        enum: ['list', 'poll', 'log', 'kill'],
+        description: 'Action to perform'
+      },
+      sessionId: { type: 'string', description: 'Background session id (for poll/log/kill)' },
+      offset: { type: 'number', description: 'Log line offset (for log action)' },
+      limit: { type: 'number', description: 'Max log lines to return (for log action, default 50)' }
+    },
+    required: ['action']
+  },
+  handler: async (args) => {
+    switch (args.action) {
+      case 'list':
+        return JSON.stringify(listBgSessions(), null, 2);
+      case 'poll':
+        if (!args.sessionId) return 'Error: sessionId required';
+        return JSON.stringify(pollBg(args.sessionId), null, 2);
+      case 'log':
+        if (!args.sessionId) return 'Error: sessionId required';
+        const log = getLog(args.sessionId, { offset: args.offset, limit: args.limit });
+        return log ? JSON.stringify(log, null, 2) : 'Session not found';
+      case 'kill':
+        if (!args.sessionId) return 'Error: sessionId required';
+        return killBg(args.sessionId) ? 'Process killed' : 'Process not found or already done';
+      default:
+        return `Unknown action: ${args.action}`;
+    }
   }
 });

@@ -70,6 +70,8 @@ function ensureSchema(db) {
   // Add status columns (safe migration for existing DBs)
   try { db.exec(`ALTER TABLE sessions ADD COLUMN status_level TEXT DEFAULT 'idle'`) } catch {}
   try { db.exec(`ALTER TABLE sessions ADD COLUMN status_text TEXT DEFAULT ''`) } catch {}
+  try { db.exec(`ALTER TABLE sessions ADD COLUMN input_tokens INTEGER DEFAULT 0`) } catch {}
+  try { db.exec(`ALTER TABLE sessions ADD COLUMN output_tokens INTEGER DEFAULT 0`) } catch {}
 }
 
 function listSessions(clawDir) {
@@ -218,6 +220,20 @@ function updateSessionStatus(clawDir, sessionId, level, text) {
   d.prepare('UPDATE sessions SET status_level = ?, status_text = ? WHERE id = ?').run(level || 'idle', text || '', sessionId)
 }
 
+function addTokenUsage(clawDir, sessionId, inputTokens, outputTokens) {
+  const d = getDb(clawDir)
+  if (!d) return
+  d.prepare('UPDATE sessions SET input_tokens = input_tokens + ?, output_tokens = output_tokens + ? WHERE id = ?')
+    .run(inputTokens || 0, outputTokens || 0, sessionId)
+}
+
+function getTokenUsage(clawDir, sessionId) {
+  const d = getDb(clawDir)
+  if (!d) return { inputTokens: 0, outputTokens: 0 }
+  const row = d.prepare('SELECT input_tokens as inputTokens, output_tokens as outputTokens FROM sessions WHERE id = ?').get(sessionId)
+  return row || { inputTokens: 0, outputTokens: 0 }
+}
+
 function getSessionStatus(clawDir, sessionId) {
   const d = getDb(clawDir)
   if (!d) return null
@@ -303,4 +319,4 @@ function isSessionStale(clawDir, sessionId, resetConfig = {}) {
   return false;
 }
 
-module.exports = { getDb, listSessions, loadSession, saveSession, deleteSession, createSession, migrateFromJson, closeDb, createTask, updateTask, listTasks, updateSessionStatus, getSessionStatus, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale }
+module.exports = { getDb, listSessions, loadSession, saveSession, deleteSession, createSession, migrateFromJson, closeDb, createTask, updateTask, listTasks, updateSessionStatus, getSessionStatus, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage }

@@ -11,10 +11,32 @@ async function buildSystemPrompt() {
   const parts = [];
   if (!state.clawDir) return '';
 
+  const BOOTSTRAP_MAX_CHARS = 20000;       // Per-file max
+  const BOOTSTRAP_TOTAL_MAX_CHARS = 80000; // Total max across all injected files
+  let totalInjected = 0;
+
+  function injectFile(label, content) {
+    if (!content) return;
+    let text = content;
+    let truncated = false;
+    if (text.length > BOOTSTRAP_MAX_CHARS) {
+      text = text.slice(0, BOOTSTRAP_MAX_CHARS) + `\n\n...[truncated, was ${content.length} chars]`;
+      truncated = true;
+    }
+    if (totalInjected + text.length > BOOTSTRAP_TOTAL_MAX_CHARS) {
+      const remaining = BOOTSTRAP_TOTAL_MAX_CHARS - totalInjected;
+      if (remaining <= 200) return; // Skip if almost no room
+      text = text.slice(0, remaining) + `\n...[total bootstrap limit reached]`;
+      truncated = true;
+    }
+    totalInjected += text.length;
+    parts.push(`## ${label}\n${text}`);
+  }
+
   // 1. Core identity files
   for (const f of ['SOUL.md', 'USER.md', 'NOW.md', 'AGENTS.md', 'IDENTITY.md']) {
     const p = path.join(state.clawDir, f);
-    if (fs.existsSync(p)) parts.push(`## ${f}\n${fs.readFileSync(p, 'utf8')}`);
+    if (fs.existsSync(p)) injectFile(f, fs.readFileSync(p, 'utf8'));
   }
 
   // 2. Memory navigation + shared state
@@ -22,20 +44,20 @@ async function buildSystemPrompt() {
   if (fs.existsSync(memDir)) {
     for (const f of ['INDEX.md', 'SHARED.md', 'SUBCONSCIOUS.md']) {
       const p = path.join(memDir, f);
-      if (fs.existsSync(p)) parts.push(`## memory/${f}\n${fs.readFileSync(p, 'utf8').slice(0, 2000)}`);
+      if (fs.existsSync(p)) injectFile(`memory/${f}`, fs.readFileSync(p, 'utf8'));
     }
     // 3. Today + yesterday daily notes
     const today = new Date().toISOString().slice(0, 10);
     const yd = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
     for (const d of [today, yd]) {
       const p = path.join(memDir, `${d}.md`);
-      if (fs.existsSync(p)) parts.push(`## memory/${d}.md\n${fs.readFileSync(p, 'utf8').slice(0, 2000)}`);
+      if (fs.existsSync(p)) injectFile(`memory/${d}.md`, fs.readFileSync(p, 'utf8'));
     }
   }
 
   // 4. Long-term memory
   const memoryMd = path.join(state.clawDir, 'MEMORY.md');
-  if (fs.existsSync(memoryMd)) parts.push(`## MEMORY.md\n${fs.readFileSync(memoryMd, 'utf8')}`);
+  if (fs.existsSync(memoryMd)) injectFile('MEMORY.md', fs.readFileSync(memoryMd, 'utf8'));
 
   // 5. Skills (frontmatter + path compression)
   const skillsDir = path.join(state.clawDir, 'skills');
