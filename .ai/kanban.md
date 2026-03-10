@@ -2,22 +2,22 @@
 
 ## 当前：M32 — 多 Workspace IM 体验
 
-### P0 基础设施
+### P0 基础设施 ✅
 | Feature | 状态 | 说明 |
 |---------|------|------|
-| F160 Feature flag 关闭旧功能 | ⬜ 待开始 | 轻量 agent / task bar / auto-rotate 隐藏 |
-| F161 Workspace identity | ⬜ 待开始 | identity.json（name, avatar）存在 workspace 里 |
-| F162 Workspace 注册表 | ⬜ 待开始 | 多 workspace 路径管理，启动时预加载 |
-| F163 状态隔离 | ⬜ 待开始 | 单例 → Map<workspaceId, State> |
-| F164 Session-Workspace 关联 | ⬜ 待开始 | session 增加 workspaceId + ownerId |
+| F160 Feature flag 关闭旧功能 | ✅ 完成 | 轻量 agent / task bar / auto-rotate 隐藏 |
+| F161 Workspace identity | ✅ 完成 | identity.json（name, avatar）存在 workspace 里 |
+| F162 Workspace 注册表 | ✅ 完成 | 多 workspace 路径管理，启动时预加载 |
+| F163 状态隔离 | ✅ 完成 | buildSystemPrompt 支持 workspacePath 参数 |
+| F164 Session-Workspace 关联 | ✅ 完成 | session 增加 workspaceId + ownerId |
 
-### P1 IM 体验
+### P1 IM 体验 ✅
 | Feature | 状态 | 说明 |
 |---------|------|------|
-| F165 Sidebar 按 workspace 分组 | ⬜ 待开始 | 头像 + 名称 + 可折叠 |
-| F166 新建对话选择器 | ⬜ 待开始 | 选 Workspace 或 Coding Agent |
-| F167 切换 session 自动切换 context | ⬜ 待开始 | 无感加载对应 workspace prompt |
-| F168 人员管理页 | ⬜ 待开始 | 编辑名字/头像/简介，添加/移除 |
+| F165 Sidebar 按 workspace 分组 | ✅ 完成 | 头像 + 名称分组渲染 |
+| F166 新建对话选择器 | ✅ 完成 | 选 Workspace 创建关联 session |
+| F167 切换 session 自动切换 context | ✅ 完成 | 无感加载对应 workspace prompt |
+| F168 人员管理页 | ✅ 完成 | 编辑名字/头像/简介，添加/新建/移除 |
 
 ### P2 Coding Agent（MVP 后）
 | Feature | 状态 | 说明 |
