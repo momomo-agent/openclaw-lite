@@ -115,6 +115,16 @@ Time zone: ${tz}
 If you need the current date/time, check the system clock via a tool call.`);
 
   // ── 9. Project Context (workspace files) ──
+  parts.push(`# Project Context
+The following project context files have been loaded:`);
+
+  // Check if SOUL.md exists for special handling
+  const soulPath = path.join(state.clawDir, 'SOUL.md');
+  const hasSoulFile = fs.existsSync(soulPath);
+  if (hasSoulFile) {
+    parts.push('If SOUL.md is present, embody its persona and tone. Avoid stiff, generic replies; follow its guidance unless higher-priority instructions override it.');
+  }
+
   // Core identity files
   for (const f of ['SOUL.md', 'USER.md', 'NOW.md', 'AGENTS.md', 'IDENTITY.md']) {
     const p = path.join(state.clawDir, f);

@@ -860,5 +860,61 @@
     "description": "Session 自动过期 (daily reset + idle timeout)",
     "passes": false,
     "milestone": "M28"
+  },
+  {
+    "id": "F149",
+    "category": "core",
+    "description": "scrubMagicStrings 实际接入 (system prompt + user prompt)",
+    "passes": true,
+    "milestone": "M29"
+  },
+  {
+    "id": "F150",
+    "category": "core",
+    "description": "Anthropic turn validation (user/assistant 严格交替)",
+    "passes": true,
+    "milestone": "M29"
+  },
+  {
+    "id": "F151",
+    "category": "core",
+    "description": "tool_use/tool_result 配对修复",
+    "passes": true,
+    "milestone": "M29"
+  },
+  {
+    "id": "F152",
+    "category": "core",
+    "description": "历史轮数限制 (configurable historyLimit)",
+    "passes": true,
+    "milestone": "M29"
+  },
+  {
+    "id": "F153",
+    "category": "core",
+    "description": "孤儿 user 消息修复 (末尾连续 user turn)",
+    "passes": true,
+    "milestone": "M29"
+  },
+  {
+    "id": "F154",
+    "category": "core",
+    "description": "动态 context window 解析 (不硬编码 200000)",
+    "passes": true,
+    "milestone": "M29"
+  },
+  {
+    "id": "F155",
+    "category": "core",
+    "description": "SOUL.md 特殊处理 (embody persona prompt)",
+    "passes": true,
+    "milestone": "M29"
+  },
+  {
+    "id": "F156",
+    "category": "core",
+    "description": "截断 warning Bootstrap 列表格式",
+    "passes": true,
+    "milestone": "M29"
   }
 ]

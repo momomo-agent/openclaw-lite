@@ -17,6 +17,8 @@ const { LoopDetector } = require('./core/loop-detection')
 const { FailoverManager } = require('./core/failover')
 const { fetchWithRetry } = require('./core/api-retry')
 const { enforceContextBudget } = require('./core/context-guard')
+const { sanitizeTranscript } = require('./core/transcript-repair')
+const { resolveContextWindow } = require('./core/model-context')
 
 const failoverManager = new FailoverManager()
 let _lastAnthropicCallTime = 0
@@ -753,6 +755,14 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
   const endpoint = base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`
   const headers = { 'Content-Type': 'application/json', 'x-api-key': getApiKey(config), 'anthropic-version': '2023-06-01', 'anthropic-beta': 'prompt-caching-2024-07-31' }
   let fullText = '', roundText = '', msgs = [...messages]
+
+  // Transcript sanitization before streaming (OpenClaw-aligned)
+  const cfg = config || {}
+  msgs = sanitizeTranscript(msgs, {
+    historyLimit: cfg.historyLimit,
+    provider: 'anthropic',
+    removeTrailingUser: true,
+  })
   const loopDetector = new LoopDetector()
   const maxRounds = config.maxToolRounds || 10
 
@@ -766,8 +776,9 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
     pushStatus(win, 'thinking', 'Thinking...')
 
     // Build system with cache_control for prompt caching
-    const systemContent = systemPrompt ? [
-      { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }
+    const scrubbedSystemPrompt = scrubMagicStrings(systemPrompt)
+    const systemContent = scrubbedSystemPrompt ? [
+      { type: 'text', text: scrubbedSystemPrompt, cache_control: { type: 'ephemeral' } }
     ] : undefined
 
     // Mark last tool with cache_control for tool schema caching
@@ -776,7 +787,14 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
     )
 
     // Mark last user message with cache_control for conversation caching
-    const cachedMsgs = msgs.map((m, i) => {
+    // Scrub magic strings from user messages before sending
+    const scrubbedMsgs = msgs.map(m => {
+      if (m.role === 'user' && typeof m.content === 'string') {
+        return { ...m, content: scrubMagicStrings(m.content) }
+      }
+      return m
+    })
+    const cachedMsgs = scrubbedMsgs.map((m, i) => {
       if (i === msgs.length - 1 && m.role === 'user') {
         if (typeof m.content === 'string') {
           return { ...m, content: [{ type: 'text', text: m.content, cache_control: { type: 'ephemeral' } }] }
@@ -793,7 +811,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
     })
 
     // Context window guard — enforce budget before API call
-    const contextWindowTokens = 200000 // TODO: resolve from model
+    const contextWindowTokens = resolveContextWindow(config)
     enforceContextBudget(cachedMsgs, contextWindowTokens)
 
     const body = {
@@ -924,8 +942,15 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
   }))
 
   const msgs = []
-  if (systemPrompt) msgs.push({ role: 'system', content: systemPrompt })
-  msgs.push(...messages)
+  if (systemPrompt) msgs.push({ role: 'system', content: scrubMagicStrings(systemPrompt) })
+
+  // Sanitize transcript before adding to msgs (OpenClaw-aligned)
+  const sanitizedHistory = sanitizeTranscript([...messages], {
+    historyLimit: config?.historyLimit,
+    provider: (config?.provider || 'openai'),
+    removeTrailingUser: true,
+  })
+  msgs.push(...sanitizedHistory)
 
   let fullText = '', roundText = ''
   const loopDetector = new LoopDetector()
@@ -940,7 +965,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
     pushStatus(win, 'thinking', 'Thinking...')
 
     // Context window guard — enforce budget before API call
-    const contextWindowTokens = 200000 // TODO: resolve from model
+    const contextWindowTokens = resolveContextWindow(config)
     enforceContextBudget(msgs, contextWindowTokens)
 
     const res = await fetchWithRetry(endpoint, {
