@@ -603,6 +603,53 @@ async function send() {
       return
     }
 
+    if (cmd === '/export') {
+      input.value = ''
+      if (!currentSessionId) { addCard('assistant', '没有活跃 session', 'System', true); return }
+      const md = await window.api.exportSession(currentSessionId)
+      if (!md) { addCard('assistant', '导出失败', 'System', true); return }
+      const prompt = await window.api.buildSystemPrompt()
+      const full = `# Session Export\n\n## System Prompt\n\n${prompt}\n\n---\n\n## Conversation\n\n${md}`
+      // Write to file
+      const filename = `session-${currentSessionId}-${new Date().toISOString().slice(0,10)}.md`
+      await window.api.writeExport(filename, full)
+      addCard('assistant', `已导出到: \`${filename}\``, 'System', true)
+      return
+    }
+
+    if (cmd === '/model' || cmd === '/models') {
+      input.value = ''
+      const config = await window.api.getConfig()
+      const current = config?.model || '(default)'
+      const provider = config?.provider || 'anthropic'
+      const models = config?.models || []
+
+      if (!arg) {
+        // Show current + list
+        let text = `**当前模型:** ${current} (${provider})\n\n`
+        if (models.length) {
+          text += '**可选模型：**\n'
+          models.forEach((m, i) => { text += `${i + 1}. ${m}\n` })
+          text += '\n用法: `/model <名称>` 或 `/model <编号>`'
+        } else {
+          text += '在设置里配置 `models` 列表来启用快速切换'
+        }
+        addCard('assistant', text, 'System', true)
+        return
+      }
+
+      // Select by number or name
+      let newModel = arg
+      const num = parseInt(arg)
+      if (!isNaN(num) && num >= 1 && num <= models.length) {
+        newModel = models[num - 1]
+      }
+      config.model = newModel
+      await window.api.saveConfig(config)
+      addCard('assistant', `模型已切换到: **${newModel}**`, 'System', true)
+      return
+    }
+
     if (cmd === '/context') {
       input.value = ''
       const config = await window.api.getConfig()

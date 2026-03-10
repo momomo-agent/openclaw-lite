@@ -1,24 +1,39 @@
 // core/session-pruning.js — Trim old tool results before LLM call (in-memory only)
-// OpenClaw-aligned: keeps recent tool results intact, truncates old ones
+// OpenClaw-aligned: soft-trim (head+tail) + hard-clear dual-level strategy
 
-const PRUNE_KEEP_RECENT = 6;      // Keep last N messages' tool results intact
-const PRUNE_MAX_TOOL_CHARS = 200; // Truncated tool result max chars
+const PRUNE_KEEP_RECENT = 3;           // Keep last N assistant messages' tool results intact
+const SOFT_TRIM_THRESHOLD = 4000;      // Soft-trim results > this many chars
+const SOFT_TRIM_HEAD = 1500;           // Keep first N chars
+const SOFT_TRIM_TAIL = 1500;           // Keep last N chars
+const HARD_CLEAR_RATIO = 0.5;          // Hard-clear results in oldest 50% of messages
+const HARD_CLEAR_PLACEHOLDER = '[Old tool result content cleared]';
+const MIN_PRUNABLE_CHARS = 500;        // Don't bother pruning results smaller than this
 
 /**
  * Prune old tool results from messages before sending to LLM.
- * Does NOT mutate the original array — returns a new array.
- * Recent messages keep full tool results; old ones get truncated.
- *
- * @param {Array} messages - Conversation messages
- * @returns {Array} - Pruned messages (new array, originals untouched)
+ * Two-level strategy matching OpenClaw:
+ * 1. Hard-clear: oldest messages get tool results completely replaced
+ * 2. Soft-trim: middle messages get head+tail preserved
+ * 3. Recent messages: untouched
  */
 function pruneToolResults(messages) {
-  if (!messages || messages.length <= PRUNE_KEEP_RECENT) return messages;
+  if (!messages || messages.length <= PRUNE_KEEP_RECENT * 2) return messages;
 
-  const cutoff = messages.length - PRUNE_KEEP_RECENT;
+  // Count assistant messages to find cutoff points
+  let assistantCount = 0;
+  const assistantIndices = [];
+  messages.forEach((m, i) => {
+    if (m.role === 'assistant') { assistantCount++; assistantIndices.push(i); }
+  });
+
+  if (assistantCount <= PRUNE_KEEP_RECENT) return messages;
+
+  const hardClearCutoff = assistantIndices[Math.floor(assistantCount * HARD_CLEAR_RATIO)] || 0;
+  const softTrimCutoff = assistantIndices[assistantCount - PRUNE_KEEP_RECENT] || messages.length;
 
   return messages.map((msg, i) => {
-    if (i >= cutoff) return msg; // Keep recent messages intact
+    // Recent messages: keep intact
+    if (i >= softTrimCutoff) return msg;
 
     // Anthropic format: tool_result in user messages as array content
     if (msg.role === 'user' && Array.isArray(msg.content)) {
@@ -27,11 +42,20 @@ function pruneToolResults(messages) {
 
       const prunedContent = msg.content.map(c => {
         if (c.type !== 'tool_result') return c;
+        // Skip image blocks
+        if (Array.isArray(c.content) && c.content.some(b => b.type === 'image')) return c;
         const text = typeof c.content === 'string' ? c.content : JSON.stringify(c.content);
-        if (text.length <= PRUNE_MAX_TOOL_CHARS) return c;
+        if (text.length < MIN_PRUNABLE_CHARS) return c;
+
+        if (i < hardClearCutoff) {
+          // Hard-clear zone
+          return { ...c, content: HARD_CLEAR_PLACEHOLDER };
+        }
+        // Soft-trim zone
+        if (text.length <= SOFT_TRIM_THRESHOLD) return c;
         return {
           ...c,
-          content: text.slice(0, PRUNE_MAX_TOOL_CHARS) + `\n...[truncated, was ${text.length} chars]`
+          content: text.slice(0, SOFT_TRIM_HEAD) + `\n...[${text.length - SOFT_TRIM_HEAD - SOFT_TRIM_TAIL} chars omitted]...\n` + text.slice(-SOFT_TRIM_TAIL)
         };
       });
       return { ...msg, content: prunedContent };
@@ -39,30 +63,20 @@ function pruneToolResults(messages) {
 
     // OpenAI format: role=tool messages
     if (msg.role === 'tool' && typeof msg.content === 'string') {
-      if (msg.content.length <= PRUNE_MAX_TOOL_CHARS) return msg;
+      if (msg.content.length < MIN_PRUNABLE_CHARS) return msg;
+
+      if (i < hardClearCutoff) {
+        return { ...msg, content: HARD_CLEAR_PLACEHOLDER };
+      }
+      if (msg.content.length <= SOFT_TRIM_THRESHOLD) return msg;
       return {
         ...msg,
-        content: msg.content.slice(0, PRUNE_MAX_TOOL_CHARS) + `\n...[truncated, was ${msg.content.length} chars]`
+        content: msg.content.slice(0, SOFT_TRIM_HEAD) + `\n...[${msg.content.length - SOFT_TRIM_HEAD - SOFT_TRIM_TAIL} chars omitted]...\n` + msg.content.slice(-SOFT_TRIM_TAIL)
       };
-    }
-
-    // Also prune assistant tool_use input (large JSON inputs)
-    if (msg.role === 'assistant' && Array.isArray(msg.content)) {
-      const hasToolUse = msg.content.some(c => c.type === 'tool_use');
-      if (!hasToolUse) return msg;
-
-      const prunedContent = msg.content.map(c => {
-        if (c.type !== 'tool_use') return c;
-        const inputStr = JSON.stringify(c.input || {});
-        if (inputStr.length <= PRUNE_MAX_TOOL_CHARS * 2) return c;
-        // Keep tool name and id, truncate large inputs
-        return c; // Don't prune tool_use inputs — they're needed for pairing
-      });
-      return { ...msg, content: prunedContent };
     }
 
     return msg;
   });
 }
 
-module.exports = { pruneToolResults, PRUNE_KEEP_RECENT, PRUNE_MAX_TOOL_CHARS };
+module.exports = { pruneToolResults, PRUNE_KEEP_RECENT, SOFT_TRIM_THRESHOLD, HARD_CLEAR_PLACEHOLDER };

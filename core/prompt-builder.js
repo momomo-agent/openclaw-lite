@@ -12,8 +12,9 @@ async function buildSystemPrompt() {
   if (!state.clawDir) return '';
 
   const BOOTSTRAP_MAX_CHARS = 20000;       // Per-file max
-  const BOOTSTRAP_TOTAL_MAX_CHARS = 80000; // Total max across all injected files
+  const BOOTSTRAP_TOTAL_MAX_CHARS = 150000; // Total max across all injected files (OpenClaw default)
   let totalInjected = 0;
+  let truncatedFiles = [];
 
   function injectFile(label, content) {
     if (!content) return;
@@ -29,6 +30,7 @@ async function buildSystemPrompt() {
       text = text.slice(0, remaining) + `\n...[total bootstrap limit reached]`;
       truncated = true;
     }
+    if (truncated) truncatedFiles.push(label);
     totalInjected += text.length;
     parts.push(`## ${label}\n${text}`);
   }
@@ -130,6 +132,11 @@ async function buildSystemPrompt() {
         parts.push(`## Session Members\n${lines.join('\n')}\n\n**You are the orchestrator. You MUST delegate to specialists when their expertise is relevant.**\n\n### Delegation Rules\n- When a question touches ANY agent's domain → use send_message to delegate. Do NOT answer it yourself.\n- Example: user asks "分析搜索功能" and 设计 + 架构 are present → you MUST send_message to both, NOT write the analysis yourself.\n- send_message example: send_message({targetAgent: "设计", message: "请从UI交互和视觉设计角度，分析如何做好搜索功能的用户体验"})\n- Craft role-specific instructions for each agent — tell them exactly what angle to cover.\n- After delegating, briefly tell the user: "已分派给设计和架构，他们会分别从各自角度回复。"\n- Only answer yourself for: greetings, simple factual questions, task management, or topics no agent covers.\n- NEVER write content that belongs to a specialist's domain. If 设计 is present, all UX/UI content goes to 设计 via send_message.`);
       }
     } catch {}
+  }
+
+  // Truncation warning (OpenClaw-aligned: inject once when files were truncated)
+  if (truncatedFiles.length > 0) {
+    parts.push(`## ⚠️ Bootstrap Truncation Warning\nThe following workspace files were truncated to fit context limits: ${truncatedFiles.join(', ')}. Use file_read to access full content when needed. Per-file limit: ${BOOTSTRAP_MAX_CHARS} chars, total limit: ${BOOTSTRAP_TOTAL_MAX_CHARS} chars.`);
   }
 
   return parts.join('\n\n---\n\n');

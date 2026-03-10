@@ -89,15 +89,34 @@ registerTool({
 
     // Safe commands skip approval
     if (classification !== 'safe' && approvalCallback) {
-      const label = classification === 'dangerous' ? '⚠️ DANGEROUS' : '⚙️ Shell';
-      const approved = await approvalCallback({
-        type: 'shell_exec',
-        command: args.command,
-        classification,
-        label
-      });
-      if (!approved) {
-        return 'Command execution cancelled by user';
+      // Check persistent approvals first
+      const approvalFile = clawDir ? require('path').join(clawDir, '.paw', 'exec-approvals.json') : null;
+      let persistedApprovals = {};
+      try { if (approvalFile) persistedApprovals = JSON.parse(require('fs').readFileSync(approvalFile, 'utf8')); } catch {}
+
+      // Extract the base command (first word)
+      const baseCmd = args.command.trim().split(/\s+/)[0];
+      const isApproved = persistedApprovals[baseCmd] === 'always' || persistedApprovals[args.command] === 'always';
+
+      if (!isApproved) {
+        const label = classification === 'dangerous' ? '⚠️ DANGEROUS' : '⚙️ Shell';
+        const approved = await approvalCallback({
+          type: 'shell_exec',
+          command: args.command,
+          classification,
+          label,
+          allowRemember: true
+        });
+        if (!approved) {
+          return 'Command execution cancelled by user';
+        }
+        // If approved with "remember", persist it
+        if (approved === 'always' && approvalFile) {
+          persistedApprovals[baseCmd] = 'always';
+          const fs = require('fs');
+          fs.mkdirSync(require('path').dirname(approvalFile), { recursive: true });
+          fs.writeFileSync(approvalFile, JSON.stringify(persistedApprovals, null, 2));
+        }
       }
     }
 

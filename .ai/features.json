@@ -615,5 +615,75 @@
     "description": "Model failover",
     "passes": true,
     "milestone": "M25"
+  },
+  {
+    "id": "F114",
+    "category": "ux",
+    "description": "/model 命令 — 切换模型",
+    "passes": true,
+    "milestone": "M26"
+  },
+  {
+    "id": "F115",
+    "category": "core",
+    "description": "Bootstrap totalMaxChars 150k + 截断 warning",
+    "passes": true,
+    "milestone": "M26"
+  },
+  {
+    "id": "F116",
+    "category": "core",
+    "description": "Pruning soft-trim + hard-clear 双级",
+    "passes": true,
+    "milestone": "M26"
+  },
+  {
+    "id": "F117",
+    "category": "core",
+    "description": "Loop detection 三级 + knownPollNoProgress",
+    "passes": true,
+    "milestone": "M26"
+  },
+  {
+    "id": "F118",
+    "category": "core",
+    "description": "Prompt caching 多断点",
+    "passes": true,
+    "milestone": "M26"
+  },
+  {
+    "id": "F119",
+    "category": "ux",
+    "description": "/export 命令",
+    "passes": true,
+    "milestone": "M26"
+  },
+  {
+    "id": "F120",
+    "category": "ux",
+    "description": "/model 列表 + 编号选择",
+    "passes": true,
+    "milestone": "M26"
+  },
+  {
+    "id": "F121",
+    "category": "core",
+    "description": "Exec approval 持久化",
+    "passes": true,
+    "milestone": "M26"
+  },
+  {
+    "id": "F122",
+    "category": "core",
+    "description": "Failover cooldown 指数退避",
+    "passes": true,
+    "milestone": "M26"
+  },
+  {
+    "id": "F123",
+    "category": "core",
+    "description": "Compaction identifier 保留",
+    "passes": true,
+    "milestone": "M26"
   }
 ]

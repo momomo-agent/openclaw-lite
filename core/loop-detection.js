@@ -1,71 +1,119 @@
 // core/loop-detection.js — Detect repetitive tool call patterns
-// OpenClaw-aligned: genericRepeat + pingPong detection
+// OpenClaw-aligned: warning → critical → circuit-breaker + knownPollNoProgress
 
-const DEFAULT_THRESHOLD = 3;   // Same tool+params N times = loop
-const DEFAULT_HISTORY = 20;    // Track last N tool calls
+const DEFAULT_WARNING_THRESHOLD = 3;
+const DEFAULT_CRITICAL_THRESHOLD = 5;
+const DEFAULT_CIRCUIT_BREAKER_THRESHOLD = 8;
+const DEFAULT_HISTORY = 30;
+
+// Known polling tools that often get stuck
+const POLL_TOOLS = new Set(['process', 'shell_exec']);
 
 class LoopDetector {
   constructor(opts = {}) {
-    this.threshold = opts.threshold || DEFAULT_THRESHOLD;
+    this.warningThreshold = opts.warningThreshold || DEFAULT_WARNING_THRESHOLD;
+    this.criticalThreshold = opts.criticalThreshold || DEFAULT_CRITICAL_THRESHOLD;
+    this.circuitBreakerThreshold = opts.circuitBreakerThreshold || DEFAULT_CIRCUIT_BREAKER_THRESHOLD;
     this.historySize = opts.historySize || DEFAULT_HISTORY;
-    this.history = [];
+    this.history = [];        // { key, name, output? }
+    this.warnings = 0;
+    this.globalCallCount = 0;
   }
 
   /**
    * Record a tool call and check for loops.
    * @param {string} name - Tool name
    * @param {object} input - Tool input params
-   * @returns {{ blocked: boolean, reason?: string }}
+   * @param {string} [lastOutput] - Previous output for no-progress detection
+   * @returns {{ blocked: boolean, warning: boolean, reason?: string }}
    */
-  check(name, input) {
+  check(name, input, lastOutput) {
     const key = name + ':' + JSON.stringify(input);
-    this.history.push(key);
-    if (this.history.length > this.historySize) {
-      this.history.shift();
+    this.history.push({ key, name, output: lastOutput });
+    this.globalCallCount++;
+    if (this.history.length > this.historySize) this.history.shift();
+
+    // 1. Circuit breaker: global no-progress check
+    if (this.globalCallCount >= this.circuitBreakerThreshold) {
+      const uniqueKeys = new Set(this.history.map(h => h.key));
+      if (uniqueKeys.size <= 2) {
+        return {
+          blocked: true,
+          warning: false,
+          reason: `Circuit breaker: ${this.globalCallCount} tool calls with only ${uniqueKeys.size} unique patterns. Stopping to prevent runaway.`
+        };
+      }
     }
 
-    // Generic repeat: same tool+params called N times in a row
+    // 2. Generic repeat: same tool+params N times
     let streak = 0;
     for (let i = this.history.length - 1; i >= 0; i--) {
-      if (this.history[i] === key) streak++;
+      if (this.history[i].key === key) streak++;
       else break;
     }
-    if (streak >= this.threshold) {
+
+    if (streak >= this.criticalThreshold) {
       return {
         blocked: true,
-        reason: `Loop detected: ${name} called ${streak} times with same params. Stopping to prevent infinite loop.`
+        warning: false,
+        reason: `Loop detected (critical): ${name} called ${streak} times with same params. Stopping.`
       };
     }
 
-    // Ping-pong: A-B-A-B pattern (4+ alternating)
-    if (this.history.length >= 4) {
+    if (streak >= this.warningThreshold) {
+      this.warnings++;
+      return {
+        blocked: false,
+        warning: true,
+        reason: `Loop warning: ${name} called ${streak} times with same params. Consider a different approach.`
+      };
+    }
+
+    // 3. Known poll no-progress: polling tool with same output
+    if (POLL_TOOLS.has(name) && lastOutput) {
+      let sameOutputCount = 0;
+      for (let i = this.history.length - 1; i >= 0; i--) {
+        if (this.history[i].name === name && this.history[i].output === lastOutput) {
+          sameOutputCount++;
+        } else break;
+      }
+      if (sameOutputCount >= this.warningThreshold) {
+        return {
+          blocked: sameOutputCount >= this.criticalThreshold,
+          warning: sameOutputCount < this.criticalThreshold,
+          reason: `Poll no-progress: ${name} returned same output ${sameOutputCount} times. ${sameOutputCount >= this.criticalThreshold ? 'Stopping.' : 'Consider waiting or using a different approach.'}`
+        };
+      }
+    }
+
+    // 4. Ping-pong: A-B-A-B pattern
+    if (this.history.length >= 6) {
       const len = this.history.length;
-      const a = this.history[len - 1];
-      const b = this.history[len - 2];
-      if (a !== b &&
-          this.history[len - 3] === a &&
-          this.history[len - 4] === b) {
-        // Check if it's been going even longer
-        let pingPongLen = 4;
-        for (let i = len - 5; i >= 0; i--) {
+      const a = this.history[len - 1].key;
+      const b = this.history[len - 2].key;
+      if (a !== b) {
+        let pingPongLen = 2;
+        for (let i = len - 3; i >= 0; i--) {
           const expected = (len - 1 - i) % 2 === 0 ? a : b;
-          if (this.history[i] === expected) pingPongLen++;
+          if (this.history[i].key === expected) pingPongLen++;
           else break;
         }
-        if (pingPongLen >= 6) {
-          return {
-            blocked: true,
-            reason: `Ping-pong loop detected: ${name} alternating with another tool ${pingPongLen} times. Stopping.`
-          };
+        if (pingPongLen >= this.criticalThreshold * 2) {
+          return { blocked: true, warning: false, reason: `Ping-pong loop: alternating ${pingPongLen} times. Stopping.` };
+        }
+        if (pingPongLen >= this.warningThreshold * 2) {
+          return { blocked: false, warning: true, reason: `Ping-pong warning: alternating ${pingPongLen} times.` };
         }
       }
     }
 
-    return { blocked: false };
+    return { blocked: false, warning: false };
   }
 
   reset() {
     this.history = [];
+    this.warnings = 0;
+    this.globalCallCount = 0;
   }
 }
 

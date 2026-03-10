@@ -98,7 +98,7 @@ async function compactHistory(messages, config, rawFn, opts = {}) {
     `[${m.role}]: ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`
   ).join('\n').slice(0, 30000);
 
-  const summaryPrompt = `Summarize this conversation concisely. Preserve: key decisions, TODOs, open questions, user preferences, file paths mentioned, and current task context. Output in the same language as the conversation.\n\n${transcript}`;
+  const summaryPrompt = `Summarize this conversation concisely. Preserve: key decisions, TODOs, open questions, user preferences, file paths mentioned, and current task context. IMPORTANT: Preserve all identifiers verbatim — file paths, commit hashes, URLs, session IDs, variable names, and any opaque strings. Do not paraphrase or generalize identifiers. Output in the same language as the conversation.\n\n${transcript}`;
 
   try {
     const summary = await rawFn(

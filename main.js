@@ -14,6 +14,9 @@ const { getApiKey, rotateApiKey, recordKeyUsage } = require('./core/api-keys')
 const { estimateTokens: coreEstimateTokens, estimateMessagesTokens: coreEstimateMessagesTokens } = require('./core/compaction')
 const { pruneToolResults } = require('./core/session-pruning')
 const { LoopDetector } = require('./core/loop-detection')
+const { FailoverManager } = require('./core/failover')
+
+const failoverManager = new FailoverManager()
 
 // Tool result truncation — cap before storing in session history
 const TOOL_RESULT_MAX_CHARS = 50000
@@ -125,16 +128,21 @@ async function executeTool(name, input, config) {
       approvalCallback: async (request) => {
         if (!mainWindow) return false;
         const { dialog } = require('electron');
+        const buttons = request.allowRemember
+          ? ['Deny', 'Allow Once', 'Always Allow']
+          : ['Deny', 'Allow'];
         const result = await dialog.showMessageBox(mainWindow, {
           type: 'warning',
           title: 'Exec Approval',
-          message: `AI wants to run a potentially dangerous command:`,
+          message: `AI wants to run a command:`,
           detail: request.command,
-          buttons: ['Deny', 'Allow'],
+          buttons,
           defaultId: 0,
           cancelId: 0,
         });
-        return result.response === 1;
+        if (result.response === 0) return false;
+        if (result.response === 2) return 'always';
+        return true;
       }
     };
     try {
@@ -379,6 +387,16 @@ ipcMain.handle('session-export', (_, id) => {
   return md
 })
 
+ipcMain.handle('write-export', (_, filename, content) => {
+  if (!clawDir) return false
+  const exportDir = path.join(clawDir, '.paw', 'exports')
+  fs.mkdirSync(exportDir, { recursive: true })
+  const p = path.join(exportDir, filename)
+  fs.writeFileSync(p, content)
+  shell.openPath(exportDir)
+  return true
+})
+
 // ── IPC: Agents ──
 
 ipcMain.handle('agents-list', () => listAgents())
@@ -597,13 +615,18 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
     finalMessages = await compactHistory(prunedMessages, { apiKey, baseUrl, model, provider })
   }
 
-  // Model fallback list
+  // Model fallback list with cooldown management
   const fallbacks = config.fallbackModels || []
   const modelsToTry = [{ model, provider }, ...fallbacks.map(f => {
     const p = f.includes('/') ? f.split('/')[0] : provider
     const m = f.includes('/') ? f.split('/').slice(1).join('/') : f
     return { model: m, provider: p }
-  })]
+  })].filter(t => failoverManager.isAvailable(t.model))
+
+  // If all models are in cooldown, try the primary anyway
+  if (modelsToTry.length === 0) {
+    modelsToTry.push({ model, provider })
+  }
 
   let lastError = null
   for (const target of modelsToTry) {
@@ -623,9 +646,10 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
       return result
     } catch (err) {
       lastError = err
-      console.warn(`[Paw] model ${target.model} failed: ${err.message}, trying next...`)
+      // Record failure with cooldown
+      const cd = failoverManager.recordFailure(target.model, err.message)
+      console.warn(`[Paw] model ${target.model} failed: ${err.message} (cooldown ${Math.round((cd.until - Date.now()) / 1000)}s, errors: ${cd.errorCount})`)
       if (target === modelsToTry[modelsToTry.length - 1]) {
-        // Last model, throw
         console.error('[Paw] all models failed:', err.message)
         pushStatus(mainWindow, 'error', err.message.slice(0, 80))
         throw err
@@ -677,11 +701,33 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
       { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }
     ] : undefined
 
+    // Mark last tool with cache_control for tool schema caching
+    const cachedTools = activeTools.map((t, i) =>
+      i === activeTools.length - 1 ? { ...t, cache_control: { type: 'ephemeral' } } : t
+    )
+
+    // Mark last user message with cache_control for conversation caching
+    const cachedMsgs = msgs.map((m, i) => {
+      if (i === msgs.length - 1 && m.role === 'user') {
+        if (typeof m.content === 'string') {
+          return { ...m, content: [{ type: 'text', text: m.content, cache_control: { type: 'ephemeral' } }] }
+        }
+        if (Array.isArray(m.content)) {
+          const last = m.content.length - 1
+          const newContent = m.content.map((c, j) =>
+            j === last ? { ...c, cache_control: { type: 'ephemeral' } } : c
+          )
+          return { ...m, content: newContent }
+        }
+      }
+      return m
+    })
+
     const body = {
       model: config.model || 'claude-sonnet-4-20250514',
       max_tokens: config.maxTokens || 4096, stream: true,
       system: systemContent,
-      messages: msgs, tools: activeTools,
+      messages: cachedMsgs, tools: cachedTools,
     }
     console.log(`[Paw] streamAnthropic round=${round} endpoint=${endpoint} model=${body.model} msgCount=${msgs.length} toolCount=${activeTools.length}`)
     const res = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body), signal: _activeAbortController?.signal })
@@ -738,7 +784,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
     let loopBlocked = false
     for (const tc of toolCalls) {
       const input = JSON.parse(tc.json || '{}')
-      // Loop detection
+      // Loop detection (three-level: warning → critical → circuit-breaker)
       const loopCheck = loopDetector.check(tc.name, input)
       if (loopCheck.blocked) {
         console.warn(`[Paw] ${loopCheck.reason}`)
@@ -746,6 +792,9 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
         win.webContents.send('chat-tool-step', { requestId, name: tc.name, output: loopCheck.reason })
         loopBlocked = true
         continue
+      }
+      if (loopCheck.warning) {
+        console.warn(`[Paw] ${loopCheck.reason}`)
       }
       const silent = SILENT_TOOLS.includes(tc.name)
       if (!silent) pushStatus(win, 'tool', `Running ${tc.name}...`)
@@ -858,13 +907,16 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
     for (const tc of tcList) {
       let input = {}
       try { input = JSON.parse(tc.args || '{}') } catch {}
-      // Loop detection
+      // Loop detection (three-level)
       const loopCheck = loopDetector.check(tc.name, input)
       if (loopCheck.blocked) {
         console.warn(`[Paw] ${loopCheck.reason}`)
         win.webContents.send('chat-tool-step', { requestId, name: tc.name, output: loopCheck.reason })
         msgs.push({ role: 'tool', tool_call_id: tc.id, content: loopCheck.reason })
         continue
+      }
+      if (loopCheck.warning) {
+        console.warn(`[Paw] ${loopCheck.reason}`)
       }
       const silent = SILENT_TOOLS_OAI.includes(tc.name)
       if (!silent) pushStatus(win, 'tool', `Running ${tc.name}...`)
