@@ -249,60 +249,91 @@ async function bootstrapFirstSession() {
 
 async function refreshSessionList() {
   const sessions = await window.api.listSessions()
+  const workspaces = await window.api.listWorkspaces()
   const list = document.getElementById('sessionList')
   list.innerHTML = ''
   // Clear search
   const searchInput = document.getElementById('sessionSearch')
   if (searchInput) searchInput.value = ''
-  
-  // Time grouping
-  const now = new Date()
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const yesterday = new Date(today - 86400000)
-  let lastGroup = ''
-  
+
+  // Group sessions by workspace
+  const wsMap = new Map()  // workspaceId -> { identity, sessions }
+  const ungrouped = []     // sessions without workspaceId
+
+  for (const ws of workspaces) {
+    wsMap.set(ws.id, { identity: ws.identity, path: ws.path, sessions: [] })
+  }
+
   for (const s of sessions) {
-    // Pre-populate status from DB if not already in memory
     if (!sessionStatus.has(s.id) && s.statusLevel) {
       sessionStatus.set(s.id, { level: s.statusLevel, text: s.statusText || '' })
     }
-    const el = document.createElement('div')
-    el.className = 'session-item' + (s.id === currentSessionId ? ' active' : '')
-    el.dataset.id = s.id
-    
-    // Time group label
-    const updatedAt = new Date(s.updatedAt || s.createdAt)
-    let group = '更早'
-    if (updatedAt >= today) group = '今天'
-    else if (updatedAt >= yesterday) group = '昨天'
-    if (group !== lastGroup) {
+    if (s.workspaceId && wsMap.has(s.workspaceId)) {
+      wsMap.get(s.workspaceId).sessions.push(s)
+    } else {
+      ungrouped.push(s)
+    }
+  }
+
+  // Render workspace groups (sorted by most recent session)
+  const wsEntries = [...wsMap.entries()]
+    .filter(([, v]) => v.sessions.length > 0)
+    .sort((a, b) => {
+      const aMax = Math.max(...a[1].sessions.map(s => s.updatedAt || 0))
+      const bMax = Math.max(...b[1].sessions.map(s => s.updatedAt || 0))
+      return bMax - aMax
+    })
+
+  for (const [wsId, ws] of wsEntries) {
+    const header = document.createElement('div')
+    header.className = 'session-group-label workspace-group'
+    header.dataset.wsId = wsId
+    const avatar = ws.identity.avatar || '🤖'
+    const isEmoji = avatar.length <= 4 && !avatar.includes('.')
+    header.innerHTML = `<span class="ws-avatar">${isEmoji ? avatar : `<img src="file://${esc(ws.path + '/' + avatar)}" class="ws-avatar-img">`}</span> ${esc(ws.identity.name)}`
+    list.appendChild(header)
+    for (const s of ws.sessions) {
+      list.appendChild(renderSessionItem(s))
+    }
+  }
+
+  // Render ungrouped sessions
+  if (ungrouped.length > 0) {
+    if (wsEntries.length > 0) {
       const label = document.createElement('div')
       label.className = 'session-group-label'
-      label.textContent = group
+      label.textContent = '对话'
       list.appendChild(label)
-      lastGroup = group
     }
-    const st = sessionStatus.get(s.id) || { level: 'idle', text: '' }
-    // Idle: show last message preview. Active/AI-authored: show status text
-    const statusText = (st.level === 'idle' || st.level === 'done') ? (s.lastMessage || '') : (st.text || s.lastMessage || '')
-    el.innerHTML = `<div class="session-item-main"><span class="session-title">${esc(s.title)}</span></div><div class="session-item-meta"><span class="session-status-dot ${st.level}"></span><span class="session-status-text">${esc(statusText)}</span><span class="del-btn" onclick="event.stopPropagation();deleteSession('${s.id}')">✕</span></div>`
-    let clickTimer = null
-    el.onclick = () => {
-      if (clickTimer) clearTimeout(clickTimer)
-      clickTimer = setTimeout(() => switchSession(s.id), 250)
+    for (const s of ungrouped) {
+      list.appendChild(renderSessionItem(s))
     }
-    el.ondblclick = (e) => {
-      e.stopPropagation()
-      if (clickTimer) { clearTimeout(clickTimer); clickTimer = null }
-      renameSession(s.id, el)
-    }
-    el.oncontextmenu = (e) => {
-      e.preventDefault()
-      e.stopPropagation()
-      showSessionContextMenu(e, s.id, el)
-    }
-    list.appendChild(el)
   }
+}
+
+function renderSessionItem(s) {
+  const el = document.createElement('div')
+  el.className = 'session-item' + (s.id === currentSessionId ? ' active' : '')
+  el.dataset.id = s.id
+  const st = sessionStatus.get(s.id) || { level: 'idle', text: '' }
+  const statusText = (st.level === 'idle' || st.level === 'done') ? (s.lastMessage || '') : (st.text || s.lastMessage || '')
+  el.innerHTML = `<div class="session-item-main"><span class="session-title">${esc(s.title)}</span></div><div class="session-item-meta"><span class="session-status-dot ${st.level}"></span><span class="session-status-text">${esc(statusText)}</span><span class="del-btn" onclick="event.stopPropagation();deleteSession('${s.id}')">✕</span></div>`
+  let clickTimer = null
+  el.onclick = () => {
+    if (clickTimer) clearTimeout(clickTimer)
+    clickTimer = setTimeout(() => switchSession(s.id), 250)
+  }
+  el.ondblclick = (e) => {
+    e.stopPropagation()
+    if (clickTimer) { clearTimeout(clickTimer); clickTimer = null }
+    renameSession(s.id, el)
+  }
+  el.oncontextmenu = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    showSessionContextMenu(e, s.id, el)
+  }
+  return el
 }
 
 async function switchSession(id) {

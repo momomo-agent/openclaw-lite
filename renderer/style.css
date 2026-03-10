@@ -98,6 +98,13 @@ button:hover { background: #2a2a2a; }
   padding: 8px 10px 4px; font-size: 11px; color: #555;
   font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
 }
+.session-group-label.workspace-group {
+  display: flex; align-items: center; gap: 6px;
+  padding: 10px 10px 6px; font-size: 12px; color: #888;
+  text-transform: none; letter-spacing: 0; cursor: default;
+}
+.ws-avatar { font-size: 16px; line-height: 1; }
+.ws-avatar-img { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; vertical-align: middle; }
 .session-item:hover { background: #ffffff08; color: #bbb; }
 .session-item.active { background: #ffffff0d; color: #e0e0e0; }
 .session-item .del-btn { opacity: 0; font-size: 11px; color: #555; cursor: pointer; padding: 2px 4px; }
