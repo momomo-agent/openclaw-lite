@@ -342,7 +342,16 @@ async function switchSession(id) {
   currentSessionId = id
   history = []
   messages.innerHTML = ''
-  document.getElementById('sessionTitle').textContent = session.title
+  // Show workspace name in header if session belongs to one
+  let titleText = session.title
+  if (session.workspaceId) {
+    try {
+      const workspaces = await window.api.listWorkspaces()
+      const ws = workspaces.find(w => w.id === session.workspaceId)
+      if (ws) titleText = `${ws.identity.name} · ${session.title}`
+    } catch {}
+  }
+  document.getElementById('sessionTitle').textContent = titleText
   const agents = await window.api.listAgents()
   for (const m of session.messages) {
     const sender = m.sender || (m.role === 'user' ? 'You' : 'Assistant')

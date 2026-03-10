@@ -840,8 +840,25 @@ ipcMain.handle('chat-route', async (_, { prompt, history, sessionId }) => {
   return { respondents }
 })
 
-// Helper: reuse build-system-prompt logic
-async function buildSystemPrompt() { syncState(); return coreBuildSystemPrompt(); }
+// Helper: reuse build-system-prompt logic (workspace-aware via F167)
+async function buildSystemPrompt() {
+  syncState()
+  // Resolve workspace path for current session
+  const wsPath = getSessionWorkspacePath()
+  return coreBuildSystemPrompt(wsPath)
+}
+
+function getSessionWorkspacePath() {
+  if (!currentSessionId || !clawDir) return null
+  try {
+    const ws = sessionStore.getSessionWorkspace(clawDir, currentSessionId)
+    if (ws?.workspaceId) {
+      const wsObj = workspaceRegistry.getWorkspace(ws.workspaceId)
+      if (wsObj?.path) return wsObj.path
+    }
+  } catch {}
+  return null  // fallback to default clawDir in prompt-builder
+}
 
 // ── Anthropic Streaming ──
 
