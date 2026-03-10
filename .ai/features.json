@@ -573,5 +573,47 @@
     "description": "Anthropic Prompt Caching",
     "passes": true,
     "milestone": "M24"
+  },
+  {
+    "id": "F108",
+    "category": "core",
+    "description": "OpenAI token 追踪",
+    "passes": true,
+    "milestone": "M25"
+  },
+  {
+    "id": "F109",
+    "category": "ux",
+    "description": "/reset /stop 命令",
+    "passes": true,
+    "milestone": "M25"
+  },
+  {
+    "id": "F110",
+    "category": "ux",
+    "description": "/context 命令",
+    "passes": true,
+    "milestone": "M25"
+  },
+  {
+    "id": "F111",
+    "category": "core",
+    "description": "可配置 max rounds",
+    "passes": true,
+    "milestone": "M25"
+  },
+  {
+    "id": "F112",
+    "category": "core",
+    "description": "max_tokens 可配",
+    "passes": true,
+    "milestone": "M25"
+  },
+  {
+    "id": "F113",
+    "category": "core",
+    "description": "Model failover",
+    "passes": true,
+    "milestone": "M25"
   }
 ]

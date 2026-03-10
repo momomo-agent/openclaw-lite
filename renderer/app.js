@@ -603,6 +603,53 @@ async function send() {
       return
     }
 
+    if (cmd === '/context') {
+      input.value = ''
+      const config = await window.api.getConfig()
+      const session = currentSessionId ? await window.api.loadSession(currentSessionId) : null
+      const prompt = await window.api.buildSystemPrompt()
+      const promptChars = prompt?.length || 0
+      const promptTokens = Math.ceil(promptChars / 3.5)
+      const msgCount = session?.messages?.length || 0
+      const historyChars = JSON.stringify(session?.messages || []).length
+      const historyTokens = Math.ceil(historyChars / 3.5)
+      const totalTokens = promptTokens + historyTokens
+
+      addCard('assistant', [
+        `**Context Breakdown**`,
+        `- System prompt: ~${promptTokens.toLocaleString()} tokens (${promptChars.toLocaleString()} chars)`,
+        `- History: ${msgCount} messages, ~${historyTokens.toLocaleString()} tokens`,
+        `- Total: ~${totalTokens.toLocaleString()} tokens`,
+        `- Model: ${config?.model || '(default)'}`,
+        `- Provider: ${config?.provider || 'anthropic'}`,
+        `- Bootstrap max/file: 20,000 chars`,
+        `- Bootstrap total max: 80,000 chars`,
+      ].join('\n'), 'System', true)
+      return
+    }
+
+    if (cmd === '/reset') {
+      input.value = ''
+      if (currentSessionId) {
+        const s = await window.api.loadSession(currentSessionId)
+        if (s) {
+          s.messages = []
+          await window.api.saveSession(s)
+        }
+        // Clear chat UI
+        document.querySelectorAll('.msg-card').forEach(c => c.remove())
+        addCard('assistant', 'Session 已重置。', 'System', true)
+      }
+      return
+    }
+
+    if (cmd === '/stop') {
+      input.value = ''
+      await window.api.chatCancel()
+      addCard('assistant', '已停止当前请求。', 'System', true)
+      return
+    }
+
     if (cmd === '/compact') {
       input.value = ''
       addCard('user', text, 'You', true)

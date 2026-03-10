@@ -597,23 +597,40 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
     finalMessages = await compactHistory(prunedMessages, { apiKey, baseUrl, model, provider })
   }
 
-  try {
-    console.log(`[Paw] chat handler: provider=${provider} model=${model} msgs=${finalMessages.length} tools=${chatTools.length} reqId=${requestId}`)
-    let result
-    if (provider === 'anthropic') {
-      result = await streamAnthropic(finalMessages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow, requestId, chatTools)
-    } else {
-      result = await streamOpenAI(finalMessages, systemPrompt, { apiKey, baseUrl, model, tavilyKey: config.tavilyKey }, mainWindow, requestId, chatTools)
+  // Model fallback list
+  const fallbacks = config.fallbackModels || []
+  const modelsToTry = [{ model, provider }, ...fallbacks.map(f => {
+    const p = f.includes('/') ? f.split('/')[0] : provider
+    const m = f.includes('/') ? f.split('/').slice(1).join('/') : f
+    return { model: m, provider: p }
+  })]
+
+  let lastError = null
+  for (const target of modelsToTry) {
+    try {
+      console.log(`[Paw] chat handler: provider=${target.provider} model=${target.model} msgs=${finalMessages.length} tools=${chatTools.length} reqId=${requestId}`)
+      let result
+      const streamConfig = { apiKey, baseUrl, model: target.model, tavilyKey: config.tavilyKey, maxToolRounds: config.maxToolRounds, maxTokens: config.maxTokens }
+      if (target.provider === 'anthropic') {
+        result = await streamAnthropic(finalMessages, systemPrompt, streamConfig, mainWindow, requestId, chatTools)
+      } else {
+        result = await streamOpenAI(finalMessages, systemPrompt, streamConfig, mainWindow, requestId, chatTools)
+      }
+      // Track token usage
+      if (result?.usage && sessionId) {
+        sessionStore.addTokenUsage(clawDir, sessionId, result.usage.inputTokens, result.usage.outputTokens)
+      }
+      return result
+    } catch (err) {
+      lastError = err
+      console.warn(`[Paw] model ${target.model} failed: ${err.message}, trying next...`)
+      if (target === modelsToTry[modelsToTry.length - 1]) {
+        // Last model, throw
+        console.error('[Paw] all models failed:', err.message)
+        pushStatus(mainWindow, 'error', err.message.slice(0, 80))
+        throw err
+      }
     }
-    // Track token usage
-    if (result?.usage && sessionId) {
-      sessionStore.addTokenUsage(clawDir, sessionId, result.usage.inputTokens, result.usage.outputTokens)
-    }
-    return result
-  } catch (err) {
-    console.error('[Paw] chat error:', err.message, err.stack?.split('\n')[1])
-    pushStatus(mainWindow, 'error', err.message.slice(0, 80))
-    throw err
   }
 })
 
@@ -640,6 +657,7 @@ async function buildSystemPrompt() { syncState(); return coreBuildSystemPrompt()
 
 async function streamAnthropic(messages, systemPrompt, config, win, requestId, tools) {
   _activeRequestId = requestId
+  _activeAbortController = new AbortController()
   const activeTools = tools || TOOLS
   const base = (config.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '')
   const endpoint = base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`
@@ -647,7 +665,9 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
   let fullText = '', roundText = '', msgs = [...messages]
   const loopDetector = new LoopDetector()
 
-  for (let round = 0; round < 5; round++) {
+  const maxRounds = config.maxToolRounds || 10
+
+  for (let round = 0; round < maxRounds; round++) {
     roundText = ''
     if (round > 0) win.webContents.send('chat-text-start', { requestId })
     pushStatus(win, 'thinking', 'Thinking...')
@@ -659,12 +679,12 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
 
     const body = {
       model: config.model || 'claude-sonnet-4-20250514',
-      max_tokens: 4096, stream: true,
+      max_tokens: config.maxTokens || 4096, stream: true,
       system: systemContent,
       messages: msgs, tools: activeTools,
     }
     console.log(`[Paw] streamAnthropic round=${round} endpoint=${endpoint} model=${body.model} msgCount=${msgs.length} toolCount=${activeTools.length}`)
-    const res = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body) })
+    const res = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body), signal: _activeAbortController?.signal })
     console.log(`[Paw] streamAnthropic response status=${res.status}`)
     if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${await res.text()}`)
 
@@ -737,7 +757,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
     }
     // Send round info to renderer
     if (toolCalls.length > 0) {
-      win.webContents.send('chat-round-info', { requestId, round: round + 1, maxRounds: 5 })
+      win.webContents.send('chat-round-info', { requestId, round: round + 1, maxRounds })
     }
     msgs.push({ role: 'user', content: toolResults })
     fullText += '\n'
@@ -750,6 +770,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
 
 async function streamOpenAI(messages, systemPrompt, config, win, requestId, tools) {
   _activeRequestId = requestId
+  _activeAbortController = new AbortController()
   const activeTools = tools || TOOLS
   const base = (config.baseUrl || 'https://api.openai.com').replace(/\/+$/, '')
   const endpoint = base.endsWith('/v1') ? `${base}/chat/completions` : `${base}/v1/chat/completions`
@@ -766,8 +787,9 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
 
   let fullText = '', roundText = ''
   const loopDetector = new LoopDetector()
+  const maxRounds = config.maxToolRounds || 10
 
-  for (let round = 0; round < 5; round++) {
+  for (let round = 0; round < maxRounds; round++) {
     roundText = ''
     if (round > 0) win.webContents.send('chat-text-start', { requestId })
     pushStatus(win, 'thinking', 'Thinking...')
@@ -775,13 +797,15 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getApiKey(config)}` },
-      body: JSON.stringify({ model: config.model || 'gpt-4o', messages: msgs, stream: true, tools: oaiTools }),
+      body: JSON.stringify({ model: config.model || 'gpt-4o', messages: msgs, stream: true, stream_options: { include_usage: true }, tools: oaiTools }),
+      signal: _activeAbortController?.signal,
     })
     if (!res.ok) throw new Error(`OpenAI API ${res.status}: ${await res.text()}`)
 
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let buf = '', toolCalls = {}
+    let usageInput = 0, usageOutput = 0
 
     while (true) {
       const { done, value } = await reader.read()
@@ -791,7 +815,13 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
       for (const line of lines) {
         if (!line.startsWith('data: ') || line === 'data: [DONE]') continue
         try {
-          const choice = JSON.parse(line.slice(6)).choices?.[0]
+          const parsed = JSON.parse(line.slice(6))
+          // Track usage (OpenAI includes it in the final chunk with stream_options)
+          if (parsed.usage) {
+            usageInput += parsed.usage.prompt_tokens || 0
+            usageOutput += parsed.usage.completion_tokens || 0
+          }
+          const choice = parsed.choices?.[0]
           const delta = choice?.delta
           if (delta?.content) {
             roundText += delta.content
@@ -814,7 +844,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
     const tcList = Object.values(toolCalls)
     if (!tcList.length || !tcList[0].name) {
       pushStatus(win, 'done', 'Done')
-      return { answer: fullText }
+      return { answer: fullText, usage: { inputTokens: usageInput, outputTokens: usageOutput } }
     }
 
     // Build assistant message with tool_calls
@@ -846,14 +876,14 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
     }
     // Send round info to renderer
     if (tcList.length > 0) {
-      win.webContents.send('chat-round-info', { requestId, round: round + 1, maxRounds: 5 })
+      win.webContents.send('chat-round-info', { requestId, round: round + 1, maxRounds })
     }
     fullText += '\n'
     win.webContents.send('chat-token', { requestId, text: '\n' })
   }
 
   pushStatus(win, 'done', 'Done')
-  return { answer: fullText }
+  return { answer: fullText, usage: { inputTokens: usageInput, outputTokens: usageOutput } }
 }
 
 // ── M8-01: Heartbeat ──
@@ -926,6 +956,17 @@ function updateTrayMenu() {
 
 // requestId is optional - when provided, renderer routes to per-card status
 let _activeRequestId = null
+let _activeAbortController = null
+
+ipcMain.handle('chat-cancel', () => {
+  if (_activeAbortController) {
+    _activeAbortController.abort()
+    _activeAbortController = null
+    return true
+  }
+  return false
+})
+
 function pushWatsonStatus(level, text, requestId) {
   const rid = requestId || _activeRequestId
   const payload = { level, text, requestId: rid }

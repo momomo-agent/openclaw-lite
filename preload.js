@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('api', {
   selectClawDir: () => ipcRenderer.invoke('select-claw-dir'),
   getConfig: () => ipcRenderer.invoke('get-config'),
   getTokenUsage: (sessionId) => ipcRenderer.invoke('get-token-usage', sessionId),
+  chatCancel: () => ipcRenderer.invoke('chat-cancel'),
   saveConfig: (c) => ipcRenderer.invoke('save-config', c),
   buildSystemPrompt: () => ipcRenderer.invoke('build-system-prompt'),
   chat: (msg) => ipcRenderer.invoke('chat', msg),
