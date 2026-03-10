@@ -673,7 +673,9 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
   } else if (history?.length) {
     for (const h of history) {
       messages.push({ role: 'user', content: h.prompt })
-      messages.push({ role: 'assistant', content: h.answer })
+      if (h.answer && h.answer.trim()) {
+        messages.push({ role: 'assistant', content: h.answer })
+      }
     }
   }
   // Build user content (text + image attachments)
@@ -797,14 +799,14 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
     removeTrailingUser: false,
   })
   const loopDetector = new LoopDetector()
-  const maxRounds = config.maxToolRounds || 10
 
   // Usage accumulator — tracks across all rounds (OpenClaw-aligned)
   let totalUsageInput = 0, totalUsageOutput = 0
   let totalCacheRead = 0, totalCacheWrite = 0
   let lastUsageInput = 0, lastCacheRead = 0, lastCacheWrite = 0
 
-  for (let round = 0; round < maxRounds; round++) {
+  // OpenClaw-aligned: no hard round limit. Loop detection + timeout guard against stuck loops.
+  for (let round = 0; ; round++) {
     roundText = ''
     if (round > 0) win.webContents.send('chat-text-start', { requestId })
     pushStatus(win, 'thinking', 'Thinking...')
@@ -959,15 +961,12 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
     }
     // Send round info to renderer
     if (toolCalls.length > 0) {
-      win.webContents.send('chat-round-info', { requestId, round: round + 1, maxRounds })
+      win.webContents.send('chat-round-info', { requestId, round: round + 1 })
     }
     msgs.push({ role: 'user', content: toolResults })
     fullText += '\n'
     win.webContents.send('chat-token', { requestId, text: '\n' })
   }
-  pushStatus(win, 'done', 'Done')
-  clearTimeout(timeoutId)
-  return { answer: fullText, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput, cacheRead: totalCacheRead, cacheWrite: totalCacheWrite, lastInputTokens: lastUsageInput, lastCacheRead, lastCacheWrite } }
 }
 
 // ── OpenAI Streaming ──
@@ -1005,12 +1004,11 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
 
   let fullText = '', roundText = ''
   const loopDetector = new LoopDetector()
-  const maxRounds = config.maxToolRounds || 10
-
   // Usage accumulator — tracks across all rounds (OpenClaw-aligned)
   let totalUsageInput = 0, totalUsageOutput = 0
 
-  for (let round = 0; round < maxRounds; round++) {
+  // OpenClaw-aligned: no hard round limit
+  for (let round = 0; ; round++) {
     roundText = ''
     if (round > 0) win.webContents.send('chat-text-start', { requestId })
     pushStatus(win, 'thinking', 'Thinking...')
@@ -1126,15 +1124,11 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
     }
     // Send round info to renderer
     if (tcList.length > 0) {
-      win.webContents.send('chat-round-info', { requestId, round: round + 1, maxRounds })
+      win.webContents.send('chat-round-info', { requestId, round: round + 1 })
     }
     fullText += '\n'
     win.webContents.send('chat-token', { requestId, text: '\n' })
   }
-
-  pushStatus(win, 'done', 'Done')
-  clearTimeout(timeoutId)
-  return { answer: fullText, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput } }
 }
 
 // ── M8-01: Heartbeat ──

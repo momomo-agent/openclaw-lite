@@ -108,6 +108,62 @@ function limitHistoryTurns(messages, limit) {
 }
 
 /**
+ * Sanitize empty/whitespace-only text content blocks.
+ * OpenAI (and some Anthropic-compatible endpoints) reject messages
+ * where text blocks contain only whitespace.
+ * - For string content: replace empty with a space placeholder
+ * - For array content: remove empty text blocks; if none remain, add placeholder
+ */
+function sanitizeEmptyTextBlocks(messages) {
+  let touched = false;
+  const out = [];
+  for (const msg of messages) {
+    if (!msg || typeof msg !== 'object') { out.push(msg); continue; }
+
+    // String content (simple messages)
+    if (typeof msg.content === 'string') {
+      if (!msg.content.trim()) {
+        touched = true;
+        out.push({ ...msg, content: '(empty)' });
+      } else {
+        out.push(msg);
+      }
+      continue;
+    }
+
+    // Array content (structured blocks)
+    if (Array.isArray(msg.content)) {
+      let changed = false;
+      const nextContent = [];
+      for (const block of msg.content) {
+        if (block && typeof block === 'object' && block.type === 'text') {
+          if (typeof block.text !== 'string' || !block.text.trim()) {
+            // Skip empty text blocks if there are other non-text blocks
+            changed = true;
+            continue;
+          }
+        }
+        nextContent.push(block);
+      }
+      if (changed) {
+        touched = true;
+        // If all content was removed, add a placeholder
+        if (nextContent.length === 0) {
+          nextContent.push({ type: 'text', text: '(empty)' });
+        }
+        out.push({ ...msg, content: nextContent });
+      } else {
+        out.push(msg);
+      }
+      continue;
+    }
+
+    out.push(msg);
+  }
+  return touched ? out : messages;
+}
+
+/**
  * Full transcript sanitization pipeline.
  * Call before sending messages to LLM.
  */
@@ -133,7 +189,10 @@ function sanitizeTranscript(messages, opts = {}) {
   // 5. Prune image payloads from already-processed user messages (OpenClaw-aligned)
   pruneProcessedHistoryImages(result);
 
-  // 6. Validate Anthropic turn ordering
+  // 6. Sanitize empty text blocks (prevents OpenAI 400 errors)
+  result = sanitizeEmptyTextBlocks(result);
+
+  // 7. Validate Anthropic turn ordering
   if (opts.provider === 'anthropic') {
     result = validateAnthropicTurns(result);
   }
@@ -166,7 +225,7 @@ function dropThinkingBlocks(messages) {
       nextContent.push(block);
     }
     if (!changed) { out.push(msg); continue; }
-    const content = nextContent.length > 0 ? nextContent : [{ type: 'text', text: '' }];
+    const content = nextContent.length > 0 ? nextContent : [{ type: 'text', text: '(thinking removed)' }];
     out.push({ ...msg, content });
   }
   return touched ? out : messages;
@@ -205,6 +264,7 @@ module.exports = {
   limitHistoryTurns,
   dropThinkingBlocks,
   pruneProcessedHistoryImages,
+  sanitizeEmptyTextBlocks,
   sanitizeTranscript,
   PRUNED_IMAGE_MARKER,
 };

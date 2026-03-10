@@ -45,10 +45,34 @@ window.api.onRoundInfo((d) => {
   if (h?.onRoundInfo) h.onRoundInfo(d)
 })
 
-// Watson status — AI-authored, highest priority
+// Agent status — inline indicator at bottom of active streaming card
+let _activeStatusEl = null  // the .inline-status element inside the streaming card
+let _statusIsAiAuthored = false  // AI-authored text takes priority
+function updateInlineStatus(text) {
+  if (!_activeStatusEl) return
+  _activeStatusEl.innerHTML = `<span class="reading-indicator"><span></span><span></span><span></span></span> ${esc(text || '')}`
+}
+window.api.onStatus(({ state, detail }) => {
+  if (!_activeStatusEl) return
+  if (state === 'done' || state === 'error') {
+    _activeStatusEl.remove()
+    _activeStatusEl = null
+    _statusIsAiAuthored = false
+  } else if (!_statusIsAiAuthored) {
+    // Only show programmatic status if no AI-authored text is active
+    updateInlineStatus(detail || '')
+  }
+})
+
+// Watson status — AI-authored, highest priority (drives both sidebar + inline)
 window.api.onWatsonStatus(({ level, text, requestId }) => {
   if (currentSessionId) {
     setSessionStatus(currentSessionId, level, text || '', true)
+  }
+  // Also update inline indicator with AI-authored text
+  if (_activeStatusEl && text) {
+    _statusIsAiAuthored = true
+    updateInlineStatus(text)
   }
 })
 
@@ -278,7 +302,7 @@ async function switchSession(id) {
   const agents = await window.api.listAgents()
   for (const m of session.messages) {
     const sender = m.sender || (m.role === 'user' ? 'You' : 'Assistant')
-    addCard(m.role, m.content, sender)
+    addCard(m.role, m.content, sender, false, m.toolSteps)
     if (m.role === 'user') history.push({ prompt: m.content, answer: '' })
     if (m.role === 'assistant' && history.length) history[history.length - 1].answer = m.content
   }
@@ -440,7 +464,7 @@ function buildAgentContext(sessionMsgs, agentName, isMain) {
       const isOwn = isMain
         ? (!m.sender || m.sender === 'Assistant')
         : m.sender === agentName
-      if (isOwn) {
+      if (isOwn && m.content && (typeof m.content !== 'string' || m.content.trim())) {
         raw.push({ role: 'assistant', content: m.content })
       }
     }
@@ -469,8 +493,14 @@ function createStreamingCard(agentName) {
   const flowContainer = card.querySelector('.msg-flow')
   const firstTextEl = document.createElement('div')
   firstTextEl.className = 'msg-content md-content'
-  firstTextEl.innerHTML = '<span class="typing-indicator">…</span>'
   flowContainer.appendChild(firstTextEl)
+  // Inline status element — sits at bottom of flow, removed when done
+  const statusEl = document.createElement('div')
+  statusEl.className = 'inline-status'
+  statusEl.innerHTML = '<span class="reading-indicator"><span></span><span></span><span></span></span> Thinking...'
+  flowContainer.appendChild(statusEl)
+  _activeStatusEl = statusEl
+  _statusIsAiAuthored = false
   return { card, flowContainer, firstTextEl }
 }
 
@@ -480,6 +510,9 @@ function registerStreamHandlers(myRequestId, flowContainer, firstTextEl, sendSes
   let fullText = ''
   let currentToolGroup = null
   let myToolSteps = []
+  const card = flowContainer.closest('.msg-card')
+  // Keep inline-status at bottom of flow
+  const keepStatusAtBottom = () => { if (_activeStatusEl?.parentNode === flowContainer) flowContainer.appendChild(_activeStatusEl) }
 
   requestHandlers.set(myRequestId, {
     onTextStart() {
@@ -490,6 +523,7 @@ function registerStreamHandlers(myRequestId, flowContainer, firstTextEl, sendSes
         currentToolGroup = null
         segmentText = ''
       }
+      keepStatusAtBottom()
     },
     onToken(d) {
       const t = typeof d === 'string' ? d : d.text
@@ -502,6 +536,7 @@ function registerStreamHandlers(myRequestId, flowContainer, firstTextEl, sendSes
         flowContainer.appendChild(currentTextEl)
         currentToolGroup = null
         segmentText = t
+        keepStatusAtBottom()
       }
       currentTextEl.innerHTML = marked.parse(segmentText)
       messages.scrollTop = messages.scrollHeight
@@ -522,6 +557,7 @@ function registerStreamHandlers(myRequestId, flowContainer, firstTextEl, sendSes
           arrow.textContent = show ? '▼' : '▶'
         }
         flowContainer.appendChild(currentToolGroup)
+        keepStatusAtBottom()
       }
       const body = currentToolGroup.querySelector('.tool-group-body')
       const count = currentToolGroup.querySelector('.tool-count')
@@ -540,13 +576,13 @@ function registerStreamHandlers(myRequestId, flowContainer, firstTextEl, sendSes
         if (header) {
           const count = currentToolGroup.querySelector('.tool-count')?.textContent || '0'
           const expand = currentToolGroup.querySelector('.tool-expand')?.textContent || '▼'
-          header.innerHTML = `🔧 <span class="tool-count">${count}</span> 个工具调用 <span class="tool-round">轮次 ${d.round}/${d.maxRounds}</span> <span class="tool-expand">${expand}</span>`
+          header.innerHTML = `🔧 <span class="tool-count">${count}</span> 个工具调用 <span class="tool-round">轮次 ${d.round}</span> <span class="tool-expand">${expand}</span>`
         }
       }
     }
   })
 
-  return { getFullText: () => fullText }
+  return { getFullText: () => fullText, getToolSteps: () => myToolSteps }
 }
 
 function finalizeCard(card, myRequestId, fullText) {
@@ -760,12 +796,13 @@ async function send() {
 
     const { card, flowContainer, firstTextEl } = createStreamingCard(targetAgentName)
     const myRequestId = await window.api.chatPrepare()
-    const { getFullText } = registerStreamHandlers(myRequestId, flowContainer, firstTextEl, sendSessionId)
+    const { getFullText, getToolSteps } = registerStreamHandlers(myRequestId, flowContainer, firstTextEl, sendSessionId)
 
     chatParams.requestId = myRequestId
 
     try {
       const result = await window.api.chat(chatParams)
+      if (_activeStatusEl) { _activeStatusEl.remove(); _activeStatusEl = null }
       const finalText = getFullText() || result?.answer || ''
 
       // NO_REPLY filtering — suppress silent replies (OpenClaw-aligned)
@@ -791,9 +828,12 @@ async function send() {
       if (sendSessionId) {
         const s = await window.api.loadSession(sendSessionId)
         if (s) {
+          const toolSteps = getToolSteps()
+          const assistantMsg = { role: 'assistant', content: finalText, sender: targetAgentName }
+          if (toolSteps.length) assistantMsg.toolSteps = toolSteps
           s.messages.push(
             { role: 'user', content: text, sender: 'You' },
-            { role: 'assistant', content: finalText, sender: targetAgentName }
+            assistantMsg
           )
           if (s.messages.length === 2) {
             s.title = generateTitle(text, finalText)
@@ -804,11 +844,19 @@ async function send() {
         }
       }
     } catch (err) {
+      if (_activeStatusEl) { _activeStatusEl.remove(); _activeStatusEl = null }
+      _statusIsAiAuthored = false
       setSessionStatus(sendSessionId, 'idle', '出错')
       requestHandlers.delete(myRequestId)
-      if (!getFullText()) {
-        card.remove()
-        addCard('error', err.message || String(err))
+      // Show error inline in the card (preserves tool steps)
+      const errEl = document.createElement('div')
+      errEl.className = 'msg-content'
+      errEl.style.color = '#ef4444'
+      errEl.textContent = err.message || String(err)
+      flowContainer.appendChild(errEl)
+      if (!getFullText().trim()) {
+        // Remove empty firstTextEl placeholder
+        if (!firstTextEl.textContent.trim() && !firstTextEl.innerHTML.includes('md-content')) firstTextEl.remove()
       }
     }
   }
@@ -816,7 +864,7 @@ async function send() {
   input.focus()
 }
 
-function addCard(role, content, sender, rawHtml) {
+function addCard(role, content, sender, rawHtml, toolSteps) {
   const card = document.createElement('div')
   card.className = `msg-card ${role}`
   const avatar = role === 'user' ? '👤' : '🤖'
@@ -831,11 +879,44 @@ function addCard(role, content, sender, rawHtml) {
     const body = rawHtml ? content : esc(content)
     card.innerHTML = `<div class="msg-avatar">${avatar}</div><div class="msg-body"><div class="msg-header"><span class="${nameClass}">${esc(sender||'You')}</span><span class="msg-time">${time}</span></div><div class="msg-content">${body}</div></div>`
   } else {
-    card.innerHTML = `<div class="msg-avatar">${avatar}</div><div class="msg-body"><div class="msg-header"><span class="${nameClass}">${esc(sender||'Assistant')}</span><span class="msg-time">${time}</span></div><div class="msg-content md-content">${marked.parse(content||'')}</div></div>`
+    card.innerHTML = `<div class="msg-avatar">${avatar}</div><div class="msg-body"><div class="msg-header"><span class="${nameClass}">${esc(sender||'Assistant')}</span><span class="msg-time">${time}</span></div><div class="msg-flow"></div></div>`
+    const flow = card.querySelector('.msg-flow')
+    // Render saved tool steps (grouped by consecutive runs)
+    if (toolSteps?.length) {
+      renderSavedToolSteps(flow, toolSteps)
+    }
+    // Render text content
+    if (content) {
+      const textEl = document.createElement('div')
+      textEl.className = 'msg-content md-content'
+      textEl.innerHTML = marked.parse(content || '')
+      flow.appendChild(textEl)
+    }
   }
 
   messages.appendChild(card)
   messages.scrollTop = messages.scrollHeight
+}
+
+function renderSavedToolSteps(container, steps) {
+  const group = document.createElement('div')
+  group.className = 'tool-group-inline'
+  group.innerHTML = `<div class="tool-group-header">🔧 <span class="tool-count">${steps.length}</span> 个工具调用 <span class="tool-expand">▶</span></div><div class="tool-group-body" style="display:none"></div>`
+  group.querySelector('.tool-group-header').onclick = () => {
+    const body = group.querySelector('.tool-group-body')
+    const arrow = group.querySelector('.tool-expand')
+    const show = body.style.display === 'none'
+    body.style.display = show ? 'block' : 'none'
+    arrow.textContent = show ? '▼' : '▶'
+  }
+  const body = group.querySelector('.tool-group-body')
+  for (const s of steps) {
+    const item = document.createElement('div')
+    item.className = 'tool-step-item'
+    item.innerHTML = `<span class="tool-step-name">${esc(s.name)}</span> <span class="tool-step-output">${esc(String(s.output || '').slice(0, 80))}</span>`
+    body.appendChild(item)
+  }
+  container.appendChild(group)
 }
 
 function renderToolGroup(slot, steps, forceCollapse) {
@@ -1029,7 +1110,7 @@ async function removeSessionAgent(agentId) {
 async function triggerAgentResponse(agentId, agentName, prompt, sendSessionId) {
   const { card, flowContainer, firstTextEl } = createStreamingCard(agentName)
   const reqId = await window.api.chatPrepare()
-  const { getFullText } = registerStreamHandlers(reqId, flowContainer, firstTextEl, sendSessionId)
+  const { getFullText, getToolSteps } = registerStreamHandlers(reqId, flowContainer, firstTextEl, sendSessionId)
 
   // Build independent context: this agent's prior history only
   // Remove the last user message — Main's delegation (prompt param) replaces it,
@@ -1051,7 +1132,10 @@ async function triggerAgentResponse(agentId, agentName, prompt, sendSessionId) {
     if (sendSessionId) {
       const session = await window.api.loadSession(sendSessionId)
       if (session) {
-        session.messages.push({ role: 'assistant', content: finalText, sender: agentName })
+        const ts = getToolSteps()
+        const msg = { role: 'assistant', content: finalText, sender: agentName }
+        if (ts.length) msg.toolSteps = ts
+        session.messages.push(msg)
         await window.api.saveSession(session)
       }
     }
