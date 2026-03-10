@@ -275,6 +275,7 @@ button:hover { background: #2a2a2a; }
 /* Sidebar footer (M32) */
 .sidebar-footer {
   padding: 8px 10px; border-top: 1px solid #1a1a1a;
+  -webkit-app-region: no-drag;
 }
 .sidebar-footer-btn {
   background: none; border: none; color: #555; font-size: 12px;

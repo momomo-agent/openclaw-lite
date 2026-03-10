@@ -306,7 +306,19 @@ app.whenReady().then(() => {
     startMemoryWatch()
     sessionStore.migrateFromJson(clawDir)
     // Auto-register current workspace if not already
-    workspaceRegistry.addWorkspace(clawDir)
+    const regResult = workspaceRegistry.addWorkspace(clawDir)
+    // Migrate orphan sessions: assign workspace_id to sessions that don't have one
+    const ws = workspaceRegistry.getWorkspaceByPath(clawDir)
+    if (ws) {
+      try {
+        const allSessions = sessionStore.listSessions(clawDir)
+        for (const s of allSessions) {
+          if (!s.workspaceId) {
+            sessionStore.setSessionWorkspace(clawDir, s.id, ws.id, ws.id)
+          }
+        }
+      } catch (e) { console.log('[Paw] session migration error:', e.message) }
+    }
   }
 
   // App menu with New Window
