@@ -6,12 +6,15 @@ require('./exec');
 require('./search');
 require('./skill');
 require('./skill-install');
+require('./skill-create');
 require('./notify');
 require('./ui-status');
 require('./memory');
 require('./tasks');
 require('./agents');
 require('./claude-code');
+require('./cron');
+require('./mcp-config');
 
 const { getAllTools, getTool, getAnthropicTools, getToolsPrompt } = require('./registry');
 

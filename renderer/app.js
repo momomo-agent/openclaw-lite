@@ -1754,8 +1754,35 @@ async function openSettings() {
   document.getElementById('cfgHeartbeatInterval').value = config.heartbeat?.intervalMinutes || 30
   document.getElementById('cfgExecApproval').checked = config.execApproval !== false
   document.getElementById('cfgWorkspacePath').textContent = prefs.clawDir || '(not set)'
+  // MCP servers
+  const mcpEl = document.getElementById('cfgMcpServers')
+  if (mcpEl) {
+    mcpEl.value = config.mcpServers ? JSON.stringify(config.mcpServers, null, 2) : ''
+  }
+  // Load MCP status
+  if (window.api.getMcpStatus) {
+    try {
+      const mcpStatus = await window.api.getMcpStatus()
+      renderMcpStatus(mcpStatus)
+    } catch {}
+  }
   switchSettingsTab('general')
   document.getElementById('settingsOverlay').style.display = 'flex'
+}
+
+function renderMcpStatus(status) {
+  const el = document.getElementById('mcpStatus')
+  if (!el || !status) return
+  const entries = Object.entries(status)
+  if (entries.length === 0) {
+    el.innerHTML = '<p class="hint">No MCP servers configured.</p>'
+    return
+  }
+  el.innerHTML = '<label>Server Status</label>' + entries.map(([name, info]) => {
+    const dot = info.status === 'connected' ? '🟢' : '🔴'
+    const detail = info.status === 'connected' ? `${info.toolCount} tools` : (info.error || 'disconnected')
+    return `<div style="font-size:13px;color:#ccc;margin:4px 0">${dot} <strong>${name}</strong> — ${detail}</div>`
+  }).join('')
 }
 
 async function changeWorkspace() {
@@ -1793,11 +1820,25 @@ async function saveSettings() {
       intervalMinutes: parseInt(document.getElementById('cfgHeartbeatInterval').value) || 30,
     },
   }
+  // MCP servers
+  const mcpText = document.getElementById('cfgMcpServers')?.value?.trim()
+  if (mcpText) {
+    try {
+      config.mcpServers = JSON.parse(mcpText)
+    } catch (e) {
+      alert('Invalid MCP JSON: ' + e.message)
+      return
+    }
+  }
   const codingAgent = document.getElementById('cfgCodingAgent').value
   await window.api.saveConfig(config)
   await window.api.setCodingAgent(codingAgent)
   if (config.heartbeat.enabled) await window.api.heartbeatStart()
   else await window.api.heartbeatStop()
+  // Reconnect MCP servers if config changed
+  if (window.api.mcpReconnect) {
+    try { await window.api.mcpReconnect() } catch {}
+  }
   closeSettings()
 }
 

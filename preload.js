@@ -71,6 +71,9 @@ contextBridge.exposeInMainWorld('api', {
   // Heartbeat
   heartbeatStart: () => ipcRenderer.invoke('heartbeat-start'),
   heartbeatStop: () => ipcRenderer.invoke('heartbeat-stop'),
+  // MCP
+  getMcpStatus: () => ipcRenderer.invoke('mcp-status'),
+  mcpReconnect: () => ipcRenderer.invoke('mcp-reconnect'),
   onHeartbeat: (cb) => ipcRenderer.on('heartbeat-result', (_, r) => cb(r)),
   onStatus: (cb) => { ipcRenderer.removeAllListeners('agent-status'); ipcRenderer.on('agent-status', (_, s) => cb(s)) },
   onWatsonStatus: (cb) => { ipcRenderer.on('watson-status', (_, s) => cb(s)) },

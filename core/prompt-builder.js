@@ -57,6 +57,9 @@ async function buildSystemPrompt(workspacePath) {
 - **task_create / task_update / task_list**: Manage shared tasks
 - **send_message**: Send a message to another agent
 - **create_agent / remove_agent**: Manage lightweight agents in session
+- **skill_create**: Create a new skill with scaffolding (SKILL.md + scripts/ + references/)
+- **cron**: Manage scheduled jobs (status, list, add, update, remove, run, runs, wake)
+- **mcp_config**: Manage MCP servers (list, add, remove, update, status). Add external tool servers that the AI can then use.
 
 ### Rules
 - When asked to "write", "save", "create a file" — call file_write. Do not just output content as text.

@@ -113,7 +113,9 @@ function truncateToolResult(result, contextWindowTokens) {
 const { extractLinkContext: coreExtractLinkContext } = require('./core/link-extract')
 const { listAgents: coreListAgents, loadAgent: coreLoadAgent, saveAgent: coreSaveAgent, createAgent: coreCreateAgent, agentsDir: coreAgentsDir } = require('./core/agents')
 const { pushStatus: corePushStatus, sendNotification: coreSendNotification, pushWatsonStatus: corePushWatsonStatus } = require('./core/notify')
-const { startHeartbeat: coreStartHeartbeat, stopHeartbeat: coreStopHeartbeat } = require('./core/heartbeat')
+const { startHeartbeat: coreStartHeartbeat, stopHeartbeat: coreStopHeartbeat, startHeartbeatCron, stopHeartbeatCron } = require('./core/heartbeat')
+const { McpManager } = require('./core/mcp-client')
+const { CronService } = require('./core/cron')
 const { updateTrayMenu: coreUpdateTrayMenu } = require('./core/tray')
 const { buildMemoryIndex: coreBuildMemoryIndex, startMemoryWatch: coreStartMemoryWatch, stopMemoryWatch: coreStopMemoryWatch } = require('./core/memory-watch')
 const { buildSystemPrompt: coreBuildSystemPrompt, buildAgentPrompt: coreBuildAgentPrompt } = require('./core/prompt-builder')
@@ -140,6 +142,8 @@ function syncState() {
 }
 let memoryWatcher = null
 let _sessionExpiry = null
+const mcpManager = new McpManager()
+let cronService = null
 
 // ── Notification helpers (must be before first usage in chat/stream) ──
 function pushStatus(win, st, detail) {
@@ -188,16 +192,24 @@ function saveAgent(agent) { syncState(); coreSaveAgent(agent); }
 function createAgent(name, soul, model) { syncState(); return coreCreateAgent(name, soul, model); }
 
 // ── Tool definitions ──
-// All tools come from registry (tools/ directory)
-function getAnthropicToolsArray() {
-  return getAnthropicTools();
-}
-
-// Gate legacy agent/task tools when feature flag is off
+// All tools come from registry (tools/ directory) + MCP tools
 const LEGACY_TOOL_NAMES = new Set(['task_create', 'task_update', 'task_list', 'send_message', 'create_agent', 'remove_agent'])
-const TOOLS = LEGACY_AGENT_FEATURES
-  ? getAnthropicToolsArray()
-  : getAnthropicToolsArray().filter(t => !LEGACY_TOOL_NAMES.has(t.name));
+
+function getToolsWithMcp() {
+  let tools = getAnthropicTools();
+  if (!LEGACY_AGENT_FEATURES) {
+    tools = tools.filter(t => !LEGACY_TOOL_NAMES.has(t.name));
+  }
+  // Merge MCP tools
+  const mcpTools = mcpManager.listTools();
+  if (mcpTools.length > 0) {
+    tools = tools.concat(mcpTools);
+  }
+  return tools;
+}
+// Legacy compat: TOOLS now calls the function
+const TOOLS_PROXY = { get tools() { return getToolsWithMcp(); } };
+const TOOLS = getToolsWithMcp();  // Initial snapshot for module-load-time references
 
 // Group chat: delegate_to tool schema (injected dynamically for group owner)
 const DELEGATE_TO_TOOL = {
@@ -219,7 +231,7 @@ const AGENT_ALLOWED_TOOLS = new Set([
   'task_create', 'task_update', 'task_list', 'send_message',
 ]);
 function getToolsForAgent() {
-  return TOOLS.filter(t => AGENT_ALLOWED_TOOLS.has(t.name));
+  return getToolsWithMcp().filter(t => AGENT_ALLOWED_TOOLS.has(t.name));
 }
 
 // Auto-assign: find best matching agent for a task title based on role keyword overlap
@@ -229,6 +241,15 @@ async function executeTool(name, input, config, { sessionId: _sid, agentName: _a
   // ── Group chat: delegate_to — route message to another participant ──
   if (name === 'delegate_to') {
     return await handleDelegateTo(input, config, sid)
+  }
+
+  // MCP tools: mcp__ prefix → route to MCP manager
+  if (mcpManager.isMcpTool(name)) {
+    try {
+      return await mcpManager.callTool(name, input);
+    } catch (e) {
+      return `MCP error: ${e.message}`;
+    }
   }
 
   // Try registry first for pluggable tools
@@ -246,6 +267,11 @@ async function executeTool(name, input, config, { sessionId: _sid, agentName: _a
       sendNotification,
       pushStatus: pushWatsonStatus,
       listAgentsFn: listAgents,
+      cronService,
+      mcpManager,
+      configPath: configPath(),
+      loadConfigFn: loadConfig,
+      saveConfigFn: (cfg) => { saveGlobalConfig(cfg); },
       approvalCallback: async (request) => {
         if (!mainWindow) return false;
         const { dialog } = require('electron');
@@ -365,12 +391,20 @@ app.whenReady().then(() => {
   // Sync all globals to core/state after initialization
   syncState()
 
+  // Start MCP servers + Cron service
+  initMcpAndCron()
+
   // Start heartbeat (default-on)
   startHeartbeat()
 })
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
-app.on('will-quit', () => { sessionStore.closeDb(); memoryIndex.closeDb(); try { require('./tools/claude-code').ccStop() } catch {} })
+app.on('will-quit', () => {
+  sessionStore.closeDb(); memoryIndex.closeDb();
+  try { require('./tools/claude-code').ccStop() } catch {}
+  mcpManager.disconnectAll().catch(() => {});
+  if (cronService) cronService.stop();
+})
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 
 async function openNewWindow() {
@@ -753,7 +787,7 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
 
   // Build system prompt + select tools
   let systemPrompt
-  let chatTools = TOOLS
+  let chatTools = getToolsWithMcp()
   if (isLightweight && agent?.role) {
     // Lightweight agent: compact prompt, filtered tools
     const sessionAgents = sessionStore.listSessionAgents(clawDir, sessionId) || []
@@ -1037,7 +1071,7 @@ async function handleDelegateTo(input, config, sessionId) {
   const fullConfig = { ...llmConfig, apiKey: config?.apiKey || llmConfig.apiKey, model: config?.model || llmConfig.model, baseUrl: config?.baseUrl || llmConfig.baseUrl }
 
   // Delegate gets all tools EXCEPT delegate_to (no recursion)
-  const delegateTools = TOOLS.filter(t => t.name !== 'delegate_to')
+  const delegateTools = getToolsWithMcp().filter(t => t.name !== 'delegate_to')
 
   try {
     // Signal delegate start — frontend creates independent bubble
@@ -1144,7 +1178,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
     _activeAbortController?.abort(new Error('Agent timeout'))
     ipc('chat-status', { text: '超时', requestId })
   }, timeoutMs)
-  const activeTools = tools || TOOLS
+  const activeTools = tools || getToolsWithMcp()
   const base = (config.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '')
   const endpoint = base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`
   const headers = { 'Content-Type': 'application/json', 'x-api-key': getApiKey(config), 'anthropic-version': '2023-06-01', 'anthropic-beta': 'prompt-caching-2024-07-31' }
@@ -1353,7 +1387,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
     _activeAbortController?.abort(new Error('Agent timeout'))
     ipc('chat-status', { text: '超时', requestId })
   }, timeoutMs)
-  const activeTools = tools || TOOLS
+  const activeTools = tools || getToolsWithMcp()
   const base = (config.baseUrl || 'https://api.openai.com').replace(/\/+$/, '')
   const endpoint = base.endsWith('/v1') ? `${base}/chat/completions` : `${base}/v1/chat/completions`
 
@@ -1548,6 +1582,62 @@ function startHeartbeat() {
 function stopHeartbeat() { if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null } }
 ipcMain.handle('heartbeat-start', () => { startHeartbeat(); return true })
 ipcMain.handle('heartbeat-stop', () => { stopHeartbeat(); return true })
+
+// ── MCP + Cron initialization ──
+
+async function initMcpAndCron() {
+  if (!clawDir) return;
+  try {
+    const cfg = loadConfig();
+
+    // MCP: connect all configured servers
+    if (cfg.mcpServers && typeof cfg.mcpServers === 'object') {
+      console.log('[Paw] Initializing MCP servers...');
+      await mcpManager.connectAll(cfg.mcpServers);
+    }
+
+    // Cron: init service
+    const pawDir = path.join(clawDir, '.paw');
+    fs.mkdirSync(pawDir, { recursive: true });
+    cronService = new CronService({
+      pawDir,
+      onSystemEvent: async (text) => {
+        // Inject system event into main session
+        if (!mainWindow) return;
+        mainWindow.webContents.send('heartbeat-result', text);
+      },
+      onAgentTurn: async (payload) => {
+        // Simplified: run as a heartbeat-like invocation
+        try {
+          const c = loadConfig();
+          if (!c.apiKey) return { error: 'No API key' };
+          const sp = await buildSystemPrompt();
+          const msgs = [{ role: 'user', content: payload.message || payload.text || 'Cron task' }];
+          const fn = (c.provider || 'anthropic') === 'anthropic' ? streamAnthropic : streamOpenAI;
+          const rid = 'cron-' + Date.now().toString(36);
+          await fn(msgs, sp, c, mainWindow, rid);
+          return { status: 'ok' };
+        } catch (e) {
+          return { error: e.message };
+        }
+      },
+      triggerHeartbeat: () => {
+        // Re-trigger heartbeat timer
+        startHeartbeat();
+      },
+    });
+    cronService.start();
+  } catch (e) {
+    console.error('[Paw] MCP/Cron init error:', e.message);
+  }
+}
+
+ipcMain.handle('mcp-status', () => mcpManager.getStatus())
+ipcMain.handle('mcp-reconnect', async () => {
+  const cfg = loadConfig();
+  await mcpManager.reconnect(cfg.mcpServers || {});
+  return mcpManager.getStatus();
+})
 
 // ── M8-04: Notification (moved to top, see line ~126) ──
 
