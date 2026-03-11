@@ -21,6 +21,74 @@ const IC = {
   group: '<span class="ic"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>',
 }
 
+// ── Tool humanization — AI-native action descriptions ──
+const TOOL_ACTIONS = {
+  file_read:      { verb: 'Read',       icon: '📄', argKey: 'path',    extract: v => v?.split('/').pop() },
+  file_write:     { verb: 'Wrote',      icon: '✏️', argKey: 'path',    extract: v => v?.split('/').pop() },
+  file_edit:      { verb: 'Edited',     icon: '✏️', argKey: 'path',    extract: v => v?.split('/').pop() },
+  shell_exec:     { verb: 'Ran',        icon: '⚡' },
+  code_exec:      { verb: 'Ran code',   icon: '⚡' },
+  process:        { verb: 'Ran process',icon: '⚡' },
+  web_fetch:      { verb: 'Fetched',    icon: '🌐', argKey: 'url',     extract: v => { try { return new URL(v).hostname } catch { return v?.slice(0, 30) } } },
+  search:         { verb: 'Searched',   icon: '🔍', argKey: 'query',   extract: v => v?.slice(0, 40) },
+  memory_search:  { verb: 'Recalled',   icon: '🧠', argKey: 'query',   extract: v => v?.slice(0, 30) },
+  memory_get:     { verb: 'Recalled',   icon: '🧠' },
+  send_message:   { verb: 'Messaged',   icon: '💬', argKey: 'to',      extract: v => v },
+  delegate_to:    { verb: 'Delegated to', icon: '🤝', argKey: 'agent', extract: v => v },
+  create_agent:   { verb: 'Created agent', icon: '🤖' },
+  remove_agent:   { verb: 'Removed agent', icon: '🤖' },
+  task_create:    { verb: 'Created task',  icon: '📋' },
+  task_update:    { verb: 'Updated task',  icon: '📋' },
+  task_list:      { verb: 'Listed tasks',  icon: '📋' },
+  skill_exec:     { verb: 'Used skill',    icon: '✨', argKey: 'name', extract: v => v },
+  skill_create:   { verb: 'Created skill', icon: '✨' },
+  skill_install:  { verb: 'Installed',     icon: '📦' },
+  claude_code:    { verb: 'Coding',        icon: '💻' },
+  cron:           { verb: 'Scheduled',     icon: '⏰' },
+  notify:         { verb: 'Notified',      icon: '🔔' },
+  mcp_config:     { verb: 'Configured MCP',icon: '🔌' },
+  ui_status_set:  { verb: 'Updated status',icon: '📊', hidden: true },
+  stay_silent:    { verb: 'Listening',     icon: '🤫', hidden: true },
+}
+
+function humanizeToolStep(name, output) {
+  const action = TOOL_ACTIONS[name]
+  if (!action) return { text: name, icon: '🔧' }
+  // Try to extract a meaningful target from the output (which contains the args as JSON)
+  let target = ''
+  if (action.argKey && output) {
+    try {
+      const parsed = typeof output === 'string' ? JSON.parse(output) : output
+      const raw = parsed[action.argKey]
+      target = action.extract ? action.extract(raw) : raw
+    } catch {
+      // output might not be JSON, try regex for common patterns
+      if (action.argKey === 'path') {
+        const m = String(output).match(/[\w.-]+\.\w+/)
+        if (m) target = m[0]
+      }
+    }
+  }
+  return { text: target ? `${action.verb} ${target}` : action.verb, icon: action.icon, hidden: action.hidden }
+}
+
+function summarizeToolSteps(steps) {
+  // Group by action verb for a natural summary
+  const actions = []
+  const seen = new Set()
+  for (const s of steps) {
+    const h = humanizeToolStep(s.name, s.output)
+    if (h.hidden) continue
+    const key = h.text
+    if (!seen.has(key)) { seen.add(key); actions.push(h) }
+  }
+  if (!actions.length) return null
+  // Show up to 3 actions, then "+N more"
+  const shown = actions.slice(0, 3).map(a => `${a.icon} ${a.text}`)
+  const rest = actions.length - 3
+  return shown.join('  ') + (rest > 0 ? `  +${rest}` : '')
+}
+
 // ── Feature flags (loaded at init) ──
 let _featureFlags = { legacyAgentFeatures: false }
 
@@ -161,12 +229,12 @@ window.api.onDelegateToken(({ token, thinking, toolStep, roundInfo, sessionId: e
   const flow = _delegateState.textEl.parentNode
   if (toolStep) {
     // Tool step — render in collapsible tool group (same pattern as main streaming)
-    const SILENT_TOOLS = ['ui_status_set', 'notify']
-    if (SILENT_TOOLS.includes(toolStep.name)) return
+    const h = humanizeToolStep(toolStep.name, toolStep.output)
+    if (h.hidden) return
     if (!_delegateState.toolGroup) {
       _delegateState.toolGroup = document.createElement('div')
       _delegateState.toolGroup.className = 'tool-group-inline'
-      _delegateState.toolGroup.innerHTML = `<div class="tool-group-header"><span class="tool-expand">▶</span> ${IC.wrench} <span class="tool-count">0</span> tool calls</div><div class="tool-group-body" style="display:none"></div>`
+      _delegateState.toolGroup.innerHTML = `<div class="tool-group-header tool-running"><span class="tool-action-text"><span class="tool-pulse"></span> ${esc(h.icon)} ${esc(h.text)}...</span> <span class="tool-expand">▶</span></div><div class="tool-group-body" style="display:none"></div>`
       const tg = _delegateState.toolGroup
       tg.querySelector('.tool-group-header').onclick = () => {
         const body = tg.querySelector('.tool-group-body')
@@ -176,22 +244,27 @@ window.api.onDelegateToken(({ token, thinking, toolStep, roundInfo, sessionId: e
         arrow.textContent = show ? '▼' : '▶'
       }
       flow.insertBefore(_delegateState.toolGroup, _delegateState.textEl)
+    } else {
+      const actionText = _delegateState.toolGroup.querySelector('.tool-action-text')
+      if (actionText) actionText.innerHTML = `<span class="tool-pulse"></span> ${esc(h.icon)} ${esc(h.text)}...`
     }
     const body = _delegateState.toolGroup.querySelector('.tool-group-body')
-    const count = _delegateState.toolGroup.querySelector('.tool-count')
     const item = document.createElement('div')
     item.className = 'tool-step-item'
-    item.innerHTML = `<span class="tool-step-name">${esc(toolStep.name)}</span> <span class="tool-step-output">${esc(String(toolStep.output).slice(0, 80))}</span>`
+    item.innerHTML = `<span class="tool-step-icon">${h.icon}</span> <span class="tool-step-name">${esc(h.text)}</span>`
     body.appendChild(item)
-    count.textContent = body.children.length
   } else if (roundInfo) {
     // Round info — update tool group header
     if (_delegateState.toolGroup) {
       const header = _delegateState.toolGroup.querySelector('.tool-group-header')
       if (header) {
-        const count = _delegateState.toolGroup.querySelector('.tool-count')?.textContent || '0'
-        const expand = _delegateState.toolGroup.querySelector('.tool-expand')?.textContent || '▼'
-        header.innerHTML = `<span class="tool-expand">${expand}</span> ${IC.wrench} <span class="tool-count">${count}</span> tool calls <span class="tool-round">round ${roundInfo.round}</span>`
+        header.classList.remove('tool-running')
+        const expand = _delegateState.toolGroup.querySelector('.tool-expand')?.textContent || '▶'
+        // Build summary from body items
+        const items = _delegateState.toolGroup.querySelectorAll('.tool-step-item')
+        const steps = Array.from(items).map(i => ({ name: i.querySelector('.tool-step-name')?.textContent || '' }))
+        const summaryText = steps.map(s => s.name).slice(0, 3).join(', ') || '✓ Done'
+        header.innerHTML = `<span class="tool-action-text">${summaryText}</span> <span class="tool-expand">${expand}</span>`
       }
     }
     // New round — reset tool group so next tools create a new group
@@ -1301,15 +1374,16 @@ function registerStreamHandlers(myRequestId, initialFlowContainer, firstTextEl, 
       messages.scrollTop = messages.scrollHeight
     },
     onToolStep(d) {
-      // delegate_to: show as "→ Name" without long output
       const isDelegation = d.name === 'delegate_to'
       const displayOutput = isDelegation ? '→ delegating...' : String(d.output).slice(0, 120)
       myToolSteps.push({ name: d.name, output: displayOutput })
       if (sendSessionId) setActivity(sendSessionId, 'running')
+      const h = humanizeToolStep(d.name, d.output)
+      if (h.hidden) return
       if (!currentToolGroup) {
         currentToolGroup = document.createElement('div')
         currentToolGroup.className = 'tool-group-inline'
-        currentToolGroup.innerHTML = `<div class="tool-group-header"><span class="tool-expand">▶</span> ${IC.wrench} <span class="tool-count">0</span> tool calls</div><div class="tool-group-body" style="display:none"></div>`
+        currentToolGroup.innerHTML = `<div class="tool-group-header tool-running"><span class="tool-action-text"><span class="tool-pulse"></span> ${esc(h.icon)} ${esc(h.text)}...</span> <span class="tool-expand">▶</span></div><div class="tool-group-body" style="display:none"></div>`
         const thisGroup = currentToolGroup
         thisGroup.querySelector('.tool-group-header').onclick = () => {
           const body = thisGroup.querySelector('.tool-group-body')
@@ -1320,25 +1394,28 @@ function registerStreamHandlers(myRequestId, initialFlowContainer, firstTextEl, 
         }
         flowContainer.appendChild(currentToolGroup)
         keepStatusAtBottom()
+      } else {
+        // Update header to show current action
+        const actionText = currentToolGroup.querySelector('.tool-action-text')
+        if (actionText) actionText.innerHTML = `<span class="tool-pulse"></span> ${esc(h.icon)} ${esc(h.text)}...`
       }
       const body = currentToolGroup.querySelector('.tool-group-body')
-      const count = currentToolGroup.querySelector('.tool-count')
       const item = document.createElement('div')
       item.className = 'tool-step-item'
-      item.innerHTML = `<span class="tool-step-name">${esc(d.name)}</span> <span class="tool-step-output">${esc(String(d.output).slice(0, 80))}</span>`
+      item.innerHTML = `<span class="tool-step-icon">${h.icon}</span> <span class="tool-step-name">${esc(h.text)}</span>`
       body.appendChild(item)
-      count.textContent = body.children.length
       messages.scrollTop = messages.scrollHeight
     },
     onStatus() {},
     onRoundInfo(d) {
-      // Update the latest tool group header with round info
+      // Round complete — finalize tool group header with summary
       if (currentToolGroup) {
         const header = currentToolGroup.querySelector('.tool-group-header')
         if (header) {
-          const count = currentToolGroup.querySelector('.tool-count')?.textContent || '0'
-          const expand = currentToolGroup.querySelector('.tool-expand')?.textContent || '▼'
-          header.innerHTML = `<span class="tool-expand">${expand}</span> ${IC.wrench} <span class="tool-count">${count}</span> tool calls <span class="tool-round">round ${d.round}</span>`
+          header.classList.remove('tool-running')
+          const expand = currentToolGroup.querySelector('.tool-expand')?.textContent || '▶'
+          const summary = summarizeToolSteps(myToolSteps) || '✓ Done'
+          header.innerHTML = `<span class="tool-action-text">${summary}</span> <span class="tool-expand">${expand}</span>`
         }
       }
     }
@@ -1348,7 +1425,7 @@ function registerStreamHandlers(myRequestId, initialFlowContainer, firstTextEl, 
   return { getFullText: () => fullText, getLastSegment: () => segmentText, getToolSteps: () => myToolSteps, getAllCards: () => allCards }
 }
 
-function finalizeCard(card, myRequestId, fullText) {
+function finalizeCard(card, myRequestId, fullText, toolSteps) {
   requestHandlers.delete(myRequestId)
   if (fullText.trim()) {
     card.querySelectorAll('.msg-content.md-content').forEach(el => {
@@ -1360,6 +1437,13 @@ function finalizeCard(card, myRequestId, fullText) {
     const arrow = g.querySelector('.tool-expand')
     if (body) body.style.display = 'none'
     if (arrow) arrow.textContent = '▶'
+    // Set final summary in header
+    const header = g.querySelector('.tool-group-header')
+    if (header && toolSteps?.length) {
+      header.classList.remove('tool-running')
+      const summary = summarizeToolSteps(toolSteps) || '✓ Done'
+      header.innerHTML = `<span class="tool-action-text">${summary}</span> <span class="tool-expand">▶</span>`
+    }
   })
 }
 
@@ -1812,7 +1896,8 @@ function addCard(role, content, sender, rawHtml, toolSteps, avatarOverride) {
 function renderSavedToolSteps(container, steps) {
   const group = document.createElement('div')
   group.className = 'tool-group-inline'
-  group.innerHTML = `<div class="tool-group-header">${IC.wrench} <span class="tool-count">${steps.length}</span> 个工具调用 <span class="tool-expand">▶</span></div><div class="tool-group-body" style="display:none"></div>`
+  const summary = summarizeToolSteps(steps) || `🔧 ${steps.length} actions`
+  group.innerHTML = `<div class="tool-group-header"><span class="tool-action-text">${summary}</span> <span class="tool-expand">▶</span></div><div class="tool-group-body" style="display:none"></div>`
   group.querySelector('.tool-group-header').onclick = () => {
     const body = group.querySelector('.tool-group-body')
     const arrow = group.querySelector('.tool-expand')
@@ -1822,9 +1907,11 @@ function renderSavedToolSteps(container, steps) {
   }
   const body = group.querySelector('.tool-group-body')
   for (const s of steps) {
+    const h = humanizeToolStep(s.name, s.output)
+    if (h.hidden) continue
     const item = document.createElement('div')
     item.className = 'tool-step-item'
-    item.innerHTML = `<span class="tool-step-name">${esc(s.name)}</span> <span class="tool-step-output">${esc(String(s.output || '').slice(0, 80))}</span>`
+    item.innerHTML = `<span class="tool-step-icon">${h.icon}</span> <span class="tool-step-name">${esc(h.text)}</span>`
     body.appendChild(item)
   }
   container.appendChild(group)
@@ -1835,10 +1922,15 @@ function renderToolGroup(slot, steps, forceCollapse) {
   slot.innerHTML = ''
   const group = document.createElement('div')
   group.className = 'tool-group-live'
-  // During streaming: expand so user sees progress. After done / forceCollapse: collapse.
   const userToggled = slot.dataset.userToggled === 'true'
   const expanded = forceCollapse ? false : (userToggled ? slot.dataset.expanded === 'true' : true)
-  group.innerHTML = `<div class="tool-group-header">${IC.wrench} <span class="tool-count">${steps.length}</span> 个工具调用 <span class="tool-expand">${expanded ? '▼' : '▶'}</span></div><div class="tool-group-body" style="display:${expanded ? 'block' : 'none'}"></div>`
+  const isRunning = !forceCollapse
+  const lastStep = steps[steps.length - 1]
+  const lastH = humanizeToolStep(lastStep.name, lastStep.output)
+  const headerContent = isRunning
+    ? `<span class="tool-action-text"><span class="tool-pulse"></span> ${esc(lastH.icon)} ${esc(lastH.text)}...</span>`
+    : `<span class="tool-action-text">${summarizeToolSteps(steps) || '✓ Done'}</span>`
+  group.innerHTML = `<div class="tool-group-header${isRunning ? ' tool-running' : ''}">${headerContent} <span class="tool-expand">${expanded ? '▼' : '▶'}</span></div><div class="tool-group-body" style="display:${expanded ? 'block' : 'none'}"></div>`
   group.querySelector('.tool-group-header').onclick = () => {
     const body = group.querySelector('.tool-group-body')
     const arrow = group.querySelector('.tool-expand')
@@ -1850,9 +1942,11 @@ function renderToolGroup(slot, steps, forceCollapse) {
   }
   const body = group.querySelector('.tool-group-body')
   for (const s of steps) {
+    const h = humanizeToolStep(s.name, s.output)
+    if (h.hidden) continue
     const item = document.createElement('div')
     item.className = 'tool-step-item'
-    item.innerHTML = `<span class="tool-step-name">${esc(s.name)}</span> <span class="tool-step-output">${esc(s.output.slice(0, 80))}</span>`
+    item.innerHTML = `<span class="tool-step-icon">${h.icon}</span> <span class="tool-step-name">${esc(h.text)}</span>`
     body.appendChild(item)
   }
   slot.appendChild(group)
@@ -2149,7 +2243,7 @@ async function triggerAgentResponse(agentId, agentName, prompt, sendSessionId) {
       sessionId: sendSessionId, requestId: reqId
     })
     const finalText = getFullText() || result?.answer || ''
-    finalizeCard(card, reqId, finalText)
+    finalizeCard(card, reqId, finalText, getToolSteps())
 
     if (sendSessionId) {
       const session = await window.api.loadSession(sendSessionId)

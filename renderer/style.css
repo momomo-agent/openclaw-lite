@@ -536,30 +536,39 @@ button:hover { background: var(--border-muted); }
 
 /* Tool group (live collapsed) — Claude-style inline, no card */
 .tool-group-live, .tool-group-inline {
-  margin: 2px 0; font-size: 13px;
+  margin: 4px 0; font-size: 13px;
 }
 .tool-group-header {
-  padding: 2px 0; color: var(--text-faint); cursor: pointer;
-  display: flex; align-items: center; gap: 5px;
+  padding: 3px 0; color: var(--text-faint); cursor: pointer;
+  display: flex; align-items: center; gap: 6px;
   user-select: none; font-size: 13px;
 }
 .tool-group-header:hover { color: var(--text-muted); }
-.tool-expand { font-size: 9px; color: var(--text-ghost); }
-.tool-round { font-size: 11px; color: var(--text-faint); margin-left: 4px; }
+.tool-action-text { display: flex; align-items: center; gap: 4px; flex: 1; }
+.tool-expand { font-size: 9px; color: var(--text-ghost); flex-shrink: 0; }
 .tool-group-body {
-  padding: 2px 0 2px 16px;
-  border-left: 1.5px solid var(--border-default); margin-left: 2px; margin-top: 2px;
+  padding: 4px 0 4px 20px;
+  border-left: 1.5px solid var(--border-default); margin-left: 4px; margin-top: 2px;
 }
-.tool-step-item.success .tool-step-name::before { content: '✓ '; color: var(--status-done); }
-.tool-step-item.error .tool-step-name::before { content: '✗ '; color: var(--status-error); }
-.tool-step-item.error .tool-step-output { color: var(--status-error); }
+/* Pulse dot for running state */
+.tool-pulse {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent-primary); margin-right: 2px;
+  animation: tool-pulse-anim 1.2s ease-in-out infinite;
+}
+@keyframes tool-pulse-anim {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.tool-group-header:not(.tool-running) .tool-pulse { display: none; }
 .tool-step-item {
   padding: 2px 0;
-  color: var(--text-ghost); font-size: 12px; line-height: 1.4;
+  color: var(--text-faint); font-size: 12px; line-height: 1.5;
+  display: flex; align-items: center; gap: 4px;
 }
-.tool-step-item + .tool-step-item { border-top: none; }
-.tool-step-name { color: var(--text-faint); font-weight: 500; }
-.tool-step-output { color: var(--text-ghost); }
+.tool-step-icon { font-size: 12px; flex-shrink: 0; }
+.tool-step-name { color: var(--text-faint); }
+.tool-step-item.error .tool-step-name { color: var(--status-error); }
 
 /* Per-card status line */
 .card-status-line {
