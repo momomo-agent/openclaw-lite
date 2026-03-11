@@ -72,12 +72,44 @@ Paw 从单 workspace 工具变成多 workspace IM。MVP = P0 + P1（F160-F168）
 
 ---
 
+## Phase 3: Coding Agent + 群聊
+
+**F169: Coding Agent 直连** ✅ `cab3a71`
+- [x] coding agent 对话形式终端体验
+- [x] CLI 流式渲染（stdout/stderr 实时）
+- [x] Session 持久化 + 容器缓存
+
+**F172-F175: 群聊** ✅ `cab3a71` `0c7e666` `23f96d9`
+- [x] Session participants + owner（群主 = 默认回复者）
+- [x] @mention 路由 → 对应 workspace context
+- [x] 群主默认回复
+- [x] 群成员管理（拉人/踢人）
+- [x] delegate 独立气泡 + 完整 agent pipeline
+- [x] session 隔离 + IM 式消息持久化
+
+---
+
+## Phase 4: IM 侧边栏重设计
+
+**F176-F178: IM 风格侧边栏** ✅ `3569de0`
+- [x] 移除 workspace 分组，改为扁平 IM 列表
+- [x] 头像（群聊=👥，私聊=workspace avatar，无=🤖）+ 标题 + 时间
+- [x] 副文本：运行中=AI status 斜体，空闲=lastMsg，群聊加 sender 前缀
+- [x] 状态点：thinking=黄, running=蓝, done=绿, need_you=红, idle=隐藏
+- [x] renameSession API（不改 updatedAt）
+- [x] 移除 agent 编辑简介字段、📥 导出按钮
+
+---
+
 ## 成功标准
 
-- [x] F160-F168 全部实现
+- [x] F160-F178 全部实现
 - [x] 旧功能已关闭，不可见
-- [x] 可同时加载 2+ workspace，sidebar 按人分组
+- [x] 可同时加载 2+ workspace，sidebar IM 风格扁平列表
 - [x] 新建对话时选择跟谁说话
 - [x] 切换 session 时 context 自动切换
-- [x] 可编辑 workspace 的名字、头像、简介
+- [x] 可编辑 workspace 的名字、头像
+- [x] Coding agent 直连 + 流式渲染
+- [x] 群聊：@mention 路由、群主默认回复、delegate 独立气泡
+- [x] 侧边栏 IM 风格：头像+标题+时间/副文本+状态点
 - [x] 现有单 workspace 对话功能无回归
