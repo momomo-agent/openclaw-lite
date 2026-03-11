@@ -73,6 +73,8 @@ function ensureSchema(db) {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_session_agents_session ON session_agents(session_id)`)
   // Migration: add mode column if missing
   try { db.exec(`ALTER TABLE sessions ADD COLUMN mode TEXT DEFAULT 'chat'`) } catch {}
+  // Migration: add participants column if missing
+  try { db.exec(`ALTER TABLE sessions ADD COLUMN participants TEXT DEFAULT '[]'`) } catch {}
 }
 
 function _parseParticipants(raw) {
