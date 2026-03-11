@@ -50,6 +50,11 @@
 | B034 | Agent 管理面板重构 | kenefe | P1 | M15 |
 | B035 | 文件路径可点击 | kenefe | P0 | M9 |
 | B036 | 主/轻量 Agent 分层 | kenefe | P0 | M19 |
+| B041 | Skill Creator（skill_create 工具）| kenefe | P1 | M33 |
+| B042 | Frontmatter 完全对齐 OpenClaw | kenefe | P1 | M33 |
+| B043 | MCP 支持（Native Client）| kenefe | P0 | M33 |
+| B044 | Cron 定时任务 | kenefe | P0 | M33 |
+| B045 | mcp_config 对话管理 | kenefe | P1 | M33 |
 
 ## 流程规范
 

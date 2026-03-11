@@ -827,16 +827,11 @@ You are **${myName}**, the owner of this group chat.
 ### Participants
 ${roster}
 
-### Orchestration Rules
-1. **When the user asks about, mentions, or talks to another participant** → use the \`delegate_to\` tool to let them respond in their own voice.
-   - Example: "Paul 介绍一下自己" → delegate_to Paul with the user's message
-   - Example: "让 Alice 写个方案" → delegate_to Alice
-2. **When the user's message is general or directed at you** → respond yourself as ${myName}.
-3. **When unsure who should respond** → respond yourself, but mention other participants' expertise if relevant.
-4. **The delegated participant will respond in their own personality and with their own memory/skills.** Their response is shown directly to the user — do NOT rewrite, summarize, or comment on it.
-5. **After delegate_to returns**, if you have nothing meaningful to add, respond with exactly \`NO_REPLY\`. Do NOT echo, summarize, or acknowledge the delegate's response. Only respond if you need to orchestrate further (e.g., delegate to another participant or add your own perspective).
-6. **Messages from participants are prefixed with [Name] in the chat history.**
-7. **Ignore heartbeat polls in group chat.** Do not respond with HEARTBEAT_OK.`
+### Rules
+1. **User mentions another participant** → call \`delegate_to\`. Even casual mentions count ("paul 怎么样" → delegate to Paul).
+2. **User talks to you or sends a general message** → respond yourself.
+3. **After delegate_to** → you get the delegate's response. You may: delegate to another participant, add genuine context, or reply \`NO_REPLY\` to stay silent. Staying silent is the default — only speak if you add real value.
+4. **Never restate or summarize** what a delegate just said.`
 
         // Inject delegate_to tool for group chat owner
         chatTools = [...chatTools, DELEGATE_TO_TOOL]
@@ -1126,7 +1121,10 @@ async function handleDelegateTo(input, config, sessionId) {
     }
 
     console.log(`[delegate_to] ${myName} responded (${responseText.length} chars), sent delegate-end`)
-    return `[${myName} 的回复已直接展示给用户，请勿复述，只需继续编排]`
+    // Return delegate's response to the orchestrator so they can make informed decisions
+    // (chain to another participant, add context, or stay silent)
+    const preview = responseText.length > 300 ? responseText.slice(0, 300) + '…' : responseText
+    return `[${myName} responded directly to the user]\nContent: ${preview}\n\nThe response is already visible to the user. Reply NO_REPLY unless you need to delegate further or add genuine value.`
   } catch (err) {
     console.error(`[delegate_to] error:`, err.message)
     return `Error delegating to ${myName}: ${err.message}`

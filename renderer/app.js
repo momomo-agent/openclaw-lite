@@ -1309,10 +1309,12 @@ async function send() {
       const finalText = getFullText() || result?.answer || ''
       const lastSegment = getLastSegment()
 
-      // NO_REPLY filtering — suppress silent replies (OpenClaw-aligned)
-      // Check last segment for NO_REPLY (post-delegate the fullText includes pre-delegate text)
-      const isNoReply = finalText.trim() === 'NO_REPLY' || (lastSegment.trim() === 'NO_REPLY')
+      // NO_REPLY filtering — suppress silent replies
+      // After delegation, owner may output NO_REPLY, partial "NO_", or empty text → all mean silence
       const hasDelegateMessages = _pendingDelegateMessages.length > 0
+      const postDelegateText = lastSegment.trim()
+      const isNoReply = finalText.trim() === 'NO_REPLY' || postDelegateText === 'NO_REPLY'
+        || (hasDelegateMessages && (!postDelegateText || postDelegateText.toUpperCase().startsWith('NO_')))
 
       let actualSender = targetAgentName
       let actualWorkspaceId = targetWorkspaceId || null

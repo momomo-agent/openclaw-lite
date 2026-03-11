@@ -1,6 +1,20 @@
-# M32: 多 Workspace IM 体验 — Roadmap
+# Paw Roadmap
 
-## 目标
+## 最新完成：M33 — Skill Creator + MCP + Cron 对齐 OpenClaw ✅
+
+详见 `milestones/m33-kickoff.md`。三个核心能力全部完成：Skill 创建（F180-F183）、MCP Native Client（F184-F187b）、Cron 定时任务（F188-F191）。
+
+---
+
+## 上一个：M32 — 多 Workspace IM 体验 ✅
+
+详见下方原始 roadmap。F160-F178 全部完成。
+
+---
+
+## M32 原始 Roadmap
+
+### 目标
 Paw 从单 workspace 工具变成多 workspace IM。MVP = P0 + P1（F160-F168）。
 
 ---
