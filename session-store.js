@@ -87,7 +87,8 @@ function listSessions(clawDir, { workspaceId } = {}) {
   const sessions = d.prepare(`
     SELECT s.id, s.title, s.created_at as createdAt, s.updated_at as updatedAt,
            s.mode, s.status_level as statusLevel, s.status_text as statusText, s.participants,
-           (SELECT substr(m.content, 1, 60) FROM messages m WHERE m.session_id = s.id ORDER BY m.id DESC LIMIT 1) as lastMessage
+           (SELECT substr(m.content, 1, 60) FROM messages m WHERE m.session_id = s.id ORDER BY m.id DESC LIMIT 1) as lastMessage,
+           (SELECT json_extract(m.metadata, '$.sender') FROM messages m WHERE m.session_id = s.id ORDER BY m.id DESC LIMIT 1) as lastSender
     FROM sessions s ORDER BY s.updated_at DESC
   `).all()
   for (const s of sessions) {
@@ -140,6 +141,12 @@ function deleteSession(clawDir, id) {
   const d = getDb(clawDir)
   if (!d) return
   d.prepare('DELETE FROM sessions WHERE id = ?').run(id)
+}
+
+function renameSession(clawDir, id, title) {
+  const d = getDb(clawDir)
+  if (!d) return
+  d.prepare('UPDATE sessions SET title = ? WHERE id = ?').run(title, id)
 }
 
 function createSession(clawDir, title, { participants, mode } = {}) {
@@ -336,4 +343,4 @@ function removeSessionParticipant(clawDir, sessionId, workspaceId) {
   return true
 }
 
-module.exports = { getDb, listSessions, loadSession, saveSession, deleteSession, createSession, closeDb, createTask, updateTask, listTasks, updateSessionStatus, getSessionStatus, getSessionMode, setSessionMode, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, addSessionParticipant, removeSessionParticipant, getSessionParticipants }
+module.exports = { getDb, listSessions, loadSession, saveSession, deleteSession, renameSession, createSession, closeDb, createTask, updateTask, listTasks, updateSessionStatus, getSessionStatus, getSessionMode, setSessionMode, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, addSessionParticipant, removeSessionParticipant, getSessionParticipants }

@@ -496,6 +496,9 @@ ipcMain.handle('session-create', (_, opts) => {
 ipcMain.handle('session-delete', (_, id) => {
   try { deleteSessionById(id); return true } catch { return false }
 })
+ipcMain.handle('session-rename', (_, id, title) => {
+  try { sessionStore.renameSession(clawDir, id, title); return true } catch { return false }
+})
 ipcMain.handle('session-export', (_, id) => {
   const s = loadSession(id)
   if (!s) return null

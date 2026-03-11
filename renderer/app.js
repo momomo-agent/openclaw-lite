@@ -12,19 +12,38 @@ const aiStatus = new Map()      // sessionId -> text ('' = none)
 function setActivity(sessionId, level) {
   activityState.set(sessionId, level)
   const item = document.querySelector(`.session-item[data-id="${sessionId}"]`)
-  const dot = item?.querySelector('.session-status-dot')
-  if (dot) dot.className = `session-status-dot ${level}`
+  if (!item) return
+  const dot = item.querySelector('.session-dot')
+  if (dot) {
+    dot.className = `session-dot ${level}`
+    dot.style.display = level === 'idle' ? 'none' : ''
+  }
+  // Update subtitle: active states show AI status text, idle/done show lastMsg
+  _updateSubtitle(item, sessionId)
 }
 
 function setAiStatus(sessionId, text) {
   aiStatus.set(sessionId, text || '')
   const item = document.querySelector(`.session-item[data-id="${sessionId}"]`)
-  const aiEl = item?.querySelector('.session-ai-status')
-  if (aiEl) aiEl.textContent = text || ''
-  if (item) item.classList.toggle('has-ai-status', !!text)
+  if (item) _updateSubtitle(item, sessionId)
   // Persist AI status to SQLite
   if (window.api.updateSessionStatus) {
     window.api.updateSessionStatus(sessionId, activityState.get(sessionId) || 'idle', text || '')
+  }
+}
+
+function _updateSubtitle(item, sessionId) {
+  const sub = item?.querySelector('.session-subtitle')
+  if (!sub) return
+  const level = activityState.get(sessionId) || 'idle'
+  const aiText = aiStatus.get(sessionId) || ''
+  const isRunning = level === 'thinking' || level === 'running' || level === 'tool'
+  if (isRunning) {
+    sub.textContent = aiText || '思考中...'
+    sub.classList.add('active-status')
+  } else {
+    sub.textContent = item.dataset.lastMsg || ''
+    sub.classList.remove('active-status')
   }
 }
 
@@ -404,75 +423,57 @@ async function refreshSessionList() {
   const searchInput = document.getElementById('sessionSearch')
   if (searchInput) searchInput.value = ''
 
-  // Group sessions by workspace (first participant)
-  const wsMap = new Map()  // workspaceId -> { identity, sessions }
-  const ungrouped = []     // sessions without participants
-
-  for (const ws of workspaces) {
-    wsMap.set(ws.id, { identity: ws.identity, path: ws.path, sessions: [] })
-  }
+  // Build workspace lookup
+  const wsMap = new Map()
+  for (const ws of workspaces) wsMap.set(ws.id, ws)
 
   for (const s of sessions) {
     // Restore AI status from DB (activity is transient — always starts idle)
     if (!aiStatus.has(s.id) && s.statusText) {
       aiStatus.set(s.id, s.statusText)
     }
-    const primaryWs = (s.participants && s.participants.length > 0) ? s.participants[0] : null
-    if (primaryWs && wsMap.has(primaryWs)) {
-      wsMap.get(primaryWs).sessions.push(s)
-    } else {
-      ungrouped.push(s)
-    }
-  }
-
-  // Render workspace groups (sorted by most recent session)
-  const wsEntries = [...wsMap.entries()]
-    .filter(([, v]) => v.sessions.length > 0)
-    .sort((a, b) => {
-      const aMax = Math.max(...a[1].sessions.map(s => s.updatedAt || 0))
-      const bMax = Math.max(...b[1].sessions.map(s => s.updatedAt || 0))
-      return bMax - aMax
-    })
-
-  for (const [wsId, ws] of wsEntries) {
-    const header = document.createElement('div')
-    header.className = 'session-group-label workspace-group'
-    header.dataset.wsId = wsId
-    const avatar = ws.identity.avatar || '🤖'
-    const isEmoji = avatar.length <= 4 && !avatar.includes('.')
-    header.innerHTML = `<span class="ws-avatar">${isEmoji ? avatar : `<img src="file://${esc(ws.path + '/' + avatar)}" class="ws-avatar-img">`}</span> ${esc(ws.identity.name)}`
-    list.appendChild(header)
-    for (const s of ws.sessions) {
-      list.appendChild(renderSessionItem(s))
-    }
-  }
-
-  // Render ungrouped sessions
-  if (ungrouped.length > 0) {
-    if (wsEntries.length > 0) {
-      const label = document.createElement('div')
-      label.className = 'session-group-label'
-      label.textContent = '对话'
-      list.appendChild(label)
-    }
-    for (const s of ungrouped) {
-      list.appendChild(renderSessionItem(s))
-    }
+    list.appendChild(renderSessionItem(s, wsMap))
   }
 }
 
-function renderSessionItem(s) {
+function renderSessionItem(s, wsMap) {
   const el = document.createElement('div')
   el.className = 'session-item' + (s.id === currentSessionId ? ' active' : '')
   el.dataset.id = s.id
-  // Three-layer status
+
+  const isGroup = s.participants?.length > 1
   const activity = activityState.get(s.id) || 'idle'
   const aiText = aiStatus.get(s.id) || ''
-  const lastMsg = s.lastMessage || ''
-  const modeIcon = s.mode === 'coding' ? '⌨ ' : ''
-  const groupIcon = (s.participants?.length > 1) ? '👥 ' : ''
-  if (aiText) el.classList.add('has-ai-status')
-  el.innerHTML = `<div class="session-item-main"><span class="session-title">${groupIcon}${modeIcon}${esc(s.title)}</span></div><div class="session-item-meta"><span class="session-status-dot ${activity}"></span><span class="session-ai-status">${esc(aiText)}</span><span class="session-last-msg">${esc(lastMsg)}</span><span class="del-btn" onclick="event.stopPropagation();deleteSession('${s.id}')">✕</span></div>`
+
+  // Avatar: group=👥, has workspace=ws avatar, else 🤖
+  let avatarContent = '🤖'
+  if (isGroup) {
+    avatarContent = '👥'
+  } else if (s.participants?.length === 1 && wsMap) {
+    const ws = wsMap.get(s.participants[0])
+    if (ws?.identity?.avatar) avatarContent = ws.identity.avatar
+  }
+
+  // Subtitle: build lastMsg with sender prefix for group chats
+  let lastMsg = s.lastMessage || ''
+  if (isGroup && s.lastSender && lastMsg) {
+    lastMsg = `${s.lastSender}: ${lastMsg}`
+  }
+  el.dataset.lastMsg = lastMsg
+
+  // Time: format updatedAt
+  const time = s.updatedAt ? _fmtTime(s.updatedAt) : ''
+
+  // Determine subtitle content
+  const isActive = aiText && activity !== 'idle' && activity !== 'done'
+  const subText = isActive ? aiText : lastMsg
+  const subClass = isActive ? 'session-subtitle active-status' : 'session-subtitle'
+
+  // Dot visibility
+  const dotStyle = activity === 'idle' ? 'display:none' : ''
+
+  el.innerHTML = `<div class="session-avatar">${esc(avatarContent)}</div><div class="session-body"><div class="session-row-top"><span class="session-title">${esc(s.title)}</span><span class="session-time">${esc(time)}</span></div><div class="session-row-bottom"><span class="${subClass}">${esc(subText)}</span><span class="session-dot ${activity}" style="${dotStyle}"></span></div></div>`
+
   let clickTimer = null
   el.onclick = () => {
     if (clickTimer) clearTimeout(clickTimer)
@@ -489,6 +490,18 @@ function renderSessionItem(s) {
     showSessionContextMenu(e, s.id, el)
   }
   return el
+}
+
+function _fmtTime(ts) {
+  const d = new Date(ts)
+  const now = new Date()
+  if (d.toDateString() === now.toDateString()) {
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  }
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (d.toDateString() === yesterday.toDateString()) return '昨天'
+  return `${d.getMonth() + 1}/${d.getDate()}`
 }
 
 async function switchSession(id) {
@@ -779,8 +792,7 @@ async function renameSession(id, el) {
   inp.select()
   const finish = async () => {
     const newTitle = inp.value.trim() || old
-    const s = await window.api.loadSession(id)
-    if (s) { s.title = newTitle; await window.api.saveSession(s) }
+    await window.api.renameSession(id, newTitle)
     if (id === currentSessionId) document.getElementById('sessionTitle').textContent = newTitle
     await refreshSessionList()
   }
@@ -1408,7 +1420,16 @@ async function send() {
             s.title = generateTitle(text, displayText || delegateMsgs[0]?.content || '')
           }
           await window.api.saveSession(s)
-          document.getElementById('sessionTitle').textContent = s.title
+          // Update header with workspace prefix (same logic as switchSession)
+          let titleDisplay = s.title
+          if (s.participants?.length > 0) {
+            try {
+              const workspaces = await window.api.listWorkspaces()
+              const ws = workspaces.find(w => w.id === s.participants[0])
+              if (ws) titleDisplay = `${ws.identity.name} · ${s.title}`
+            } catch {}
+          }
+          document.getElementById('sessionTitle').textContent = titleDisplay
           await refreshSessionList()
         }
       }
@@ -1698,21 +1719,21 @@ function editWorkspace(ws, overlay, renderCallback) {
       <input type="text" id="editWsName" value="${esc(ws.identity.name)}">
       <label>头像 (emoji)</label>
       <input type="text" id="editWsAvatar" value="${esc(ws.identity.avatar || '')}" placeholder="🤖">
-      <label>简介</label>
-      <textarea id="editWsDesc" rows="3" placeholder="这个人员的角色和能力...">${esc(ws.identity.description || '')}</textarea>
       <button class="primary-btn" id="editWsSave">保存</button>
     </div>
   `
   document.getElementById('editBackBtn').onclick = () => renderCallback()
   document.getElementById('editWsSave').onclick = async () => {
+    const newName = document.getElementById('editWsName').value
+    const newAvatar = document.getElementById('editWsAvatar').value || null
     const updated = await window.api.updateWorkspaceIdentity({
       id: ws.id,
-      name: document.getElementById('editWsName').value,
-      avatar: document.getElementById('editWsAvatar').value || null,
-      description: document.getElementById('editWsDesc').value,
+      name: newName,
+      avatar: newAvatar,
+      description: ws.identity.description || '',
     })
     if (updated) {
-      ws.identity = updated.identity || { name: document.getElementById('editWsName').value, avatar: document.getElementById('editWsAvatar').value, description: document.getElementById('editWsDesc').value }
+      ws.identity = updated.identity || { ...ws.identity, name: newName, avatar: newAvatar }
     }
     renderCallback()
     refreshSessionList()

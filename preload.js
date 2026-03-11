@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld('api', {
   saveSession: (s) => ipcRenderer.invoke('session-save', s),
   createSession: (opts) => ipcRenderer.invoke('session-create', opts),
   deleteSession: (id) => ipcRenderer.invoke('session-delete', id),
+  renameSession: (id, title) => ipcRenderer.invoke('session-rename', id, title),
   exportSession: (id) => ipcRenderer.invoke('session-export', id),
   // Agents
   listAgents: () => ipcRenderer.invoke('agents-list'),
