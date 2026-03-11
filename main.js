@@ -1347,7 +1347,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
       if (loopCheck.blocked) {
         console.warn(`[Paw] ${loopCheck.reason}`)
         toolResults.push({ type: 'tool_result', tool_use_id: tc.id, content: loopCheck.reason })
-        ipc('chat-tool-step', { requestId, name: tc.name, output: loopCheck.reason })
+        ipc('chat-tool-step', { requestId, name: tc.name, input, output: loopCheck.reason })
         loopBlocked = true
         continue
       }
@@ -1365,7 +1365,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
       }
       loopDetector.recordOutcome(tc.name, input, result, execError)
       if (!silent) {
-        ipc('chat-tool-step', { requestId, name: tc.name, output: String(result).slice(0, 500) })
+        ipc('chat-tool-step', { requestId, name: tc.name, input, output: String(result).slice(0, 500) })
       }
       toolResults.push({ type: 'tool_result', tool_use_id: tc.id, content: truncateToolResult(result) })
     }
@@ -1520,7 +1520,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
       const loopCheck = loopDetector.check(tc.name, input)
       if (loopCheck.blocked) {
         console.warn(`[Paw] ${loopCheck.reason}`)
-        ipc('chat-tool-step', { requestId, name: tc.name, output: loopCheck.reason })
+        ipc('chat-tool-step', { requestId, name: tc.name, input, output: loopCheck.reason })
         msgs.push({ role: 'tool', tool_call_id: tc.id, content: loopCheck.reason })
         continue
       }
@@ -1538,7 +1538,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
       }
       loopDetector.recordOutcome(tc.name, input, result, execError)
       if (!silent) {
-        ipc('chat-tool-step', { requestId, name: tc.name, output: String(result).slice(0, 500) })
+        ipc('chat-tool-step', { requestId, name: tc.name, input, output: String(result).slice(0, 500) })
       }
       msgs.push({ role: 'tool', tool_call_id: tc.id, content: truncateToolResult(result) })
     }

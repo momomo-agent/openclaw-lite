@@ -26,7 +26,7 @@ const TOOL_ACTIONS = {
   file_read:      { verb: 'Read',       icon: '📄', argKey: 'path',    extract: v => v?.split('/').pop() },
   file_write:     { verb: 'Wrote',      icon: '✏️', argKey: 'path',    extract: v => v?.split('/').pop() },
   file_edit:      { verb: 'Edited',     icon: '✏️', argKey: 'path',    extract: v => v?.split('/').pop() },
-  shell_exec:     { verb: 'Ran',        icon: '⚡' },
+  shell_exec:     { verb: 'Ran',        icon: '⚡', argKey: 'command', extract: v => v?.split('\n')[0]?.slice(0, 40) },
   code_exec:      { verb: 'Ran code',   icon: '⚡' },
   process:        { verb: 'Ran process',icon: '⚡' },
   web_fetch:      { verb: 'Fetched',    icon: '🌐', argKey: 'url',     extract: v => { try { return new URL(v).hostname } catch { return v?.slice(0, 30) } } },
@@ -51,22 +51,26 @@ const TOOL_ACTIONS = {
   stay_silent:    { verb: 'Listening',     icon: '🤫', hidden: true },
 }
 
-function humanizeToolStep(name, output) {
+function humanizeToolStep(name, input) {
   const action = TOOL_ACTIONS[name]
   if (!action) return { text: name, icon: '🔧' }
-  // Try to extract a meaningful target from the output (which contains the args as JSON)
+  // Extract a meaningful target from the tool input args
   let target = ''
-  if (action.argKey && output) {
-    try {
-      const parsed = typeof output === 'string' ? JSON.parse(output) : output
-      const raw = parsed[action.argKey]
-      target = action.extract ? action.extract(raw) : raw
-    } catch {
-      // output might not be JSON, try regex for common patterns
+  if (action.argKey && input) {
+    const src = typeof input === 'object' ? input : (() => { try { return JSON.parse(input) } catch { return null } })()
+    if (src) {
+      const raw = src[action.argKey]
+      target = raw ? (action.extract ? action.extract(raw) : String(raw)) : ''
+    }
+    if (!target && typeof input === 'string' && input.length < 200) {
+      // Fallback: try regex extraction from short strings (likely input, not output)
       if (action.argKey === 'path') {
-        const m = String(output).match(/[\w.-]+\.\w+/)
+        const m = input.match(/[\w.-]+\.\w{1,10}/)
         if (m) target = m[0]
+      } else if (action.argKey === 'command') {
+        target = input.split('\n')[0].slice(0, 40)
       }
+      // Don't use output as query — it's the result, not the input
     }
   }
   return { text: target ? `${action.verb} ${target}` : action.verb, icon: action.icon, hidden: action.hidden }
@@ -77,7 +81,7 @@ function summarizeToolSteps(steps) {
   const actions = []
   const seen = new Set()
   for (const s of steps) {
-    const h = humanizeToolStep(s.name, s.output)
+    const h = humanizeToolStep(s.name, s.input)
     if (h.hidden) continue
     const key = h.text
     if (!seen.has(key)) { seen.add(key); actions.push(h) }
@@ -229,7 +233,7 @@ window.api.onDelegateToken(({ token, thinking, toolStep, roundInfo, sessionId: e
   const flow = _delegateState.textEl.parentNode
   if (toolStep) {
     // Tool step — render in collapsible tool group (same pattern as main streaming)
-    const h = humanizeToolStep(toolStep.name, toolStep.output)
+    const h = humanizeToolStep(toolStep.name, toolStep.input)
     if (h.hidden) return
     if (!_delegateState.toolGroup) {
       _delegateState.toolGroup = document.createElement('div')
@@ -619,7 +623,7 @@ function renderSessionItem(s, wsMap) {
   }
 
   // Subtitle: build lastMsg with sender prefix for group chats
-  let lastMsg = s.lastMessage || ''
+  let lastMsg = stripMd(s.lastMessage || '')
   if (isGroup && s.lastSender && lastMsg) {
     let senderName = s.lastSender
     if (s.lastSenderWsId && wsMap) {
@@ -1376,10 +1380,14 @@ function registerStreamHandlers(myRequestId, initialFlowContainer, firstTextEl, 
     onToolStep(d) {
       const isDelegation = d.name === 'delegate_to'
       const displayOutput = isDelegation ? '→ delegating...' : String(d.output).slice(0, 120)
-      myToolSteps.push({ name: d.name, output: displayOutput })
+      myToolSteps.push({ name: d.name, input: d.input, output: displayOutput })
       if (sendSessionId) setActivity(sendSessionId, 'running')
-      const h = humanizeToolStep(d.name, d.output)
+      const h = humanizeToolStep(d.name, d.input)
       if (h.hidden) return
+      // Update inline status with current action
+      if (_activeStatusEl && !_statusIsAiAuthored) {
+        updateInlineStatus(`${h.icon} ${h.text}...`)
+      }
       if (!currentToolGroup) {
         currentToolGroup = document.createElement('div')
         currentToolGroup.className = 'tool-group-inline'
@@ -1907,7 +1915,7 @@ function renderSavedToolSteps(container, steps) {
   }
   const body = group.querySelector('.tool-group-body')
   for (const s of steps) {
-    const h = humanizeToolStep(s.name, s.output)
+    const h = humanizeToolStep(s.name, s.input)
     if (h.hidden) continue
     const item = document.createElement('div')
     item.className = 'tool-step-item'
@@ -1926,7 +1934,7 @@ function renderToolGroup(slot, steps, forceCollapse) {
   const expanded = forceCollapse ? false : (userToggled ? slot.dataset.expanded === 'true' : true)
   const isRunning = !forceCollapse
   const lastStep = steps[steps.length - 1]
-  const lastH = humanizeToolStep(lastStep.name, lastStep.output)
+  const lastH = humanizeToolStep(lastStep.name, lastStep.input)
   const headerContent = isRunning
     ? `<span class="tool-action-text"><span class="tool-pulse"></span> ${esc(lastH.icon)} ${esc(lastH.text)}...</span>`
     : `<span class="tool-action-text">${summarizeToolSteps(steps) || '✓ Done'}</span>`
@@ -1942,7 +1950,7 @@ function renderToolGroup(slot, steps, forceCollapse) {
   }
   const body = group.querySelector('.tool-group-body')
   for (const s of steps) {
-    const h = humanizeToolStep(s.name, s.output)
+    const h = humanizeToolStep(s.name, s.input)
     if (h.hidden) continue
     const item = document.createElement('div')
     item.className = 'tool-step-item'
@@ -1986,6 +1994,21 @@ function generateTitle(userText, assistantText) {
 
 function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+}
+
+function stripMd(s) {
+  return String(s)
+    .replace(/```[\s\S]*?```/g, '[code]')     // code blocks
+    .replace(/`([^`]+)`/g, '$1')               // inline code
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '[$1]') // images
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')   // links
+    .replace(/^#{1,6}\s+/gm, '')               // headings
+    .replace(/(\*\*|__)(.*?)\1/g, '$2')        // bold
+    .replace(/(\*|_)(.*?)\1/g, '$2')           // italic
+    .replace(/~~(.*?)~~/g, '$1')               // strikethrough
+    .replace(/^[\s>*+-]+/gm, '')               // blockquotes + list markers
+    .replace(/\n+/g, ' ')                      // newlines → space
+    .trim()
 }
 
 // ── People Manager (M32/F168) ──
