@@ -317,7 +317,9 @@ function loadPrefs() {
   try { return JSON.parse(fs.readFileSync(PREFS_PATH, 'utf8')) } catch { return {} }
 }
 function savePrefs(p) {
-  fs.writeFileSync(PREFS_PATH, JSON.stringify(p, null, 2))
+  const existing = loadPrefs()
+  const merged = { ...existing, ...p }
+  fs.writeFileSync(PREFS_PATH, JSON.stringify(merged, null, 2))
 }
 
 // app.disableHardwareAcceleration() - removed: conflicts with hiddenInset rendering
@@ -432,9 +434,45 @@ ipcMain.handle('get-prefs', () => {
     stopHeartbeat()
     clawDir = null
     syncState()
-    savePrefs({})
+    savePrefs({ clawDir: null })
   }
-  return { clawDir }
+  const prefs = loadPrefs()
+  return { clawDir, userName: prefs.userName || '', userAvatar: prefs.userAvatar || '' }
+})
+
+ipcMain.handle('get-user-profile', () => {
+  const prefs = loadPrefs()
+  // Ensure user avatar file exists — auto-assign 0.png if missing
+  const avatarPath = prefs.userAvatar ? path.join(app.getPath('userData'), prefs.userAvatar) : null
+  if (!prefs.userAvatar || (avatarPath && !fs.existsSync(avatarPath))) {
+    const src = path.join(__dirname, 'renderer', 'avatars', '0.png')
+    const dest = path.join(app.getPath('userData'), 'user-avatar.png')
+    try { fs.copyFileSync(src, dest) } catch {}
+    prefs.userAvatar = 'user-avatar.png'
+    savePrefs(prefs)
+  }
+  return { userName: prefs.userName || '', userAvatar: prefs.userAvatar || '' }
+})
+
+ipcMain.handle('set-user-profile', (_, { userName, presetIndex, customPath }) => {
+  const prefs = loadPrefs()
+  if (userName !== undefined) prefs.userName = userName
+  if (presetIndex !== undefined) {
+    const src = path.join(__dirname, 'renderer', 'avatars', `${presetIndex}.png`)
+    const dest = path.join(app.getPath('userData'), 'user-avatar.png')
+    try { fs.copyFileSync(src, dest) } catch {}
+    prefs.userAvatar = 'user-avatar.png'
+  } else if (customPath) {
+    const dest = path.join(app.getPath('userData'), 'user-avatar.png')
+    try { fs.copyFileSync(customPath, dest) } catch {}
+    prefs.userAvatar = 'user-avatar.png'
+  }
+  savePrefs(prefs)
+  return { userName: prefs.userName || '', userAvatar: prefs.userAvatar || '' }
+})
+
+ipcMain.handle('get-user-avatar-path', () => {
+  return path.join(app.getPath('userData'), 'user-avatar.png')
 })
 
 ipcMain.handle('reset-claw-dir', () => {
@@ -442,7 +480,7 @@ ipcMain.handle('reset-claw-dir', () => {
   stopMemoryWatch()
   clawDir = null
   syncState()
-  savePrefs({})
+  savePrefs({ clawDir: null })
   return true
 })
 
@@ -672,6 +710,26 @@ ipcMain.handle('workspace-create', async (_, { name, parentDir, avatar, descript
 
 ipcMain.handle('workspace-update-identity', (_, { id, name, avatar, description }) => {
   return workspaceRegistry.updateWorkspaceIdentity(id, { name, avatar, description })
+})
+
+ipcMain.handle('workspace-set-avatar', async (_, { id, presetIndex, customPath }) => {
+  const ws = workspaceRegistry.getWorkspace(id)
+  if (!ws) return { ok: false, error: 'not_found' }
+  const dest = path.join(ws.path, '.paw', 'avatar.png')
+  fs.mkdirSync(path.join(ws.path, '.paw'), { recursive: true })
+  try {
+    if (customPath) {
+      fs.copyFileSync(customPath, dest)
+    } else if (presetIndex !== undefined) {
+      const src = path.join(__dirname, 'renderer', 'avatars', `${presetIndex}.png`)
+      fs.copyFileSync(src, dest)
+    } else {
+      return { ok: false, error: 'no_source' }
+    }
+    return workspaceRegistry.updateWorkspaceIdentity(id, { avatar: 'avatar.png' })
+  } catch (e) {
+    return { ok: false, error: e.message }
+  }
 })
 
 // ── IPC: Build system prompt from directories ──
@@ -1281,6 +1339,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
     const decoder = new TextDecoder()
     let buf = '', toolCalls = [], curBlock = null
     let roundUsageInput = 0, roundUsageOutput = 0
+    let roundThinking = '' // Accumulate thinking for this round (tool group purpose)
 
     while (true) {
       const { done, value } = await reader.read()
@@ -1307,6 +1366,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
             curBlock = { id: evt.content_block.id, name: evt.content_block.name, json: '' }
           } else if (evt.type === 'content_block_delta') {
             if (evt.delta?.type === 'thinking_delta' && evt.delta?.thinking) {
+              roundThinking += evt.delta.thinking
               ipc('chat-token', { requestId, text: evt.delta.thinking, thinking: true })
             }
             if (evt.delta?.text && !curBlock) { roundText += evt.delta.text; fullText += evt.delta.text; ipc('chat-token', { requestId, text: evt.delta.text }) }
@@ -1328,6 +1388,18 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
       console.log('[Paw] streamAnthropic done, fullText length:', fullText.length)
       clearTimeout(timeoutId)
       return { answer: fullText, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput, cacheRead: totalCacheRead, cacheWrite: totalCacheWrite, lastInputTokens: lastUsageInput, lastCacheRead, lastCacheWrite } }
+    }
+
+    // Extract purpose from thinking — last meaningful line before tool calls
+    let roundPurpose = ''
+    if (roundThinking) {
+      const lines = roundThinking.trim().split('\n').filter(l => l.trim().length > 5)
+      // Take the last line that looks like a plan/intent (often starts with 让我/I'll/Let me/需要)
+      roundPurpose = (lines[lines.length - 1] || '').trim().slice(0, 80)
+    }
+    // Also check roundText for intent (visible text before tool calls)
+    if (!roundPurpose && roundText) {
+      roundPurpose = roundText.trim().split('\n').pop()?.trim().slice(0, 80) || ''
     }
 
     // Execute tools and continue
@@ -1369,9 +1441,9 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
       }
       toolResults.push({ type: 'tool_result', tool_use_id: tc.id, content: truncateToolResult(result) })
     }
-    // Send round info to renderer
+    // Send round info to renderer (include purpose extracted from thinking)
     if (toolCalls.length > 0) {
-      ipc('chat-round-info', { requestId, round: round + 1 })
+      ipc('chat-round-info', { requestId, round: round + 1, purpose: roundPurpose })
     }
     msgs.push({ role: 'user', content: toolResults })
     fullText += '\n'
@@ -1542,9 +1614,10 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
       }
       msgs.push({ role: 'tool', tool_call_id: tc.id, content: truncateToolResult(result) })
     }
-    // Send round info to renderer
+    // Send round info to renderer (purpose from visible text for OpenAI)
     if (tcList.length > 0) {
-      ipc('chat-round-info', { requestId, round: round + 1 })
+      const oaiPurpose = roundText ? roundText.trim().split('\n').pop()?.trim().slice(0, 80) || '' : ''
+      ipc('chat-round-info', { requestId, round: round + 1, purpose: oaiPurpose })
     }
     fullText += '\n'
     ipc('chat-token', { requestId, text: '\n' })

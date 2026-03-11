@@ -206,6 +206,18 @@ window.api.onMemoryChanged(({ file }) => {
 // Tray menu: new chat
 window.api.onTrayNewChat(() => { newSession() })
 
+// Global user profile — { userName, userAvatar, avatarAbsPath }
+let _userProfile = { userName: '', userAvatar: '', avatarAbsPath: '' }
+
+// Global workspace cache — refreshed on sidebar render + session load
+let _wsCache = new Map()  // id → { id, path, identity }
+let _avatarTs = Date.now()  // cache-bust timestamp for avatar images
+function _updateWsCache(workspaces) {
+  _wsCache = new Map()
+  for (const ws of workspaces) _wsCache.set(ws.id, ws)
+}
+function _wsPath(wsId) { return _wsCache.get(wsId)?.path || '' }
+
 // Group chat delegation streaming — independent bubbles
 let _delegateState = null  // { card, textEl, fullText, sender, workspaceId }
 let _pendingDelegateMessages = []  // accumulated delegate messages to save after orchestrator finishes
@@ -214,18 +226,26 @@ window.api.onDelegateStart(({ requestId, sender, workspaceId, avatar, sessionId:
   // Ignore delegate events from other sessions
   if (evtSid && evtSid !== currentSessionId) return
   console.log(`[delegate] START: sender=${sender}, avatar=${avatar}, wsId=${workspaceId}`)
-  // Capture orchestrator info from the current streaming card for later split
+  // Capture orchestrator info for later split (read from DOM name, resolve from wsCache)
   const lastCard = _msgContainer?.querySelector('.msg-card.assistant:last-of-type')
   const orchName = lastCard?.querySelector('.msg-name')?.textContent || 'Assistant'
-  const orchAvatar = lastCard?.querySelector('.msg-avatar')?.textContent?.trim() || null
+  // Find orchestrator ws from cache by name match
+  let orchAvatar = null, orchWsPath = null
+  for (const [, ws] of _wsCache) {
+    if (ws.identity?.name === orchName) {
+      orchAvatar = ws.identity?.avatar || null
+      orchWsPath = ws.path
+      break
+    }
+  }
   const card = document.createElement('div')
   card.className = 'msg-card assistant'
   const _t = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
-  card.innerHTML = `<div class="msg-avatar">${_renderAvatar(avatar)}</div><div class="msg-body"><div class="msg-header"><span class="msg-name">${esc(sender)}</span><span class="msg-time">${_t}</span></div><div class="msg-flow"><div class="msg-content md-content"></div><div class="inline-status"><span class="reading-indicator"><span></span><span></span><span></span></span> ${esc(sender)} thinking...</div></div></div>`
+  card.innerHTML = `<div class="msg-avatar">${_renderAvatar(avatar, 'assistant', _wsPath(workspaceId))}</div><div class="msg-body"><div class="msg-header"><span class="msg-name">${esc(sender)}</span><span class="msg-time">${_t}</span></div><div class="msg-flow"><div class="msg-content md-content"></div><div class="inline-status"><span class="reading-indicator"><span></span><span></span><span></span></span> ${esc(sender)} thinking...</div></div></div>`
   _msgContainer?.appendChild(card) || messages.appendChild(card)
   messages.scrollTop = messages.scrollHeight
   const textEl = card.querySelector('.msg-content.md-content')
-  _delegateState = { card, textEl, fullText: '', sender, workspaceId, requestId, orchestratorName: orchName, orchestratorAvatar: orchAvatar }
+  _delegateState = { card, textEl, fullText: '', sender, workspaceId, requestId, orchestratorName: orchName, orchestratorAvatar: orchAvatar, orchestratorWsPath: orchWsPath }
 })
 window.api.onDelegateToken(({ token, thinking, toolStep, roundInfo, sessionId: evtSid }) => {
   if (evtSid && evtSid !== currentSessionId) return
@@ -258,17 +278,19 @@ window.api.onDelegateToken(({ token, thinking, toolStep, roundInfo, sessionId: e
     item.innerHTML = `<span class="tool-step-icon">${h.icon}</span> <span class="tool-step-name">${esc(h.text)}</span>`
     body.appendChild(item)
   } else if (roundInfo) {
-    // Round info — update tool group header
+    // Round info — update tool group header with purpose
     if (_delegateState.toolGroup) {
       const header = _delegateState.toolGroup.querySelector('.tool-group-header')
       if (header) {
         header.classList.remove('tool-running')
         const expand = _delegateState.toolGroup.querySelector('.tool-expand')?.textContent || '▶'
-        // Build summary from body items
         const items = _delegateState.toolGroup.querySelectorAll('.tool-step-item')
         const steps = Array.from(items).map(i => ({ name: i.querySelector('.tool-step-name')?.textContent || '' }))
         const summaryText = steps.map(s => s.name).slice(0, 3).join(', ') || '✓ Done'
-        header.innerHTML = `<span class="tool-action-text">${summaryText}</span> <span class="tool-expand">${expand}</span>`
+        const purpose = roundInfo.purpose ? esc(roundInfo.purpose) : ''
+        header.innerHTML = purpose
+          ? `<span class="tool-action-text"><span class="tool-purpose">${purpose}</span></span> <span class="tool-expand">${expand}</span>`
+          : `<span class="tool-action-text">${summaryText}</span> <span class="tool-expand">${expand}</span>`
       }
     }
     // New round — reset tool group so next tools create a new group
@@ -313,7 +335,7 @@ window.api.onDelegateEnd(({ sender, workspaceId, fullText, sessionId: evtSid }) 
   // Signal orchestrator handler to create a new card for post-delegate continuation
   const handler = requestHandlers.get(_delegateState.requestId)
   if (handler) {
-    handler._pendingSplit = { name: _delegateState.orchestratorName, avatar: _delegateState.orchestratorAvatar }
+    handler._pendingSplit = { name: _delegateState.orchestratorName, avatar: _delegateState.orchestratorAvatar, wsPath: _delegateState.orchestratorWsPath }
   }
   _delegateState = null
 })
@@ -539,6 +561,15 @@ async function openExisting() {
 async function enterChat() {
   document.getElementById('setupScreen').style.display = 'none'
   document.getElementById('chatScreen').style.display = 'flex'
+  // Load user profile (name + avatar)
+  try {
+    const profile = await window.api.getUserProfile()
+    _userProfile.userName = profile.userName || ''
+    _userProfile.userAvatar = profile.userAvatar || ''
+    if (profile.userAvatar) {
+      _userProfile.avatarAbsPath = await window.api.getUserAvatarPath()
+    }
+  } catch {}
   // Load and apply theme (default: light)
   try {
     const config = await window.api.getConfig()
@@ -590,6 +621,8 @@ async function refreshSessionList() {
   const searchInput = document.getElementById('sessionSearch')
   if (searchInput) searchInput.value = ''
 
+  // Update global workspace cache
+  _updateWsCache(workspaces)
   // Build workspace lookup
   const wsMap = new Map()
   for (const ws of workspaces) wsMap.set(ws.id, ws)
@@ -612,14 +645,18 @@ function renderSessionItem(s, wsMap) {
   const activity = activityState.get(s.id) || 'idle'
   const aiText = aiStatus.get(s.id) || ''
 
-  // Avatar: group=group icon, has workspace=ws avatar, else bot icon
+  // Avatar: group=group.png, has workspace=ws avatar img, else bot icon
   let avatarContent = IC.bot
   let avatarIsHtml = true
   if (isGroup) {
-    avatarContent = IC.group
+    avatarContent = `<img src="avatars/group.png" class="avatar-img">`
   } else if (s.participants?.length === 1 && wsMap) {
     const ws = wsMap.get(s.participants[0])
-    if (ws?.identity?.avatar) { avatarContent = ws.identity.avatar; avatarIsHtml = false }
+    if (ws?.identity?.avatar?.includes('.') && ws?.path) {
+      avatarContent = `<img src="file://${ws.path}/.paw/${ws.identity.avatar}?t=${_avatarTs}" class="avatar-img">`
+    } else if (ws?.identity?.avatar) {
+      avatarContent = ws.identity.avatar; avatarIsHtml = false
+    }
   }
 
   // Subtitle: build lastMsg with sender prefix for group chats
@@ -691,8 +728,9 @@ async function switchSession(id) {
   if (!session) return
   currentSessionId = id
 
-  // Show workspace name in header + coding mode badge
+  // Show workspace name in header + coding mode badge + group members
   let titleText = session.title
+  let memberNames = ''
   if (session.participants && session.participants.length > 0) {
     try {
       const workspaces = await window.api.listWorkspaces()
@@ -700,8 +738,23 @@ async function switchSession(id) {
       if (ws) titleText = `${ws.identity.name} · ${session.title}`
     } catch {}
   }
+  // For group chats, collect session agent names
+  try {
+    const agents = await window.api.listSessionAgents(id)
+    if (agents.length > 0) {
+      memberNames = agents.map(a => a.name).join(', ')
+    }
+  } catch {}
   if (session.mode === 'coding') titleText = `⌨ ${titleText}`
   document.getElementById('sessionTitle').textContent = titleText
+  const membersEl = document.getElementById('headerMembers')
+  if (memberNames) {
+    membersEl.textContent = memberNames
+    membersEl.style.display = ''
+  } else {
+    membersEl.textContent = ''
+    membersEl.style.display = 'none'
+  }
 
   // Activate container — if already cached (in-flight streaming), reuse it
   const entry = activateContainer(id)
@@ -721,6 +774,7 @@ async function switchSession(id) {
   if (session.participants && session.participants.length > 0) {
     try {
       allWorkspaces = await window.api.listWorkspaces()
+      _updateWsCache(allWorkspaces)
       const ownerWs = allWorkspaces.find(w => w.id === session.participants[0])
       if (ownerWs?.identity?.name) ownerName = ownerWs.identity.name
       if (ownerWs?.identity?.avatar) ownerAvatar = ownerWs.identity.avatar
@@ -729,20 +783,23 @@ async function switchSession(id) {
   const agents = await window.api.listAgents()
   for (const m of session.messages) {
     // Resolve name from workspace identity (always current), fall back to stored sender
-    let sender = m.sender || (m.role === 'user' ? 'You' : ownerName)
+    let sender = m.sender || (m.role === 'user' ? (_userProfile.userName || 'You') : ownerName)
     let msgAvatar = undefined
+    let msgWsPath = undefined
     if (m.role === 'assistant') {
       if (m.senderWorkspaceId) {
         const ws = allWorkspaces.find(w => w.id === m.senderWorkspaceId)
         if (ws?.identity?.name) sender = ws.identity.name
         msgAvatar = ws?.identity?.avatar || null
+        msgWsPath = ws?.path
       } else {
         msgAvatar = ownerAvatar
+        msgWsPath = allWorkspaces.find(w => w.id === session.participants?.[0])?.path
         // Owner message (no senderWorkspaceId) — use current owner name
         if (m.sender && m.sender !== 'You') sender = ownerName
       }
     }
-    addCard(m.role, m.content, sender, false, m.toolSteps, msgAvatar)
+    addCard(m.role, m.content, sender, false, m.toolSteps, msgAvatar, msgWsPath)
     if (m.role === 'user') history.push({ prompt: m.content, answer: '' })
     if (m.role === 'assistant' && history.length) history[history.length - 1].answer = m.content
   }
@@ -836,7 +893,7 @@ async function showNewChatSelector(workspaces) {
       item.className = 'new-chat-item'
       const avatar = ws.identity.avatar || ''
       const isEmoji = !avatar.includes('.')
-      const avatarHtml = isEmoji ? `<span class="new-chat-avatar">${avatar || IC.bot}</span>` : `<img src="file://${esc(ws.path + '/' + avatar)}" class="new-chat-avatar-img">`
+      const avatarHtml = isEmoji ? `<span class="new-chat-avatar">${avatar || IC.bot}</span>` : `<img src="file://${esc(ws.path + '/.paw/' + avatar)}?t=${_avatarTs}" class="new-chat-avatar-img">`
       let selectHtml = ''
       if (codingAgentsList.length === 1) {
         selectHtml = `<span class="new-chat-coding-label">${esc(codingAgentsList[0].name)}</span>`
@@ -868,7 +925,7 @@ async function showNewChatSelector(workspaces) {
       item.className = 'new-chat-item'
       const avatar = ws.identity.avatar || ''
       const isEmoji = !avatar.includes('.')
-      const avatarHtml = isEmoji ? `<span class="new-chat-avatar">${avatar || IC.bot}</span>` : `<img src="file://${esc(ws.path + '/' + avatar)}" class="new-chat-avatar-img">`
+      const avatarHtml = isEmoji ? `<span class="new-chat-avatar">${avatar || IC.bot}</span>` : `<img src="file://${esc(ws.path + '/.paw/' + avatar)}?t=${_avatarTs}" class="new-chat-avatar-img">`
       item.innerHTML = `<input type="checkbox" class="group-ws-check" data-id="${esc(ws.id)}" style="margin-right:8px">${avatarHtml}<div class="new-chat-info"><div class="new-chat-name">${esc(ws.identity.name)}</div></div>`
       item.onclick = (e) => {
         if (e.target.tagName === 'INPUT') return
@@ -928,7 +985,7 @@ async function showNewChatSelector(workspaces) {
       item.style.cssText = 'padding:8px 4px'
       const avatar = ws.identity.avatar || ''
       const isEmoji = !avatar.includes('.')
-      const avatarHtml = isEmoji ? `<span class="people-avatar" style="font-size:20px;width:28px">${avatar || IC.bot}</span>` : `<img src="file://${esc(ws.path + '/' + avatar)}" class="people-avatar-img" style="width:28px;height:28px">`
+      const avatarHtml = isEmoji ? `<span class="people-avatar" style="font-size:20px;width:28px">${avatar || IC.bot}</span>` : `<img src="file://${esc(ws.path + '/.paw/' + avatar)}?t=${_avatarTs}" class="people-avatar-img" style="width:28px;height:28px">`
       item.innerHTML = `
         ${avatarHtml}
         <div class="people-info">
@@ -1035,32 +1092,81 @@ async function showNewChatSelector(workspaces) {
 function editWorkspaceInline(ws, panel, scrollContainer, onDone) {
   // Replace panel body with edit form, restore on save/cancel
   const savedBody = scrollContainer.innerHTML
+  const currentAvatar = ws.identity?.avatar || ''
+  const isImg = currentAvatar.includes('.')
+  const previewSrc = isImg && ws.path ? `file://${ws.path}/.paw/${currentAvatar}?t=${Date.now()}` : ''
   scrollContainer.innerHTML = `
     <div style="padding:12px;display:flex;flex-direction:column;gap:8px">
       <div class="settings-section-title">编辑 · ${esc(ws.identity.name)}</div>
       <label style="font-size:12px;color:var(--text-muted)">名称</label>
       <input type="text" id="inlineEditName" value="${esc(ws.identity.name)}" style="background:var(--bg-base);color:var(--text-primary);border:1px solid var(--border-muted);border-radius:6px;padding:8px 10px;font-size:13px;font-family:inherit">
-      <label style="font-size:12px;color:var(--text-muted)">头像 (emoji)</label>
-      <input type="text" id="inlineEditAvatar" value="${esc(ws.identity.avatar || '')}" placeholder="🤖" style="background:var(--bg-base);color:var(--text-primary);border:1px solid var(--border-muted);border-radius:6px;padding:8px 10px;font-size:13px;font-family:inherit">
+      <label style="font-size:12px;color:var(--text-muted)">头像</label>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+        <div id="avatarPreview" style="width:48px;height:48px;border-radius:50%;background:var(--avatar-bg);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0">
+          ${previewSrc ? `<img src="${esc(previewSrc)}" class="avatar-img">` : `<span style="font-size:28px">${esc(currentAvatar) || '🤖'}</span>`}
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${[0,1,2,3,4,5].map(i => `<img src="avatars/${i}.png" class="avatar-preset-thumb${previewSrc ? '' : ''}" data-preset="${i}" style="width:32px;height:32px;border-radius:50%;cursor:pointer;border:2px solid transparent;object-fit:cover;transition:border-color 0.15s">`).join('')}
+        </div>
+      </div>
+      <button class="secondary-btn" id="avatarUploadBtn" style="font-size:12px;margin:0">上传自定义...</button>
+      <input type="file" id="avatarFileInput" accept="image/*" style="display:none">
       <div style="display:flex;gap:8px;margin-top:4px">
         <button class="primary-btn" id="inlineEditSave" style="flex:1;font-size:12px">保存</button>
         <button class="secondary-btn" id="inlineEditCancel" style="flex:1;margin:0;font-size:12px">取消</button>
       </div>
     </div>
   `
+
+  // Avatar preset click handlers
+  let pendingAvatarAction = null  // { type: 'preset', index } or { type: 'custom', path }
+  scrollContainer.querySelectorAll('.avatar-preset-thumb').forEach(thumb => {
+    thumb.onmouseenter = () => { thumb.style.borderColor = 'var(--accent)' }
+    thumb.onmouseleave = () => { if (!thumb.classList.contains('selected')) thumb.style.borderColor = 'transparent' }
+    thumb.onclick = () => {
+      scrollContainer.querySelectorAll('.avatar-preset-thumb').forEach(t => { t.style.borderColor = 'transparent'; t.classList.remove('selected') })
+      thumb.style.borderColor = 'var(--accent)'
+      thumb.classList.add('selected')
+      pendingAvatarAction = { type: 'preset', index: parseInt(thumb.dataset.preset) }
+      const preview = scrollContainer.querySelector('#avatarPreview')
+      preview.innerHTML = `<img src="${thumb.src}" class="avatar-img">`
+    }
+  })
+
+  // Upload button
+  const fileInput = scrollContainer.querySelector('#avatarFileInput')
+  scrollContainer.querySelector('#avatarUploadBtn').onclick = () => fileInput.click()
+  fileInput.onchange = () => {
+    if (fileInput.files[0]) {
+      pendingAvatarAction = { type: 'custom', path: fileInput.files[0].path }
+      const preview = scrollContainer.querySelector('#avatarPreview')
+      preview.innerHTML = `<img src="file://${esc(fileInput.files[0].path)}" class="avatar-img">`
+    }
+  }
+
   scrollContainer.querySelector('#inlineEditCancel').onclick = () => {
     scrollContainer.innerHTML = savedBody
     onDone()
   }
   scrollContainer.querySelector('#inlineEditSave').onclick = async () => {
     const newName = scrollContainer.querySelector('#inlineEditName').value
-    const newAvatar = scrollContainer.querySelector('#inlineEditAvatar').value || null
+
+    // Apply avatar change if any
+    if (pendingAvatarAction) {
+      if (pendingAvatarAction.type === 'preset') {
+        await window.api.setWorkspaceAvatar({ id: ws.id, presetIndex: pendingAvatarAction.index })
+      } else if (pendingAvatarAction.type === 'custom') {
+        await window.api.setWorkspaceAvatar({ id: ws.id, customPath: pendingAvatarAction.path })
+      }
+    }
+
     const updated = await window.api.updateWorkspaceIdentity({
-      id: ws.id, name: newName, avatar: newAvatar, description: ws.identity.description || ''
+      id: ws.id, name: newName, avatar: ws.identity.avatar, description: ws.identity.description || ''
     })
     if (updated) {
-      ws.identity = updated.identity || { ...ws.identity, name: newName, avatar: newAvatar }
+      ws.identity = updated.identity || { ...ws.identity, name: newName }
     }
+    _avatarTs = Date.now()  // bust avatar cache
     scrollContainer.innerHTML = savedBody
     onDone()
     // Refresh header if current session uses this workspace
@@ -1085,7 +1191,7 @@ function _makeAgentItem(ws, onclick) {
   item.className = 'new-chat-item'
   const avatar = ws.identity.avatar || ''
   const isEmoji = !avatar.includes('.')
-  const avatarHtml = isEmoji ? `<span class="new-chat-avatar">${avatar || IC.bot}</span>` : `<img src="file://${esc(ws.path + '/' + avatar)}" class="new-chat-avatar-img">`
+  const avatarHtml = isEmoji ? `<span class="new-chat-avatar">${avatar || IC.bot}</span>` : `<img src="file://${esc(ws.path + '/.paw/' + avatar)}?t=${_avatarTs}" class="new-chat-avatar-img">`
   item.innerHTML = `${avatarHtml}<div class="new-chat-info"><div class="new-chat-name">${esc(ws.identity.name)}</div>${ws.identity.description ? `<div class="new-chat-desc">${esc(ws.identity.description)}</div>` : ''}</div>`
   item.onclick = onclick
   return item
@@ -1271,17 +1377,25 @@ function buildAgentContext(sessionMsgs, agentName, isMain) {
 
 // ── Streaming Helpers (shared by main + agent responses) ──
 
-// Avatar rendering helper — raw emoji → esc, null → IC fallback, never pass IC.* as value
-function _renderAvatar(raw, role) {
+// Avatar rendering helper — image file → <img>, emoji → esc, null → IC fallback
+function _renderAvatar(raw, role, wsPath) {
+  // User role: show user profile avatar
+  if (role === 'user' && _userProfile.avatarAbsPath) {
+    return `<img src="file://${esc(_userProfile.avatarAbsPath)}?t=${_avatarTs}" class="avatar-img" onerror="this.style.display='none';this.parentNode.textContent='👤'">`
+  }
   if (!raw) return role === 'user' ? IC.user : IC.bot
+  if (raw.includes('.') && wsPath) {
+    const src = `file://${wsPath}/.paw/${raw}?t=${_avatarTs}`
+    return `<img src="${esc(src)}" class="avatar-img" onerror="this.style.display='none';this.parentNode.textContent='🤖'">`
+  }
   return esc(raw)
 }
 
-function createStreamingCard(agentName, avatar) {
+function createStreamingCard(agentName, avatar, wsPath) {
   const card = document.createElement('div')
   card.className = 'msg-card assistant'
   const _t = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
-  card.innerHTML = `<div class="msg-avatar">${_renderAvatar(avatar)}</div><div class="msg-body"><div class="msg-header"><span class="msg-name">${esc(agentName)}</span><span class="msg-time">${_t}</span></div><div class="msg-flow"></div></div>`
+  card.innerHTML = `<div class="msg-avatar">${_renderAvatar(avatar, 'assistant', wsPath)}</div><div class="msg-body"><div class="msg-header"><span class="msg-name">${esc(agentName)}</span><span class="msg-time">${_t}</span></div><div class="msg-flow"></div></div>`
   _msgContainer?.appendChild(card) || messages.appendChild(card)
   messages.scrollTop = messages.scrollHeight
   const flowContainer = card.querySelector('.msg-flow')
@@ -1320,11 +1434,11 @@ function registerStreamHandlers(myRequestId, initialFlowContainer, firstTextEl, 
     onTextStart() {
       // After delegate: create a new orchestrator card below the delegate bubble
       if (handler._pendingSplit) {
-        const { name, avatar } = handler._pendingSplit
+        const { name, avatar, wsPath: splitWsPath } = handler._pendingSplit
         handler._pendingSplit = null
         // Remove the old card's inline status before creating a new card
         if (_activeStatusEl) { _activeStatusEl.remove(); _activeStatusEl = null }
-        const result = createStreamingCard(name, avatar)
+        const result = createStreamingCard(name, avatar, splitWsPath)
         card = result.card
         flowContainer = result.flowContainer
         currentTextEl = result.firstTextEl
@@ -1416,14 +1530,17 @@ function registerStreamHandlers(myRequestId, initialFlowContainer, firstTextEl, 
     },
     onStatus() {},
     onRoundInfo(d) {
-      // Round complete — finalize tool group header with summary
+      // Round complete — finalize tool group header with purpose (from thinking) + summary
       if (currentToolGroup) {
         const header = currentToolGroup.querySelector('.tool-group-header')
         if (header) {
           header.classList.remove('tool-running')
           const expand = currentToolGroup.querySelector('.tool-expand')?.textContent || '▶'
           const summary = summarizeToolSteps(myToolSteps) || '✓ Done'
-          header.innerHTML = `<span class="tool-action-text">${summary}</span> <span class="tool-expand">${expand}</span>`
+          const purpose = d.purpose ? esc(d.purpose) : ''
+          header.innerHTML = purpose
+            ? `<span class="tool-action-text"><span class="tool-purpose">${purpose}</span></span> <span class="tool-expand">${expand}</span>`
+            : `<span class="tool-action-text">${summary}</span> <span class="tool-expand">${expand}</span>`
         }
       }
     }
@@ -1591,7 +1708,7 @@ async function send() {
 
     if (cmd === '/compact') {
       input.value = ''
-      addCard('user', text, 'You', true)
+      addCard('user', text, _userProfile.userName || 'You', true)
       setActivity(currentSessionId, 'thinking')
       // Force compaction by setting the flag
       const chatParams = { prompt: arg || '请压缩历史对话', history, agentId: null, files: [], sessionId: currentSessionId, requestId: null, forceCompact: true }
@@ -1614,7 +1731,7 @@ async function send() {
   renderAttachPreview()
 
   // Detect @mention — route to workspace participant or legacy agent
-  let targetAgentId = null, targetAgentName = 'Assistant', targetWorkspaceId = null, targetAvatar = null
+  let targetAgentId = null, targetAgentName = 'Assistant', targetWorkspaceId = null, targetAvatar = null, targetWsPath = null
   const mention = text.match(/^@(\S+)[\s，,]/)
   if (mention && sendSessionId) {
     const q = mention[1].toLowerCase()
@@ -1632,6 +1749,7 @@ async function send() {
           targetWorkspaceId = fuzzyWs.id
           targetAgentName = fuzzyWs.identity?.name || 'Assistant'
           targetAvatar = fuzzyWs.identity?.avatar || null
+          targetWsPath = fuzzyWs.path
         }
       }
     } catch {}
@@ -1662,13 +1780,14 @@ async function send() {
         const ownerWs = workspaces.find(w => w.id === participants[0])
         if (ownerWs?.identity?.name) targetAgentName = ownerWs.identity.name
         if (ownerWs?.identity?.avatar) targetAvatar = ownerWs.identity.avatar
+        if (ownerWs?.path) targetWsPath = ownerWs.path
       }
     } catch {}
   }
 
   // Show user message with attachments
   const attachHtml = files.map(f => f.type.startsWith('image/') ? `<img src="${f.data}" style="max-height:120px;border-radius:6px;margin-top:4px">` : `<div class="attach-chip">${IC.file} ${esc(f.name)}</div>`).join('')
-  addCard('user', text + (attachHtml ? `<div>${attachHtml}</div>` : ''), 'You', true)
+  addCard('user', text + (attachHtml ? `<div>${attachHtml}</div>` : ''), _userProfile.userName || 'You', true)
   setActivity(sendSessionId, 'thinking')
 
   // ── IM-style: save user message immediately (don't wait for response) ──
@@ -1696,7 +1815,7 @@ async function send() {
       chatParams = { prompt: text, history, agentId: null, files, sessionId: sendSessionId, requestId: null, targetWorkspaceId: targetWorkspaceId || null }
     }
 
-    const { card, flowContainer, firstTextEl } = createStreamingCard(targetAgentName, targetAvatar)
+    const { card, flowContainer, firstTextEl } = createStreamingCard(targetAgentName, targetAvatar, targetWsPath)
     const myRequestId = await window.api.chatPrepare()
     const { getFullText, getLastSegment, getToolSteps, getAllCards } = registerStreamHandlers(myRequestId, flowContainer, firstTextEl, sendSessionId)
 
@@ -1867,10 +1986,10 @@ async function send() {
   input.focus()
 }
 
-function addCard(role, content, sender, rawHtml, toolSteps, avatarOverride) {
+function addCard(role, content, sender, rawHtml, toolSteps, avatarOverride, wsPath) {
   const card = document.createElement('div')
   card.className = `msg-card ${role}`
-  const avatarDisplay = _renderAvatar(avatarOverride, role)
+  const avatarDisplay = _renderAvatar(avatarOverride, role, wsPath)
   const nameClass = role === 'user' ? 'msg-name user-name' : 'msg-name'
   const time = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
 
@@ -2025,6 +2144,60 @@ async function openSettings() {
   const config = await window.api.getConfig() || {}
   const prefs = await window.api.getPrefs()
   const codingAgent = await window.api.getCodingAgent()
+  // Load user profile into settings
+  const profile = await window.api.getUserProfile()
+  document.getElementById('cfgUserName').value = profile.userName || ''
+  const avatarAbsPath = await window.api.getUserAvatarPath()
+  const imgEl = document.getElementById('cfgUserAvatarImg')
+  const fallbackEl = document.getElementById('cfgUserAvatarFallback')
+  if (profile.userAvatar && avatarAbsPath) {
+    imgEl.src = `file://${avatarAbsPath}?t=${Date.now()}`
+    imgEl.style.display = 'block'
+    fallbackEl.style.display = 'none'
+  } else {
+    imgEl.style.display = 'none'
+    fallbackEl.style.display = 'block'
+  }
+  // Render preset thumbnails
+  const presetsContainer = document.getElementById('cfgUserPresets')
+  presetsContainer.innerHTML = [0,1,2,3,4,5].map(i =>
+    `<img src="avatars/${i}.png" data-preset="${i}" style="width:28px;height:28px;border-radius:50%;cursor:pointer;border:2px solid transparent;object-fit:cover;transition:border-color 0.15s" class="user-avatar-preset">`
+  ).join('')
+  let _pendingUserAvatar = null
+  presetsContainer.querySelectorAll('.user-avatar-preset').forEach(thumb => {
+    thumb.onmouseenter = () => { thumb.style.borderColor = 'var(--accent)' }
+    thumb.onmouseleave = () => { if (!thumb.classList.contains('selected')) thumb.style.borderColor = 'transparent' }
+    thumb.onclick = async () => {
+      presetsContainer.querySelectorAll('.user-avatar-preset').forEach(t => { t.style.borderColor = 'transparent'; t.classList.remove('selected') })
+      thumb.style.borderColor = 'var(--accent)'
+      thumb.classList.add('selected')
+      imgEl.src = thumb.src
+      imgEl.style.display = 'block'
+      fallbackEl.style.display = 'none'
+      _pendingUserAvatar = { presetIndex: parseInt(thumb.dataset.preset) }
+    }
+  })
+  // Upload handler
+  const fileInput = document.getElementById('cfgUserAvatarFile')
+  fileInput.value = ''
+  fileInput.onchange = () => {
+    if (fileInput.files[0]) {
+      imgEl.src = `file://${fileInput.files[0].path}`
+      imgEl.style.display = 'block'
+      fallbackEl.style.display = 'none'
+      presetsContainer.querySelectorAll('.user-avatar-preset').forEach(t => { t.style.borderColor = 'transparent'; t.classList.remove('selected') })
+      _pendingUserAvatar = { customPath: fileInput.files[0].path }
+    }
+  }
+  // Store pending avatar action for saveSettings to pick up
+  window._pendingUserAvatar = _pendingUserAvatar
+  // Watch for changes — auto-save profile on input blur
+  const userNameInput = document.getElementById('cfgUserName')
+  userNameInput._origOnchange = userNameInput.onchange
+  userNameInput.onchange = null
+  // Store reference for saveSettings
+  window._settingsUserAvatarGetter = () => _pendingUserAvatar
+
   document.getElementById('cfgProvider').value = config.provider || 'anthropic'
   document.getElementById('cfgApiKey').value = config.apiKey || ''
   document.getElementById('cfgBaseUrl').value = config.baseUrl || ''
@@ -2082,8 +2255,9 @@ async function changeWorkspace() {
   }
 }
 
-function closeSettings() {
+async function closeSettings() {
   document.getElementById('settingsOverlay').style.display = 'none'
+  await saveSettings()
 }
 
 // switchSettingsTab removed — settings is now a single scrollable page
@@ -2118,11 +2292,21 @@ async function saveSettings() {
   await window.api.setCodingAgent(codingAgent)
   if (config.heartbeat.enabled) await window.api.heartbeatStart()
   else await window.api.heartbeatStop()
+  // Save user profile
+  const userProfileOpts = { userName: document.getElementById('cfgUserName').value }
+  const pendingAvatar = window._settingsUserAvatarGetter?.()
+  if (pendingAvatar) Object.assign(userProfileOpts, pendingAvatar)
+  const updatedProfile = await window.api.setUserProfile(userProfileOpts)
+  _userProfile.userName = updatedProfile.userName || ''
+  _userProfile.userAvatar = updatedProfile.userAvatar || ''
+  if (updatedProfile.userAvatar) {
+    _userProfile.avatarAbsPath = await window.api.getUserAvatarPath()
+  }
+  _avatarTs = Date.now()
   // Reconnect MCP servers if config changed
   if (window.api.mcpReconnect) {
     try { await window.api.mcpReconnect() } catch {}
   }
-  closeSettings()
 }
 
 // ── Members panel ──
@@ -2151,7 +2335,7 @@ async function refreshMemberList() {
       el.className = 'member-item'
       const avatar = ws.identity?.avatar || ''
       const isEmoji = !avatar.includes('.')
-      const avatarHtml = isEmoji ? (avatar || IC.bot) : `<img src="file://${esc(ws.path + '/' + avatar)}" style="width:16px;height:16px;border-radius:50%">`
+      const avatarHtml = isEmoji ? (avatar || IC.bot) : `<img src="file://${esc(ws.path + '/.paw/' + avatar)}?t=${_avatarTs}" style="width:16px;height:16px;border-radius:50%;object-fit:cover">`
       const ownerBadge = i === 0 ? ' <span class="hint" style="font-size:10px">(群主)</span>' : ''
       const removeBtn = i > 0 ? `<span class="del-btn" onclick="removeParticipant('${esc(ws.id)}')">✕</span>` : ''
       el.innerHTML = `<span>${avatarHtml} ${esc(ws.identity?.name || ws.id)}${ownerBadge}</span>${removeBtn}`
@@ -2182,7 +2366,10 @@ async function refreshMemberList() {
   // Always show user
   const userEl = document.createElement('div')
   userEl.className = 'member-item'
-  userEl.innerHTML = `<span>${IC.user} You</span>`
+  const userAvatarHtml = _userProfile.avatarAbsPath
+    ? `<img src="file://${esc(_userProfile.avatarAbsPath)}?t=${_avatarTs}" style="width:16px;height:16px;border-radius:50%;object-fit:cover;vertical-align:middle">`
+    : IC.user
+  userEl.innerHTML = `<span>${userAvatarHtml} ${esc(_userProfile.userName || 'You')}</span>`
   list.appendChild(userEl)
   // Show lightweight agents
   for (const a of sessionAgents) {

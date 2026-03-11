@@ -27,6 +27,34 @@ function _writeWsConfig(workspacePath, config) {
   fs.writeFileSync(_configPath(workspacePath), JSON.stringify(config, null, 2) + '\n', 'utf8')
 }
 
+function _ensureAvatar(workspacePath, config) {
+  const avatarDest = path.join(workspacePath, CONFIG_DIR, 'avatar.png')
+
+  // If avatar is already an image file AND the file exists, nothing to do
+  if (config.avatar && config.avatar.includes('.') && fs.existsSync(avatarDest)) return config
+
+  // If file exists but config doesn't point to it, fix config
+  if (fs.existsSync(avatarDest)) {
+    config.avatar = 'avatar.png'
+    _writeWsConfig(workspacePath, config)
+    return config
+  }
+
+  // Pick a random preset (1-5) and copy it
+  const presetIndex = Math.floor(Math.random() * 5) + 1
+  const presetsDir = path.join(__dirname, '..', 'renderer', 'avatars')
+  const src = path.join(presetsDir, `${presetIndex}.png`)
+  try {
+    if (fs.existsSync(src)) {
+      fs.mkdirSync(path.join(workspacePath, CONFIG_DIR), { recursive: true })
+      fs.copyFileSync(src, avatarDest)
+      config.avatar = 'avatar.png'
+      _writeWsConfig(workspacePath, config)
+    }
+  } catch { /* ignore copy errors */ }
+  return config
+}
+
 function loadWorkspaceIdentity(workspacePath) {
   let config = _readWsConfig(workspacePath)
 
@@ -35,6 +63,9 @@ function loadWorkspaceIdentity(workspacePath) {
     config.id = crypto.randomUUID()
     _writeWsConfig(workspacePath, config)
   }
+
+  // Ensure avatar image exists
+  config = _ensureAvatar(workspacePath, config)
 
   return {
     id: config.id,
