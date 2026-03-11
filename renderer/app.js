@@ -137,6 +137,7 @@ window.api.onTrayNewChat(() => { newSession() })
 // Group chat delegation streaming — independent bubbles
 let _delegateState = null  // { card, textEl, fullText, sender, workspaceId }
 let _pendingDelegateMessages = []  // accumulated delegate messages to save after orchestrator finishes
+let _clawDir = ''  // workspace root for resolving relative paths
 window.api.onDelegateStart(({ requestId, sender, workspaceId, avatar, sessionId: evtSid }) => {
   // Ignore delegate events from other sessions
   if (evtSid && evtSid !== currentSessionId) return
@@ -300,6 +301,21 @@ marked.use(markedHighlight.markedHighlight({
     return hljs.highlightAuto(code).value
   },
 }))
+// Custom image renderer — resolve relative paths to workspace
+marked.use({
+  renderer: {
+    image({ href, title, text }) {
+      if (href && !href.startsWith('http') && !href.startsWith('data:') && !href.startsWith('file:')) {
+        // Relative path → resolve to clawDir
+        const resolved = _clawDir ? `file://${_clawDir}/${href}` : href
+        href = resolved
+      }
+      const alt = text ? ` alt="${text}"` : ''
+      const titleAttr = title ? ` title="${title}"` : ''
+      return `<img src="${href}"${alt}${titleAttr}>`
+    }
+  }
+})
 
 // File click handler — detect file paths in rendered messages
 document.addEventListener('click', async (e) => {
@@ -425,7 +441,7 @@ async function init() {
   // Load feature flags
   try { _featureFlags = await window.api.getFeatureFlags() || _featureFlags } catch {}
   const prefs = await window.api.getPrefs()
-  if (prefs.clawDir) enterChat()
+  if (prefs.clawDir) { _clawDir = prefs.clawDir; enterChat() }
 }
 
 function showSetupScreen() {
@@ -435,12 +451,12 @@ function showSetupScreen() {
 
 async function createNew() {
   const dir = await window.api.createClawDir()
-  if (dir) enterChat()
+  if (dir) { _clawDir = dir; enterChat() }
 }
 
 async function openExisting() {
   const dir = await window.api.selectClawDir()
-  if (dir) enterChat()
+  if (dir) { _clawDir = dir; enterChat() }
 }
 
 async function enterChat() {
@@ -1846,12 +1862,13 @@ function renderToolGroup(slot, steps, forceCollapse) {
 // addToolCard removed — tool steps now render inline via renderToolGroup
 
 function linkifyPaths(html) {
-  // Match absolute paths (/...), home paths (~/...), and relative paths with extension
-  // Negative lookbehind avoids matching inside href="..." or src="..."
-  return html.replace(/(?<![="'`])(?:~?\/[\w.@:+-]+(?:\/[\w.@:+-]+)*\.\w+|~?\/[\w.@:+-]+(?:\/[\w.@:+-]+)+)/g, (m) => {
-    // Skip if it looks like a URL path fragment (no leading /)
-    if (m.startsWith('http')) return m
-    return `<a href="#" class="file-link" data-path="${m}" title="Click to open">${m}</a>`
+  // Split HTML into tags and text segments, only linkify text segments
+  return html.replace(/(<[^>]*>)|(?:~?\/[\w.@:+-]+(?:\/[\w.@:+-]+)*\.\w+|~?\/[\w.@:+-]+(?:\/[\w.@:+-]+)+)/g, (full, tag) => {
+    // If it's an HTML tag, leave it untouched
+    if (tag) return tag
+    // Skip URL path fragments
+    if (full.startsWith('http')) return full
+    return `<a href="#" class="file-link" data-path="${full}" title="Click to open">${full}</a>`
   })
 }
 

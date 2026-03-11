@@ -137,7 +137,7 @@ button:hover { background: var(--border-muted); }
 .sidebar.hidden .sidebar-resize { display: none; }
 .sidebar-header {
   display: flex; align-items: center; justify-content: flex-end;
-  padding: 6px 10px 6px 80px;
+  padding: 6px 10px 6px 84px;
   -webkit-app-region: no-drag; gap: 2px;
   min-height: 36px;
 }
@@ -205,7 +205,7 @@ button:hover { background: var(--border-muted); }
 }
 .chat-header .icon-btn { -webkit-app-region: no-drag; }
 .chat-header .sidebar-toggle { margin-right: -2px; }
-.chat-header.sidebar-hidden { padding-left: 86px; }
+.chat-header.sidebar-hidden { padding-left: 90px; }
 .chat-header span { flex: 1; }
 .icon-btn {
   background: transparent; border: none; font-size: 15px;
