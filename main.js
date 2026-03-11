@@ -351,6 +351,22 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // F201: Auto-migration from old path to ~/.paw/
+  const oldUserDataPath = app.getPath('userData')
+  const migratedFlag = path.join(GLOBAL_DIR, '.migrated')
+  if (!fs.existsSync(migratedFlag) && fs.existsSync(oldUserDataPath)) {
+    fs.mkdirSync(GLOBAL_DIR, { recursive: true })
+    const filesToMigrate = ['settings.json', 'workspaces.json', 'prefs.json', 'user-avatar.png']
+    for (const file of filesToMigrate) {
+      const src = path.join(oldUserDataPath, file)
+      const dest = path.join(GLOBAL_DIR, file)
+      if (fs.existsSync(src) && !fs.existsSync(dest)) {
+        try { fs.copyFileSync(src, dest) } catch {}
+      }
+    }
+    fs.writeFileSync(migratedFlag, Date.now().toString())
+  }
+
   // Initialize acpx + coding agents
   acpx.init()
   codingAgents.init()
