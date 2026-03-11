@@ -179,11 +179,36 @@ function stopMemoryWatch() { coreStopMemoryWatch(); }
 // ── Session helpers (SQLite backend) ──
 const sessionStore = require('./session-store')
 
-function listSessions(opts) { return sessionStore.listSessions(clawDir, opts) }
-function loadSession(id) { return sessionStore.loadSession(clawDir, id) }
-function saveSession(session) { sessionStore.saveSession(clawDir, session) }
-function createSession(title, opts) { return sessionStore.createSession(clawDir, title, opts) }
-function deleteSessionById(id) { sessionStore.deleteSession(clawDir, id) }
+function getSessionWorkspace(sessionId) {
+  const workspaces = workspaceRegistry.listWorkspaces()
+  return sessionStore.findSessionWorkspace(workspaces, sessionId)
+}
+
+function listSessions(opts) {
+  const workspaces = workspaceRegistry.listWorkspaces()
+  return sessionStore.listAllSessions(workspaces, opts)
+}
+
+function loadSession(id) {
+  const wsPath = getSessionWorkspace(id)
+  return wsPath ? sessionStore.loadSession(wsPath, id) : null
+}
+
+function saveSession(session) {
+  const wsPath = getSessionWorkspace(session.id)
+  if (wsPath) sessionStore.saveSession(wsPath, session)
+}
+
+function createSession(title, opts) {
+  const targetWsPath = clawDir || workspaceRegistry.listWorkspaces()[0]?.path
+  if (!targetWsPath) return null
+  return sessionStore.createSession(targetWsPath, title, opts)
+}
+
+function deleteSessionById(id) {
+  const wsPath = getSessionWorkspace(id)
+  if (wsPath) sessionStore.deleteSession(wsPath, id)
+}
 
 function agentsDir() { syncState(); return coreAgentsDir(); }
 function listAgents() { syncState(); return coreListAgents(); }
@@ -599,7 +624,11 @@ ipcMain.handle('session-delete', (_, id) => {
   try { deleteSessionById(id); return true } catch { return false }
 })
 ipcMain.handle('session-rename', (_, id, title) => {
-  try { sessionStore.renameSession(clawDir, id, title); return true } catch { return false }
+  try {
+    const wsPath = getSessionWorkspace(id)
+    if (wsPath) sessionStore.renameSession(wsPath, id, title)
+    return true
+  } catch { return false }
 })
 ipcMain.handle('session-export', (_, id) => {
   const s = loadSession(id)
@@ -654,51 +683,61 @@ ipcMain.handle('session-remove-member', (_, { sessionId, agentId }) => {
 // ── IPC: Session Participants (M32 group chat) ──
 
 ipcMain.handle('session-add-participant', (_, { sessionId, workspaceId }) => {
-  if (!clawDir || !sessionId || !workspaceId) return false
-  return sessionStore.addSessionParticipant(clawDir, sessionId, workspaceId)
+  if (!sessionId || !workspaceId) return false
+  const wsPath = getSessionWorkspace(sessionId)
+  return wsPath ? sessionStore.addSessionParticipant(wsPath, sessionId, workspaceId) : false
 })
 
 ipcMain.handle('session-remove-participant', (_, { sessionId, workspaceId }) => {
-  if (!clawDir || !sessionId || !workspaceId) return false
-  return sessionStore.removeSessionParticipant(clawDir, sessionId, workspaceId)
+  if (!sessionId || !workspaceId) return false
+  const wsPath = getSessionWorkspace(sessionId)
+  return wsPath ? sessionStore.removeSessionParticipant(wsPath, sessionId, workspaceId) : false
 })
 
 ipcMain.handle('session-get-participants', (_, sessionId) => {
-  if (!clawDir || !sessionId) return []
-  return sessionStore.getSessionParticipants(clawDir, sessionId)
+  if (!sessionId) return []
+  const wsPath = getSessionWorkspace(sessionId)
+  return wsPath ? sessionStore.getSessionParticipants(wsPath, sessionId) : []
 })
 
 // ── IPC: Session Agents (M19: lightweight agents, gated) ──
 
 ipcMain.handle('session-create-agent', (_, { sessionId, name, role }) => {
   if (!LEGACY_AGENT_FEATURES) return null
-  if (!clawDir || !sessionId) return null
-  const existing = sessionStore.findSessionAgentByName(clawDir, sessionId, name)
+  if (!sessionId) return null
+  const wsPath = getSessionWorkspace(sessionId)
+  if (!wsPath) return null
+  const existing = sessionStore.findSessionAgentByName(wsPath, sessionId, name)
   if (existing) return { error: `Agent "${name}" already exists in this session` }
-  const agent = sessionStore.createSessionAgent(clawDir, sessionId, { name, role })
+  const agent = sessionStore.createSessionAgent(wsPath, sessionId, { name, role })
   mainWindow?.webContents.send('session-agents-changed', sessionId)
   return agent
 })
 
 ipcMain.handle('session-list-agents', (_, sessionId) => {
   if (!LEGACY_AGENT_FEATURES) return []
-  if (!clawDir) return []
-  return sessionStore.listSessionAgents(clawDir, sessionId)
+  const wsPath = getSessionWorkspace(sessionId)
+  return wsPath ? sessionStore.listSessionAgents(wsPath, sessionId) : []
 })
 
 ipcMain.handle('session-delete-agent', (_, agentId) => {
   if (!LEGACY_AGENT_FEATURES) return false
-  if (!clawDir) return false
-  const result = sessionStore.deleteSessionAgent(clawDir, agentId)
-  if (result && currentSessionId) mainWindow?.webContents.send('session-agents-changed', currentSessionId)
-  return result
+  const workspaces = workspaceRegistry.listWorkspaces()
+  for (const ws of workspaces) {
+    const result = sessionStore.deleteSessionAgent(ws.path, agentId)
+    if (result && currentSessionId) {
+      mainWindow?.webContents.send('session-agents-changed', currentSessionId)
+      return true
+    }
+  }
+  return false
 })
 
 // ── IPC: Tasks (legacy, gated) ──
 ipcMain.handle('session-tasks', (_, sessionId) => {
   if (!LEGACY_AGENT_FEATURES) return []
-  if (!clawDir) return []
-  return sessionStore.listTasks(clawDir, sessionId)
+  const wsPath = getSessionWorkspace(sessionId)
+  return wsPath ? sessionStore.listTasks(wsPath, sessionId) : []
 })
 
 // ── IPC: Feature flags ──

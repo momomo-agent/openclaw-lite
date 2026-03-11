@@ -3,19 +3,18 @@ const path = require('path')
 const fs = require('fs')
 const Database = require('better-sqlite3')
 
-let db = null
-let dbPath = null
+const dbCache = new Map()
 
 function getDb(clawDir) {
   if (!clawDir) return null
   const target = path.join(clawDir, '.paw', 'sessions.db')
-  if (db && dbPath === target) return db
+  if (dbCache.has(target)) return dbCache.get(target)
   fs.mkdirSync(path.dirname(target), { recursive: true })
-  db = new Database(target)
+  const db = new Database(target)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
-  dbPath = target
   ensureSchema(db)
+  dbCache.set(target, db)
   return db
 }
 
@@ -211,7 +210,36 @@ function listTasks(clawDir, sessionId) {
 }
 
 function closeDb() {
-  if (db) { try { db.close() } catch {} db = null; dbPath = null }
+  for (const db of dbCache.values()) {
+    try { db.close() } catch {}
+  }
+  dbCache.clear()
+}
+
+// ── Multi-workspace session lookup ──
+
+function findSessionWorkspace(workspaces, sessionId) {
+  for (const ws of workspaces) {
+    const db = getDb(ws.path)
+    if (!db) continue
+    const exists = db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(sessionId)
+    if (exists) return ws.path
+  }
+  return null
+}
+
+function listAllSessions(workspaces, opts = {}) {
+  const allSessions = []
+  for (const ws of workspaces) {
+    const sessions = listSessions(ws.path, opts)
+    for (const s of sessions) {
+      s.workspacePath = ws.path
+      s.workspaceId = ws.id
+    }
+    allSessions.push(...sessions)
+  }
+  allSessions.sort((a, b) => b.updatedAt - a.updatedAt)
+  return allSessions
 }
 
 function updateSessionStatus(clawDir, sessionId, level, text) {
@@ -344,4 +372,4 @@ function removeSessionParticipant(clawDir, sessionId, workspaceId) {
   return true
 }
 
-module.exports = { getDb, listSessions, loadSession, saveSession, deleteSession, renameSession, createSession, closeDb, createTask, updateTask, listTasks, updateSessionStatus, getSessionStatus, getSessionMode, setSessionMode, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, addSessionParticipant, removeSessionParticipant, getSessionParticipants }
+module.exports = { getDb, listSessions, loadSession, saveSession, deleteSession, renameSession, createSession, closeDb, createTask, updateTask, listTasks, updateSessionStatus, getSessionStatus, getSessionMode, setSessionMode, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, addSessionParticipant, removeSessionParticipant, getSessionParticipants, findSessionWorkspace, listAllSessions }
