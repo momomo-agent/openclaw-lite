@@ -97,3 +97,28 @@ Session（群聊）
 - 完全符合 IM 隐喻：群聊就是把人拉到一起
 - 每个 workspace 作为"独立的人"参与，保持 U盘隐喻的一致性
 - 未来扩展自然：workspace 可以是本地的，也可以是远程的（网络上另一台机器的 workspace）
+
+---
+
+## Roadmap
+
+### Phase 1：MCP 支持
+- 实现 MCP client，连接外部 MCP server
+- MCP server 暴露的 tools 自动注册到 Paw 工具系统
+- Workspace config 里声明 MCP server 连接信息
+- 一旦有 MCP，用户可以自己扩展任意工具，不需要 Paw 内置
+
+### Phase 2：Tool 体系对齐
+优先补齐已有 tool 的质量和覆盖：
+- `web_fetch` 输出改为 markdown（turndown）
+- `skill_create` — 创建 skill 脚手架
+- 补齐 OpenClaw 常用工具：browser、image、pdf、tts
+- Tool 安全模型完善（allowlist、approval chain）
+
+### Phase 3：IM 接入
+内置轻量 IM provider，Paw 开着时 workspace 可以通过外部 IM 对话：
+- **Discord** — discord.js，开发者/社区场景
+- **Telegram** — node-telegram-bot-api，个人/国际用户
+- **飞书** — @larksuiteoapi/node-sdk，国内企业场景
+- 架构：chat handler 抽象化，每个 IM 一个 provider 插件
+- 限制（接受的）：Paw 关了 bot 就断，不做 24/7 常驻
