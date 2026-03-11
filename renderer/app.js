@@ -741,9 +741,32 @@ function _fmtTime(ts) {
 }
 
 async function switchSession(id) {
+  // F210: Save current draft before switching
+  if (currentSessionId) {
+    draftCache.set(currentSessionId, {
+      text: input.value,
+      attachments: [...pendingFiles]
+    })
+  }
+
   const session = await window.api.loadSession(id)
   if (!session) return
   currentSessionId = id
+
+  // F210: Restore draft for new session
+  const draft = draftCache.get(id)
+  if (draft) {
+    input.value = draft.text
+    pendingFiles = [...draft.attachments]
+    renderAttachPreview()
+  } else {
+    input.value = ''
+    pendingFiles = []
+    renderAttachPreview()
+  }
+  input.style.height = 'auto'
+  input.style.height = Math.min(input.scrollHeight, 120) + 'px'
+  _updateSendBtn()
 
   // Show workspace name in header + coding mode badge + group members
   let titleText = session.title
@@ -1440,6 +1463,9 @@ function _updateSendBtn() {
 
 // File attachments
 let pendingFiles = []
+// F210: Draft cache per session (memory only)
+const draftCache = new Map() // sessionId -> { text, attachments }
+
 function handleFiles(fileList) {
   for (const f of fileList) {
     const reader = new FileReader()
