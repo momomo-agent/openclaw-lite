@@ -1,5 +1,26 @@
 // Paw — Renderer App
 
+// ── Icon constants (Lucide-style inline SVGs) ──
+const IC = {
+  wrench: '<span class="ic"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>',
+  thought: '<span class="ic"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22z"/></svg></span>',
+  user: '<span class="ic"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>',
+  warn: '<span class="ic"><svg viewBox="0 0 24 24" width="14" height="14"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>',
+  chat: '<span class="ic"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22z"/></svg></span>',
+  edit: '<span class="ic"><svg viewBox="0 0 24 24" width="12" height="12"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></span>',
+  folder: '<span class="ic"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>',
+  spark: '<span class="ic"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg></span>',
+  bot: '<span class="ic"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg></span>',
+  check: '<span class="ic"><svg viewBox="0 0 24 24" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg></span>',
+  cross: '<span class="ic"><svg viewBox="0 0 24 24" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>',
+  clock: '<span class="ic"><svg viewBox="0 0 24 24" width="14" height="14"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>',
+  refresh: '<span class="ic"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg></span>',
+  dot_green: '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e"></span>',
+  dot_red: '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444"></span>',
+  file: '<span class="ic"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg></span>',
+  group: '<span class="ic"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>',
+}
+
 // ── Feature flags (loaded at init) ──
 let _featureFlags = { legacyAgentFeatures: false }
 
@@ -123,11 +144,11 @@ window.api.onDelegateStart(({ requestId, sender, workspaceId, avatar, sessionId:
   // Capture orchestrator info from the current streaming card for later split
   const lastCard = _msgContainer?.querySelector('.msg-card.assistant:last-of-type')
   const orchName = lastCard?.querySelector('.msg-name')?.textContent || 'Assistant'
-  const orchAvatar = lastCard?.querySelector('.msg-avatar')?.textContent || '🤖'
+  const orchAvatar = lastCard?.querySelector('.msg-avatar')?.textContent?.trim() || null
   const card = document.createElement('div')
   card.className = 'msg-card assistant'
   const _t = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
-  card.innerHTML = `<div class="msg-avatar">${esc(avatar || '🤖')}</div><div class="msg-body"><div class="msg-header"><span class="msg-name">${esc(sender)}</span><span class="msg-time">${_t}</span></div><div class="msg-flow"><div class="msg-content md-content"></div><div class="inline-status"><span class="reading-indicator"><span></span><span></span><span></span></span> ${esc(sender)} thinking...</div></div></div>`
+  card.innerHTML = `<div class="msg-avatar">${_renderAvatar(avatar)}</div><div class="msg-body"><div class="msg-header"><span class="msg-name">${esc(sender)}</span><span class="msg-time">${_t}</span></div><div class="msg-flow"><div class="msg-content md-content"></div><div class="inline-status"><span class="reading-indicator"><span></span><span></span><span></span></span> ${esc(sender)} thinking...</div></div></div>`
   _msgContainer?.appendChild(card) || messages.appendChild(card)
   messages.scrollTop = messages.scrollHeight
   const textEl = card.querySelector('.msg-content.md-content')
@@ -144,7 +165,7 @@ window.api.onDelegateToken(({ token, thinking, toolStep, roundInfo, sessionId: e
     if (!_delegateState.toolGroup) {
       _delegateState.toolGroup = document.createElement('div')
       _delegateState.toolGroup.className = 'tool-group-inline'
-      _delegateState.toolGroup.innerHTML = '<div class="tool-group-header">🔧 <span class="tool-count">0</span> 个工具调用 <span class="tool-expand">▼</span></div><div class="tool-group-body"></div>'
+      _delegateState.toolGroup.innerHTML = `<div class="tool-group-header"><span class="tool-expand">▶</span> ${IC.wrench} <span class="tool-count">0</span> tool calls</div><div class="tool-group-body" style="display:none"></div>`
       const tg = _delegateState.toolGroup
       tg.querySelector('.tool-group-header').onclick = () => {
         const body = tg.querySelector('.tool-group-body')
@@ -169,7 +190,7 @@ window.api.onDelegateToken(({ token, thinking, toolStep, roundInfo, sessionId: e
       if (header) {
         const count = _delegateState.toolGroup.querySelector('.tool-count')?.textContent || '0'
         const expand = _delegateState.toolGroup.querySelector('.tool-expand')?.textContent || '▼'
-        header.innerHTML = `🔧 <span class="tool-count">${count}</span> 个工具调用 <span class="tool-round">轮次 ${roundInfo.round}</span> <span class="tool-expand">${expand}</span>`
+        header.innerHTML = `<span class="tool-expand">${expand}</span> ${IC.wrench} <span class="tool-count">${count}</span> tool calls <span class="tool-round">round ${roundInfo.round}</span>`
       }
     }
     // New round — reset tool group so next tools create a new group
@@ -180,7 +201,7 @@ window.api.onDelegateToken(({ token, thinking, toolStep, roundInfo, sessionId: e
       _delegateState.thinkingText = ''
       const details = document.createElement('details')
       details.className = 'delegate-thinking'
-      details.innerHTML = '<summary>💭 Thinking...</summary><div class="thinking-content"></div>'
+      details.innerHTML = `<summary>▶ ${IC.thought} Thinking...</summary><div class="thinking-content"></div>`
       flow.insertBefore(details, _delegateState.textEl)
       _delegateState.thinkingEl = details.querySelector('.thinking-content')
     }
@@ -238,19 +259,19 @@ window.api.onCcStatus(({ status, task, error, length }) => {
       }
       ccOutputEl = document.createElement('div')
       ccOutputEl.className = 'tool-step cc-output expanded'
-      ccOutputEl.innerHTML = `<div class="tool-step-header"><span class="tool-icon">🤖</span> <strong>Claude Code</strong> <span class="cc-task">${esc(task || '')}</span> <button class="cc-stop-btn" onclick="window.api.ccStop()">Stop</button></div><pre class="cc-pre"></pre>`
+      ccOutputEl.innerHTML = `<div class="tool-step-header"><span class="tool-icon">${IC.bot}</span> <strong>Claude Code</strong> <span class="cc-task">${esc(task || '')}</span> <button class="cc-stop-btn" onclick="window.api.ccStop()">Stop</button></div><pre class="cc-pre"></pre>`
       toolArea.appendChild(ccOutputEl)
     }
   } else if (status === 'done') {
     if (ccOutputEl) {
       const header = ccOutputEl.querySelector('.tool-step-header')
-      if (header) header.innerHTML = `<span class="tool-icon">✅</span> <strong>Claude Code</strong> <span class="hint">${length || 0} chars</span>`
+      if (header) header.innerHTML = `<span class="tool-icon">${IC.check}</span> <strong>Claude Code</strong> <span class="hint">${length || 0} chars</span>`
     }
     ccOutputEl = null
   } else if (status === 'error') {
     if (ccOutputEl) {
       const header = ccOutputEl.querySelector('.tool-step-header')
-      if (header) header.innerHTML = `<span class="tool-icon">❌</span> <strong>Claude Code</strong> <span class="hint">${esc(error || 'unknown error')}</span>`
+      if (header) header.innerHTML = `<span class="tool-icon">${IC.cross}</span> <strong>Claude Code</strong> <span class="hint">${esc(error || 'unknown error')}</span>`
     }
     ccOutputEl = null
   }
@@ -350,6 +371,54 @@ function destroyContainer(sessionId) {
   }
 }
 
+// ── Theme ──
+let _currentTheme = 'light'
+
+function applyTheme(theme) {
+  _currentTheme = theme || 'default'
+  if (_currentTheme === 'default') {
+    document.documentElement.removeAttribute('data-theme')
+  } else {
+    document.documentElement.setAttribute('data-theme', _currentTheme)
+  }
+  // Update swatch active state if settings is open
+  document.querySelectorAll('.theme-swatch').forEach(s => {
+    s.classList.toggle('active', s.dataset.themeVal === _currentTheme)
+  })
+}
+
+function previewTheme(theme) {
+  applyTheme(theme)
+}
+
+// ── Sidebar resize ──
+{
+  const handle = document.getElementById('sidebarResize')
+  const sidebar = document.getElementById('sidebar')
+  if (handle && sidebar) {
+    let dragging = false
+    handle.addEventListener('mousedown', (e) => {
+      e.preventDefault()
+      dragging = true
+      handle.classList.add('dragging')
+      document.body.style.cursor = 'col-resize'
+      document.body.style.userSelect = 'none'
+    })
+    document.addEventListener('mousemove', (e) => {
+      if (!dragging) return
+      const w = Math.max(160, Math.min(480, e.clientX))
+      sidebar.style.width = w + 'px'
+    })
+    document.addEventListener('mouseup', () => {
+      if (!dragging) return
+      dragging = false
+      handle.classList.remove('dragging')
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    })
+  }
+}
+
 // ── Setup screen ──
 
 async function init() {
@@ -377,6 +446,11 @@ async function openExisting() {
 async function enterChat() {
   document.getElementById('setupScreen').style.display = 'none'
   document.getElementById('chatScreen').style.display = 'flex'
+  // Load and apply theme (default: light)
+  try {
+    const config = await window.api.getConfig()
+    applyTheme(config?.theme || 'light')
+  } catch { applyTheme('light') }
   // Hide legacy UI when feature flag is off
   if (!_featureFlags.legacyAgentFeatures) {
     // Hide Members button (👥)
@@ -445,13 +519,14 @@ function renderSessionItem(s, wsMap) {
   const activity = activityState.get(s.id) || 'idle'
   const aiText = aiStatus.get(s.id) || ''
 
-  // Avatar: group=👥, has workspace=ws avatar, else 🤖
-  let avatarContent = '🤖'
+  // Avatar: group=group icon, has workspace=ws avatar, else bot icon
+  let avatarContent = IC.bot
+  let avatarIsHtml = true
   if (isGroup) {
-    avatarContent = '👥'
+    avatarContent = IC.group
   } else if (s.participants?.length === 1 && wsMap) {
     const ws = wsMap.get(s.participants[0])
-    if (ws?.identity?.avatar) avatarContent = ws.identity.avatar
+    if (ws?.identity?.avatar) { avatarContent = ws.identity.avatar; avatarIsHtml = false }
   }
 
   // Subtitle: build lastMsg with sender prefix for group chats
@@ -461,6 +536,14 @@ function renderSessionItem(s, wsMap) {
     if (s.lastSenderWsId && wsMap) {
       const ws = wsMap.get(s.lastSenderWsId)
       if (ws?.identity?.name) senderName = ws.identity.name
+    } else if (wsMap) {
+      // Reverse lookup: find ws whose current or former name matches lastSender
+      for (const [, ws] of wsMap) {
+        if (ws?.identity?.name === senderName || ws?.identity?.wsId === s.lastSender) {
+          senderName = ws.identity.name
+          break
+        }
+      }
     }
     lastMsg = `${senderName}: ${lastMsg}`
   }
@@ -477,7 +560,8 @@ function renderSessionItem(s, wsMap) {
   // Dot visibility
   const dotStyle = activity === 'idle' ? 'display:none' : ''
 
-  el.innerHTML = `<div class="session-avatar">${esc(avatarContent)}</div><div class="session-body"><div class="session-row-top"><span class="session-title">${esc(s.title)}</span><span class="session-time">${esc(time)}</span></div><div class="session-row-bottom"><span class="${subClass}">${esc(subText)}</span><span class="session-dot ${activity}" style="${dotStyle}"></span></div></div>`
+  const avatarHtmlOut = avatarIsHtml ? avatarContent : esc(avatarContent)
+  el.innerHTML = `<div class="session-avatar">${avatarHtmlOut}</div><div class="session-body"><div class="session-row-top"><span class="session-title">${esc(s.title)}</span><span class="session-time">${esc(time)}</span></div><div class="session-row-bottom"><span class="${subClass}">${esc(subText)}</span><span class="session-dot ${activity}" style="${dotStyle}"></span></div></div>`
 
   let clickTimer = null
   el.onclick = () => {
@@ -539,7 +623,7 @@ async function switchSession(id) {
 
   // Otherwise, build from DB
   let ownerName = 'Assistant'
-  let ownerAvatar = '🤖'
+  let ownerAvatar = null
   let allWorkspaces = []
   if (session.participants && session.participants.length > 0) {
     try {
@@ -558,7 +642,7 @@ async function switchSession(id) {
       if (m.senderWorkspaceId) {
         const ws = allWorkspaces.find(w => w.id === m.senderWorkspaceId)
         if (ws?.identity?.name) sender = ws.identity.name
-        msgAvatar = ws?.identity?.avatar || '🤖'
+        msgAvatar = ws?.identity?.avatar || null
       } else {
         msgAvatar = ownerAvatar
         // Owner message (no senderWorkspaceId) — use current owner name
@@ -611,53 +695,55 @@ async function showNewChatSelector(workspaces) {
 
   const panel = document.createElement('div')
   panel.className = 'new-chat-panel'
+  panel.style.maxHeight = '80vh'
+  panel.style.overflow = 'hidden'
+  panel.style.display = 'flex'
+  panel.style.flexDirection = 'column'
 
-  // Tabs: 💬 对话  |  ⌨ Coding  |  👥 群聊
   const hasCoding = codingAgentsList.length > 0
   const hasGroup = workspaces.length > 1
-  panel.innerHTML = `
-    <div class="new-chat-header">
-      <span class="new-chat-tab active" data-tab="chat">💬 对话</span>
-      ${hasCoding ? '<span class="new-chat-tab" data-tab="coding">⌨ Coding</span>' : ''}
-      ${hasGroup ? '<span class="new-chat-tab" data-tab="group">👥 群聊</span>' : ''}
-    </div>
-    <div class="new-chat-body">
-      <div class="new-chat-tab-content active" data-tab="chat"></div>
-      ${hasCoding ? '<div class="new-chat-tab-content" data-tab="coding"></div>' : ''}
-      ${hasGroup ? '<div class="new-chat-tab-content" data-tab="group"></div>' : ''}
-    </div>
-  `
 
-  // Tab switching
-  panel.querySelectorAll('.new-chat-tab').forEach(tab => {
-    tab.onclick = () => {
-      panel.querySelectorAll('.new-chat-tab').forEach(t => t.classList.remove('active'))
-      panel.querySelectorAll('.new-chat-tab-content').forEach(t => t.classList.remove('active'))
-      tab.classList.add('active')
-      panel.querySelector(`.new-chat-tab-content[data-tab="${tab.dataset.tab}"]`).classList.add('active')
-    }
-  })
+  // Header
+  const header = document.createElement('div')
+  header.className = 'people-header'
+  header.innerHTML = `<span>New Chat</span><button class="icon-btn" onclick="document.getElementById('newChatOverlay')?.remove()">✕</button>`
+  panel.appendChild(header)
 
-  // ── Tab 1: Chat ──
-  const chatTab = panel.querySelector('.new-chat-tab-content[data-tab="chat"]')
+  // Scrollable body
+  const body = document.createElement('div')
+  body.style.cssText = 'flex:1;overflow-y:auto;padding:8px'
+
+  // ── Section: Chat ──
+  const chatSection = document.createElement('div')
+  chatSection.style.cssText = 'margin-bottom:12px'
+  const chatLabel = document.createElement('div')
+  chatLabel.className = 'settings-section-title'
+  chatLabel.style.cssText = 'padding:4px 8px'
+  chatLabel.textContent = 'Chat'
+  chatSection.appendChild(chatLabel)
   for (const ws of workspaces) {
-    chatTab.appendChild(_makeAgentItem(ws, () => {
+    chatSection.appendChild(_makeAgentItem(ws, () => {
       overlay.remove()
       createNewSession(ws.id, 'chat')
     }))
   }
+  body.appendChild(chatSection)
 
-  // ── Tab 2: Coding ──
+  // ── Section: Coding ──
   if (hasCoding) {
-    const codingTab = panel.querySelector('.new-chat-tab-content[data-tab="coding"]')
-    // Show each agent × coding-agent combo
+    const codingSection = document.createElement('div')
+    codingSection.style.cssText = 'margin-bottom:12px'
+    const codingLabel = document.createElement('div')
+    codingLabel.className = 'settings-section-title'
+    codingLabel.style.cssText = 'padding:4px 8px'
+    codingLabel.textContent = 'Coding'
+    codingSection.appendChild(codingLabel)
     for (const ws of workspaces) {
       const item = document.createElement('div')
       item.className = 'new-chat-item'
-      const avatar = ws.identity.avatar || '🤖'
-      const isEmoji = avatar.length <= 4 && !avatar.includes('.')
-      const avatarHtml = isEmoji ? `<span class="new-chat-avatar">${avatar}</span>` : `<img src="file://${esc(ws.path + '/' + avatar)}" class="new-chat-avatar-img">`
-      // Coding agent selector
+      const avatar = ws.identity.avatar || ''
+      const isEmoji = !avatar.includes('.')
+      const avatarHtml = isEmoji ? `<span class="new-chat-avatar">${avatar || IC.bot}</span>` : `<img src="file://${esc(ws.path + '/' + avatar)}" class="new-chat-avatar-img">`
       let selectHtml = ''
       if (codingAgentsList.length === 1) {
         selectHtml = `<span class="new-chat-coding-label">${esc(codingAgentsList[0].name)}</span>`
@@ -666,31 +752,30 @@ async function showNewChatSelector(workspaces) {
       }
       item.innerHTML = `${avatarHtml}<div class="new-chat-info"><div class="new-chat-name">${esc(ws.identity.name)}</div><div class="new-chat-desc">Coding Agent: ${selectHtml}</div></div>`
       item.onclick = () => {
-        const sel = item.querySelector('.new-chat-coding-select')
-        const agentId = sel ? sel.value : codingAgentsList[0]?.id
         overlay.remove()
         createNewSession(ws.id, 'coding')
       }
-      codingTab.appendChild(item)
+      codingSection.appendChild(item)
     }
-    if (codingAgentsList.length === 0) {
-      const hint = document.createElement('div')
-      hint.className = 'new-chat-empty'
-      hint.textContent = '未检测到本地 coding agent (claude/codex/gemini/kiro)'
-      codingTab.appendChild(hint)
-    }
+    body.appendChild(codingSection)
   }
 
-  // ── Tab 3: Group Chat ──
+  // ── Section: Group Chat ──
   if (hasGroup) {
-    const groupTab = panel.querySelector('.new-chat-tab-content[data-tab="group"]')
+    const groupSection = document.createElement('div')
+    groupSection.style.cssText = 'margin-bottom:12px'
+    const groupLabel = document.createElement('div')
+    groupLabel.className = 'settings-section-title'
+    groupLabel.style.cssText = 'padding:4px 8px'
+    groupLabel.textContent = 'Group Chat'
+    groupSection.appendChild(groupLabel)
     const selected = new Set()
     for (const ws of workspaces) {
       const item = document.createElement('div')
       item.className = 'new-chat-item'
-      const avatar = ws.identity.avatar || '🤖'
-      const isEmoji = avatar.length <= 4 && !avatar.includes('.')
-      const avatarHtml = isEmoji ? `<span class="new-chat-avatar">${avatar}</span>` : `<img src="file://${esc(ws.path + '/' + avatar)}" class="new-chat-avatar-img">`
+      const avatar = ws.identity.avatar || ''
+      const isEmoji = !avatar.includes('.')
+      const avatarHtml = isEmoji ? `<span class="new-chat-avatar">${avatar || IC.bot}</span>` : `<img src="file://${esc(ws.path + '/' + avatar)}" class="new-chat-avatar-img">`
       item.innerHTML = `<input type="checkbox" class="group-ws-check" data-id="${esc(ws.id)}" style="margin-right:8px">${avatarHtml}<div class="new-chat-info"><div class="new-chat-name">${esc(ws.identity.name)}</div></div>`
       item.onclick = (e) => {
         if (e.target.tagName === 'INPUT') return
@@ -703,11 +788,11 @@ async function showNewChatSelector(workspaces) {
         else selected.delete(ws.id)
         createBtn.disabled = selected.size < 2
       }
-      groupTab.appendChild(item)
+      groupSection.appendChild(item)
     }
     const createBtn = document.createElement('button')
     createBtn.className = 'primary-btn'
-    createBtn.style.cssText = 'margin:12px 16px;width:calc(100% - 32px)'
+    createBtn.style.cssText = 'margin:8px;width:calc(100% - 16px)'
     createBtn.textContent = '创建群聊'
     createBtn.disabled = true
     createBtn.onclick = async () => {
@@ -721,19 +806,193 @@ async function showNewChatSelector(workspaces) {
       overlay.remove()
       await refreshSessionList()
     }
-    groupTab.appendChild(createBtn)
+    groupSection.appendChild(createBtn)
+    body.appendChild(groupSection)
   }
 
+  // ── Section: Manage Agents ──
+  const hr = document.createElement('hr')
+  hr.style.cssText = 'border:none;height:1px;background:var(--border-default);margin:8px'
+  body.appendChild(hr)
+  const manageSection = document.createElement('div')
+  manageSection.style.cssText = 'margin-bottom:8px'
+  const manageLabel = document.createElement('div')
+  manageLabel.className = 'settings-section-title'
+  manageLabel.style.cssText = 'padding:4px 8px'
+  manageLabel.textContent = 'Manage Agents'
+  manageSection.appendChild(manageLabel)
+
+  // List existing agents
+  const agentListEl = document.createElement('div')
+  agentListEl.className = 'people-list'
+  agentListEl.style.cssText = 'padding:0 4px'
+
+  function renderAgentList() {
+    agentListEl.innerHTML = ''
+    for (const ws of workspaces) {
+      const item = document.createElement('div')
+      item.className = 'people-item'
+      item.style.cssText = 'padding:8px 4px'
+      const avatar = ws.identity.avatar || ''
+      const isEmoji = !avatar.includes('.')
+      const avatarHtml = isEmoji ? `<span class="people-avatar" style="font-size:20px;width:28px">${avatar || IC.bot}</span>` : `<img src="file://${esc(ws.path + '/' + avatar)}" class="people-avatar-img" style="width:28px;height:28px">`
+      item.innerHTML = `
+        ${avatarHtml}
+        <div class="people-info">
+          <div class="people-name" style="font-size:13px">${esc(ws.identity.name)}</div>
+          <div class="people-desc">${esc(ws.identity.description || '')}</div>
+        </div>
+        <div class="people-actions">
+          <button class="icon-btn" title="编辑" style="font-size:12px">${IC.edit}</button>
+          <button class="icon-btn" title="移除" style="font-size:12px">✕</button>
+        </div>
+      `
+      const editBtn = item.querySelectorAll('.icon-btn')[0]
+      const removeBtn = item.querySelectorAll('.icon-btn')[1]
+      editBtn.onclick = (e) => {
+        e.stopPropagation()
+        editWorkspaceInline(ws, panel, body, () => {
+          // Re-render after edit
+          renderAgentList()
+          refreshSessionList()
+        })
+      }
+      removeBtn.onclick = async (e) => {
+        e.stopPropagation()
+        if (!confirm(`确定要移除 "${ws.identity.name}" 吗？`)) return
+        await window.api.removeWorkspace(ws.id)
+        const idx = workspaces.findIndex(w => w.id === ws.id)
+        if (idx !== -1) workspaces.splice(idx, 1)
+        renderAgentList()
+        refreshSessionList()
+      }
+      agentListEl.appendChild(item)
+    }
+  }
+  renderAgentList()
+  manageSection.appendChild(agentListEl)
+
+  // Add/Create buttons
+  const actions = document.createElement('div')
+  actions.style.cssText = 'display:flex;gap:8px;padding:8px 4px'
+  const addBtn = document.createElement('button')
+  addBtn.className = 'secondary-btn'
+  addBtn.style.cssText = 'flex:1;margin:0;font-size:12px'
+  addBtn.innerHTML = `${IC.folder} 添加已有`
+  addBtn.onclick = async () => {
+    const result = await window.api.addWorkspace()
+    if (result?.ok) {
+      overlay.remove()
+      const ws = await window.api.listWorkspaces()
+      showNewChatSelector(ws)
+      await refreshSessionList()
+    } else if (result?.error === 'not_a_workspace') {
+      alert('该文件夹不是有效的 workspace')
+    } else if (result?.error === 'already_registered') {
+      alert('该 workspace 已添加')
+    }
+  }
+  const createAgentBtn = document.createElement('button')
+  createAgentBtn.className = 'secondary-btn'
+  createAgentBtn.style.cssText = 'flex:1;margin:0;font-size:12px'
+  createAgentBtn.innerHTML = `${IC.spark} 新建`
+  createAgentBtn.onclick = async () => {
+    // Inline create form
+    actions.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:6px;width:100%">
+        <input type="text" id="inlineNewWsName" placeholder="Agent 名称" style="background:var(--bg-base);color:var(--text-primary);border:1px solid var(--border-muted);border-radius:4px;padding:6px 8px;font-size:13px;font-family:inherit">
+        <div style="display:flex;gap:6px">
+          <button class="primary-btn" id="inlineWsCreate" style="flex:1;font-size:12px">创建</button>
+          <button class="secondary-btn" id="inlineWsCancel" style="flex:1;margin:0;font-size:12px">取消</button>
+        </div>
+      </div>
+    `
+    const nameInput = actions.querySelector('#inlineNewWsName')
+    nameInput.focus()
+    actions.querySelector('#inlineWsCancel').onclick = () => {
+      overlay.remove()
+      window.api.listWorkspaces().then(ws => showNewChatSelector(ws))
+    }
+    const doCreate = async () => {
+      const name = nameInput.value.trim()
+      if (!name) return
+      const result = await window.api.createWorkspace({ name })
+      if (result?.ok) {
+        overlay.remove()
+        const ws = await window.api.listWorkspaces()
+        showNewChatSelector(ws)
+        await refreshSessionList()
+      } else if (result?.error !== 'cancelled') {
+        alert('创建失败: ' + (result?.error || 'unknown'))
+      }
+    }
+    actions.querySelector('#inlineWsCreate').onclick = doCreate
+    nameInput.onkeydown = (e) => { if (e.key === 'Enter') doCreate() }
+  }
+  actions.appendChild(addBtn)
+  actions.appendChild(createAgentBtn)
+  manageSection.appendChild(actions)
+
+  body.appendChild(manageSection)
+  panel.appendChild(body)
   overlay.appendChild(panel)
   document.body.appendChild(overlay)
+}
+
+function editWorkspaceInline(ws, panel, scrollContainer, onDone) {
+  // Replace panel body with edit form, restore on save/cancel
+  const savedBody = scrollContainer.innerHTML
+  scrollContainer.innerHTML = `
+    <div style="padding:12px;display:flex;flex-direction:column;gap:8px">
+      <div class="settings-section-title">编辑 · ${esc(ws.identity.name)}</div>
+      <label style="font-size:12px;color:var(--text-muted)">名称</label>
+      <input type="text" id="inlineEditName" value="${esc(ws.identity.name)}" style="background:var(--bg-base);color:var(--text-primary);border:1px solid var(--border-muted);border-radius:6px;padding:8px 10px;font-size:13px;font-family:inherit">
+      <label style="font-size:12px;color:var(--text-muted)">头像 (emoji)</label>
+      <input type="text" id="inlineEditAvatar" value="${esc(ws.identity.avatar || '')}" placeholder="🤖" style="background:var(--bg-base);color:var(--text-primary);border:1px solid var(--border-muted);border-radius:6px;padding:8px 10px;font-size:13px;font-family:inherit">
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <button class="primary-btn" id="inlineEditSave" style="flex:1;font-size:12px">保存</button>
+        <button class="secondary-btn" id="inlineEditCancel" style="flex:1;margin:0;font-size:12px">取消</button>
+      </div>
+    </div>
+  `
+  scrollContainer.querySelector('#inlineEditCancel').onclick = () => {
+    scrollContainer.innerHTML = savedBody
+    onDone()
+  }
+  scrollContainer.querySelector('#inlineEditSave').onclick = async () => {
+    const newName = scrollContainer.querySelector('#inlineEditName').value
+    const newAvatar = scrollContainer.querySelector('#inlineEditAvatar').value || null
+    const updated = await window.api.updateWorkspaceIdentity({
+      id: ws.id, name: newName, avatar: newAvatar, description: ws.identity.description || ''
+    })
+    if (updated) {
+      ws.identity = updated.identity || { ...ws.identity, name: newName, avatar: newAvatar }
+    }
+    scrollContainer.innerHTML = savedBody
+    onDone()
+    // Refresh header if current session uses this workspace
+    if (currentSessionId) {
+      const session = await window.api.loadSession(currentSessionId)
+      if (session?.participants?.includes(ws.id)) {
+        const allWs = await window.api.listWorkspaces()
+        const ownerWs = allWs.find(w => w.id === session.participants[0])
+        if (ownerWs) {
+          let titleText = `${ownerWs.identity.name} · ${session.title}`
+          if (session.mode === 'coding') titleText = `⌨ ${titleText}`
+          document.getElementById('sessionTitle').textContent = titleText
+        }
+      }
+    }
+  }
+  scrollContainer.querySelector('#inlineEditName').focus()
 }
 
 function _makeAgentItem(ws, onclick) {
   const item = document.createElement('div')
   item.className = 'new-chat-item'
-  const avatar = ws.identity.avatar || '🤖'
-  const isEmoji = avatar.length <= 4 && !avatar.includes('.')
-  const avatarHtml = isEmoji ? `<span class="new-chat-avatar">${avatar}</span>` : `<img src="file://${esc(ws.path + '/' + avatar)}" class="new-chat-avatar-img">`
+  const avatar = ws.identity.avatar || ''
+  const isEmoji = !avatar.includes('.')
+  const avatarHtml = isEmoji ? `<span class="new-chat-avatar">${avatar || IC.bot}</span>` : `<img src="file://${esc(ws.path + '/' + avatar)}" class="new-chat-avatar-img">`
   item.innerHTML = `${avatarHtml}<div class="new-chat-info"><div class="new-chat-name">${esc(ws.identity.name)}</div>${ws.identity.description ? `<div class="new-chat-desc">${esc(ws.identity.description)}</div>` : ''}</div>`
   item.onclick = onclick
   return item
@@ -784,7 +1043,12 @@ function filterSessions(query) {
 }
 
 function toggleSidebar() {
-  document.getElementById('sidebar').classList.toggle('hidden')
+  const sidebar = document.getElementById('sidebar')
+  sidebar.classList.toggle('hidden')
+  const isHidden = sidebar.classList.contains('hidden')
+  document.getElementById('sidebarToggleChat').style.display = isHidden ? '' : 'none'
+  document.getElementById('sidebarToggleSidebar').style.display = isHidden ? 'none' : ''
+  document.querySelector('.chat-header').classList.toggle('sidebar-hidden', isHidden)
 }
 
 async function renameSession(id, el) {
@@ -795,7 +1059,7 @@ async function renameSession(id, el) {
   inp.type = 'text'
   inp.value = old
   inp.className = 'session-rename-input'
-  inp.style.cssText = 'width:100%;background:#222;color:#eee;border:1px solid #555;border-radius:4px;padding:2px 4px;font-size:13px'
+  inp.style.cssText = 'width:100%;background:var(--bg-surface);color:var(--text-primary);border:1px solid var(--border-focus);border-radius:4px;padding:2px 4px;font-size:13px'
   titleEl.replaceWith(inp)
   inp.focus()
   inp.select()
@@ -839,11 +1103,22 @@ document.addEventListener('keydown', e => {
 input.addEventListener('input', () => {
   input.style.height = 'auto'
   input.style.height = Math.min(input.scrollHeight, 120) + 'px'
-  // Disable send button when empty
-  sendBtn.disabled = !input.value.trim()
+  // Toggle send button active state when input changes
+  _updateSendBtn()
 })
 // Initial state
-sendBtn.disabled = true
+_updateSendBtn()
+
+function _updateSendBtn() {
+  const hasContent = input.value.trim().length > 0
+  if (hasContent) {
+    sendBtn.classList.add('active')
+    sendBtn.disabled = false
+  } else {
+    sendBtn.classList.remove('active')
+    sendBtn.disabled = true
+  }
+}
 
 // File attachments
 let pendingFiles = []
@@ -863,7 +1138,7 @@ function renderAttachPreview() {
   el.style.display = pendingFiles.length ? 'flex' : 'none'
   el.innerHTML = pendingFiles.map((f, i) => {
     const isImg = f.type.startsWith('image/')
-    const preview = isImg ? `<img src="${f.data}">` : '📄'
+    const preview = isImg ? `<img src="${f.data}">` : IC.file
     return `<div class="attach-chip">${preview}<span>${esc(f.name)}</span><span class="remove" onclick="removeAttach(${i})">✕</span></div>`
   }).join('')
 }
@@ -903,11 +1178,17 @@ function buildAgentContext(sessionMsgs, agentName, isMain) {
 
 // ── Streaming Helpers (shared by main + agent responses) ──
 
+// Avatar rendering helper — raw emoji → esc, null → IC fallback, never pass IC.* as value
+function _renderAvatar(raw, role) {
+  if (!raw) return role === 'user' ? IC.user : IC.bot
+  return esc(raw)
+}
+
 function createStreamingCard(agentName, avatar) {
   const card = document.createElement('div')
   card.className = 'msg-card assistant'
   const _t = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
-  card.innerHTML = `<div class="msg-avatar">${esc(avatar || '🤖')}</div><div class="msg-body"><div class="msg-header"><span class="msg-name">${esc(agentName)}</span><span class="msg-time">${_t}</span></div><div class="msg-flow"></div></div>`
+  card.innerHTML = `<div class="msg-avatar">${_renderAvatar(avatar)}</div><div class="msg-body"><div class="msg-header"><span class="msg-name">${esc(agentName)}</span><span class="msg-time">${_t}</span></div><div class="msg-flow"></div></div>`
   _msgContainer?.appendChild(card) || messages.appendChild(card)
   messages.scrollTop = messages.scrollHeight
   const flowContainer = card.querySelector('.msg-flow')
@@ -977,7 +1258,7 @@ function registerStreamHandlers(myRequestId, initialFlowContainer, firstTextEl, 
         if (!thinkingEl) {
           const details = document.createElement('details')
           details.className = 'delegate-thinking'
-          details.innerHTML = '<summary>💭 Thinking...</summary><div class="thinking-content"></div>'
+          details.innerHTML = `<summary>▶ ${IC.thought} Thinking...</summary><div class="thinking-content"></div>`
           flowContainer.insertBefore(details, currentTextEl)
           thinkingEl = details.querySelector('.thinking-content')
           thinkingText = ''
@@ -1012,7 +1293,7 @@ function registerStreamHandlers(myRequestId, initialFlowContainer, firstTextEl, 
       if (!currentToolGroup) {
         currentToolGroup = document.createElement('div')
         currentToolGroup.className = 'tool-group-inline'
-        currentToolGroup.innerHTML = '<div class="tool-group-header">🔧 <span class="tool-count">0</span> 个工具调用 <span class="tool-expand">▼</span></div><div class="tool-group-body"></div>'
+        currentToolGroup.innerHTML = `<div class="tool-group-header"><span class="tool-expand">▶</span> ${IC.wrench} <span class="tool-count">0</span> tool calls</div><div class="tool-group-body" style="display:none"></div>`
         const thisGroup = currentToolGroup
         thisGroup.querySelector('.tool-group-header').onclick = () => {
           const body = thisGroup.querySelector('.tool-group-body')
@@ -1041,7 +1322,7 @@ function registerStreamHandlers(myRequestId, initialFlowContainer, firstTextEl, 
         if (header) {
           const count = currentToolGroup.querySelector('.tool-count')?.textContent || '0'
           const expand = currentToolGroup.querySelector('.tool-expand')?.textContent || '▼'
-          header.innerHTML = `🔧 <span class="tool-count">${count}</span> 个工具调用 <span class="tool-round">轮次 ${d.round}</span> <span class="tool-expand">${expand}</span>`
+          header.innerHTML = `<span class="tool-expand">${expand}</span> ${IC.wrench} <span class="tool-count">${count}</span> tool calls <span class="tool-round">round ${d.round}</span>`
         }
       }
     }
@@ -1218,13 +1499,14 @@ async function send() {
 
   input.value = ''
   input.style.height = 'auto'
+  sendBtn.classList.remove('active')
   sendBtn.disabled = true
   const files = [...pendingFiles]
   pendingFiles = []
   renderAttachPreview()
 
   // Detect @mention — route to workspace participant or legacy agent
-  let targetAgentId = null, targetAgentName = 'Assistant', targetWorkspaceId = null, targetAvatar = '🤖'
+  let targetAgentId = null, targetAgentName = 'Assistant', targetWorkspaceId = null, targetAvatar = null
   const mention = text.match(/^@(\S+)[\s，,]/)
   if (mention && sendSessionId) {
     const q = mention[1].toLowerCase()
@@ -1241,7 +1523,7 @@ async function send() {
         if (fuzzyWs) {
           targetWorkspaceId = fuzzyWs.id
           targetAgentName = fuzzyWs.identity?.name || 'Assistant'
-          targetAvatar = fuzzyWs.identity?.avatar || '🤖'
+          targetAvatar = fuzzyWs.identity?.avatar || null
         }
       }
     } catch {}
@@ -1277,7 +1559,7 @@ async function send() {
   }
 
   // Show user message with attachments
-  const attachHtml = files.map(f => f.type.startsWith('image/') ? `<img src="${f.data}" style="max-height:120px;border-radius:6px;margin-top:4px">` : `<div class="attach-chip">📄 ${esc(f.name)}</div>`).join('')
+  const attachHtml = files.map(f => f.type.startsWith('image/') ? `<img src="${f.data}" style="max-height:120px;border-radius:6px;margin-top:4px">` : `<div class="attach-chip">${IC.file} ${esc(f.name)}</div>`).join('')
   addCard('user', text + (attachHtml ? `<div>${attachHtml}</div>` : ''), 'You', true)
   setActivity(sendSessionId, 'thinking')
 
@@ -1358,14 +1640,23 @@ async function send() {
           // Pure NO_REPLY with no delegates — remove everything
           allCards.forEach(c => c.remove())
         } else {
-          // Has delegates but single card — finalize it
+          // Has delegates but single card — owner pure dispatch, check for actual text
           for (const c of allCards) {
-            c.querySelectorAll('.tool-group-inline').forEach(g => {
-              const body = g.querySelector('.tool-group-body')
-              const arrow = g.querySelector('.tool-expand')
-              if (body) body.style.display = 'none'
-              if (arrow) arrow.textContent = '▶'
-            })
+            const textEls = c.querySelectorAll('.msg-content.md-content')
+            const hasText = Array.from(textEls).some(el =>
+              el.textContent.trim() && el.textContent.trim() !== 'NO_REPLY'
+            )
+            if (!hasText) {
+              c.remove()  // No content, remove empty bubble
+            } else {
+              // Has pre-delegate text, keep but collapse tools
+              c.querySelectorAll('.tool-group-inline').forEach(g => {
+                const body = g.querySelector('.tool-group-body')
+                const arrow = g.querySelector('.tool-expand')
+                if (body) body.style.display = 'none'
+                if (arrow) arrow.textContent = '▶'
+              })
+            }
           }
         }
         requestHandlers.delete(myRequestId)
@@ -1406,7 +1697,7 @@ async function send() {
 
         // Only show empty placeholder if no delegate messages were sent
         if (!displayText.trim() && !hasDelegateMessages) {
-          firstTextEl.innerHTML = '<span style="color:#666;font-style:italic">（无文本回复）</span>'
+          firstTextEl.innerHTML = '<span style="color:var(--text-faint);font-style:italic">（无文本回复）</span>'
         }
       }
 
@@ -1454,7 +1745,7 @@ async function send() {
       // Show error inline in the card (preserves tool steps)
       const errEl = document.createElement('div')
       errEl.className = 'msg-content'
-      errEl.style.color = '#ef4444'
+      errEl.style.color = 'var(--status-error)'
       errEl.textContent = err.message || String(err)
       flowContainer.appendChild(errEl)
       if (!getFullText().trim()) {
@@ -1464,26 +1755,26 @@ async function send() {
     }
   }
 
-  sendBtn.disabled = false
+  _updateSendBtn()
   input.focus()
 }
 
 function addCard(role, content, sender, rawHtml, toolSteps, avatarOverride) {
   const card = document.createElement('div')
   card.className = `msg-card ${role}`
-  const avatar = avatarOverride || (role === 'user' ? '👤' : '🤖')
+  const avatarDisplay = _renderAvatar(avatarOverride, role)
   const nameClass = role === 'user' ? 'msg-name user-name' : 'msg-name'
   const time = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
 
   if (role === 'error') {
-    card.innerHTML = `<div class="msg-avatar">⚠️</div><div class="msg-body"><div class="msg-content" style="color:#ef4444">${esc(content)}</div></div>`
+    card.innerHTML = `<div class="msg-avatar">${IC.warn}</div><div class="msg-body"><div class="msg-content" style="color:var(--status-error)">${esc(content)}</div></div>`
   } else if (role === 'agent-to-agent') {
-    card.innerHTML = `<div class="msg-avatar">💬</div><div class="msg-body"><div class="msg-header"><span class="msg-name a2a-name">${esc(sender||'Agent')}</span><span class="msg-time">${time}</span></div><div class="msg-content md-content a2a-content">${marked.parse(content||'')}</div></div>`
+    card.innerHTML = `<div class="msg-avatar">${IC.chat}</div><div class="msg-body"><div class="msg-header"><span class="msg-name a2a-name">${esc(sender||'Agent')}</span><span class="msg-time">${time}</span></div><div class="msg-content md-content a2a-content">${marked.parse(content||'')}</div></div>`
   } else if (role === 'user') {
     const body = rawHtml ? content : esc(content)
-    card.innerHTML = `<div class="msg-avatar">${avatar}</div><div class="msg-body"><div class="msg-header"><span class="${nameClass}">${esc(sender||'You')}</span><span class="msg-time">${time}</span></div><div class="msg-content">${body}</div></div>`
+    card.innerHTML = `<div class="msg-avatar">${avatarDisplay}</div><div class="msg-body"><div class="msg-header"><span class="${nameClass}">${esc(sender||'You')}</span><span class="msg-time">${time}</span></div><div class="msg-content">${body}</div></div>`
   } else {
-    card.innerHTML = `<div class="msg-avatar">${avatar}</div><div class="msg-body"><div class="msg-header"><span class="${nameClass}">${esc(sender||'Assistant')}</span><span class="msg-time">${time}</span></div><div class="msg-flow"></div></div>`
+    card.innerHTML = `<div class="msg-avatar">${avatarDisplay}</div><div class="msg-body"><div class="msg-header"><span class="${nameClass}">${esc(sender||'Assistant')}</span><span class="msg-time">${time}</span></div><div class="msg-flow"></div></div>`
     const flow = card.querySelector('.msg-flow')
     // Render saved tool steps (grouped by consecutive runs)
     if (toolSteps?.length) {
@@ -1505,7 +1796,7 @@ function addCard(role, content, sender, rawHtml, toolSteps, avatarOverride) {
 function renderSavedToolSteps(container, steps) {
   const group = document.createElement('div')
   group.className = 'tool-group-inline'
-  group.innerHTML = `<div class="tool-group-header">🔧 <span class="tool-count">${steps.length}</span> 个工具调用 <span class="tool-expand">▶</span></div><div class="tool-group-body" style="display:none"></div>`
+  group.innerHTML = `<div class="tool-group-header">${IC.wrench} <span class="tool-count">${steps.length}</span> 个工具调用 <span class="tool-expand">▶</span></div><div class="tool-group-body" style="display:none"></div>`
   group.querySelector('.tool-group-header').onclick = () => {
     const body = group.querySelector('.tool-group-body')
     const arrow = group.querySelector('.tool-expand')
@@ -1531,7 +1822,7 @@ function renderToolGroup(slot, steps, forceCollapse) {
   // During streaming: expand so user sees progress. After done / forceCollapse: collapse.
   const userToggled = slot.dataset.userToggled === 'true'
   const expanded = forceCollapse ? false : (userToggled ? slot.dataset.expanded === 'true' : true)
-  group.innerHTML = `<div class="tool-group-header">🔧 <span class="tool-count">${steps.length}</span> 个工具调用 <span class="tool-expand">${expanded ? '▼' : '▶'}</span></div><div class="tool-group-body" style="display:${expanded ? 'block' : 'none'}"></div>`
+  group.innerHTML = `<div class="tool-group-header">${IC.wrench} <span class="tool-count">${steps.length}</span> 个工具调用 <span class="tool-expand">${expanded ? '▼' : '▶'}</span></div><div class="tool-group-body" style="display:${expanded ? 'block' : 'none'}"></div>`
   group.querySelector('.tool-group-header').onclick = () => {
     const body = group.querySelector('.tool-group-body')
     const arrow = group.querySelector('.tool-expand')
@@ -1589,169 +1880,12 @@ function esc(s) {
 // ── People Manager (M32/F168) ──
 
 async function openPeopleManager() {
-  document.getElementById('peopleOverlay')?.remove()
-
+  // Merged into new-chat panel — just open that
   const workspaces = await window.api.listWorkspaces()
-
-  const overlay = document.createElement('div')
-  overlay.id = 'peopleOverlay'
-  overlay.className = 'overlay-backdrop'
-  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove() }
-
-  const panel = document.createElement('div')
-  panel.className = 'people-panel'
-
-  function render() {
-    panel.innerHTML = ''
-    // Header
-    const header = document.createElement('div')
-    header.className = 'people-header'
-    header.innerHTML = `<span>Agents</span><button class="icon-btn" onclick="document.getElementById('peopleOverlay')?.remove()">✕</button>`
-    panel.appendChild(header)
-
-    // List
-    const listEl = document.createElement('div')
-    listEl.className = 'people-list'
-
-    for (const ws of workspaces) {
-      const item = document.createElement('div')
-      item.className = 'people-item'
-      const avatar = ws.identity.avatar || '🤖'
-      const isEmoji = avatar.length <= 4 && !avatar.includes('.')
-      const avatarHtml = isEmoji ? `<span class="people-avatar">${avatar}</span>` : `<img src="file://${esc(ws.path + '/' + avatar)}" class="people-avatar-img">`
-      item.innerHTML = `
-        ${avatarHtml}
-        <div class="people-info">
-          <div class="people-name">${esc(ws.identity.name)}</div>
-          <div class="people-desc">${esc(ws.identity.description || ws.path)}</div>
-        </div>
-        <div class="people-actions">
-          <button class="icon-btn people-edit-btn" title="编辑">✏️</button>
-          <button class="icon-btn people-remove-btn" title="移除">✕</button>
-        </div>
-      `
-      item.querySelector('.people-edit-btn').onclick = () => editWorkspace(ws, overlay, render)
-      item.querySelector('.people-remove-btn').onclick = async () => {
-        if (!confirm(`确定要移除 "${ws.identity.name}" 吗？（不会删除文件夹）`)) return
-        await window.api.removeWorkspace(ws.id)
-        const idx = workspaces.findIndex(w => w.id === ws.id)
-        if (idx !== -1) workspaces.splice(idx, 1)
-        render()
-        refreshSessionList()
-      }
-      listEl.appendChild(item)
-    }
-
-    if (workspaces.length === 0) {
-      const empty = document.createElement('div')
-      empty.className = 'people-empty'
-      empty.textContent = '还没有添加任何 Agent'
-      listEl.appendChild(empty)
-    }
-
-    panel.appendChild(listEl)
-
-    // Actions
-    const actions = document.createElement('div')
-    actions.className = 'people-footer'
-    actions.innerHTML = `
-      <button class="primary-btn people-add-btn" onclick="addExistingWorkspace()">📁 添加已有</button>
-      <button class="primary-btn people-create-btn" onclick="createNewWorkspace()">✨ 新建</button>
-    `
-    panel.appendChild(actions)
-  }
-
-  render()
-  overlay.appendChild(panel)
-  document.body.appendChild(overlay)
+  showNewChatSelector(workspaces)
 }
 
-async function addExistingWorkspace() {
-  const result = await window.api.addWorkspace()
-  if (result?.ok) {
-    document.getElementById('peopleOverlay')?.remove()
-    await openPeopleManager()
-    await refreshSessionList()
-  } else if (result?.error === 'not_a_workspace') {
-    alert('该文件夹不是有效的 workspace（缺少 SOUL.md 或 identity.json）')
-  } else if (result?.error === 'already_registered') {
-    alert('该 workspace 已添加')
-  }
-}
-
-async function createNewWorkspace() {
-  // Replace footer with inline form instead of using prompt()
-  const overlay = document.getElementById('peopleOverlay')
-  const panel = overlay?.querySelector('.people-panel')
-  if (!panel) return
-  const footer = panel.querySelector('.people-footer')
-  if (!footer) return
-  footer.innerHTML = `
-    <div style="display:flex;flex-direction:column;gap:8px;width:100%">
-      <label style="font-size:12px;color:#888">Agent 名称</label>
-      <input type="text" id="newWsNameInput" placeholder="例如：小助手" style="background:#111;color:#e0e0e0;border:1px solid #333;border-radius:4px;padding:6px 8px;font-size:13px">
-      <div style="display:flex;gap:8px">
-        <button class="primary-btn" id="newWsConfirmBtn">创建</button>
-        <button class="secondary-btn" id="newWsCancelBtn">取消</button>
-      </div>
-    </div>
-  `
-  const nameInput = footer.querySelector('#newWsNameInput')
-  nameInput.focus()
-  footer.querySelector('#newWsCancelBtn').onclick = () => {
-    openPeopleManager() // re-render
-  }
-  const doCreate = async () => {
-    const name = nameInput.value.trim()
-    if (!name) return
-    const result = await window.api.createWorkspace({ name })
-    if (result?.ok) {
-      overlay.remove()
-      await openPeopleManager()
-      await refreshSessionList()
-    } else if (result?.error === 'cancelled') {
-      // user cancelled folder selection
-    } else {
-      alert('创建失败: ' + (result?.error || 'unknown'))
-    }
-  }
-  footer.querySelector('#newWsConfirmBtn').onclick = doCreate
-  nameInput.onkeydown = (e) => { if (e.key === 'Enter') doCreate() }
-}
-
-function editWorkspace(ws, overlay, renderCallback) {
-  // Replace overlay content with edit form
-  const panel = overlay.querySelector('.people-panel')
-  panel.innerHTML = `
-    <div class="people-header">
-      <span>编辑 · ${esc(ws.identity.name)}</span>
-      <button class="icon-btn" id="editBackBtn">←</button>
-    </div>
-    <div class="people-edit-form">
-      <label>名称</label>
-      <input type="text" id="editWsName" value="${esc(ws.identity.name)}">
-      <label>头像 (emoji)</label>
-      <input type="text" id="editWsAvatar" value="${esc(ws.identity.avatar || '')}" placeholder="🤖">
-      <button class="primary-btn" id="editWsSave">保存</button>
-    </div>
-  `
-  document.getElementById('editBackBtn').onclick = () => renderCallback()
-  document.getElementById('editWsSave').onclick = async () => {
-    const newName = document.getElementById('editWsName').value
-    const newAvatar = document.getElementById('editWsAvatar').value || null
-    const updated = await window.api.updateWorkspaceIdentity({
-      id: ws.id,
-      name: newName,
-      avatar: newAvatar,
-      description: ws.identity.description || '',
-    })
-    if (updated) {
-      ws.identity = updated.identity || { ...ws.identity, name: newName, avatar: newAvatar }
-    }
-    renderCallback()
-    refreshSessionList()
-  }
-}
+// addExistingWorkspace, createNewWorkspace, editWorkspace — merged into showNewChatSelector
 
 async function openSettings() {
   const config = await window.api.getConfig() || {}
@@ -1779,7 +1913,10 @@ async function openSettings() {
       renderMcpStatus(mcpStatus)
     } catch {}
   }
-  switchSettingsTab('general')
+  // Update theme swatches
+  document.querySelectorAll('.theme-swatch').forEach(s => {
+    s.classList.toggle('active', s.dataset.themeVal === _currentTheme)
+  })
   document.getElementById('settingsOverlay').style.display = 'flex'
 }
 
@@ -1792,9 +1929,9 @@ function renderMcpStatus(status) {
     return
   }
   el.innerHTML = '<label>Server Status</label>' + entries.map(([name, info]) => {
-    const dot = info.status === 'connected' ? '🟢' : '🔴'
+    const dot = info.status === 'connected' ? IC.dot_green : IC.dot_red
     const detail = info.status === 'connected' ? `${info.toolCount} tools` : (info.error || 'disconnected')
-    return `<div style="font-size:13px;color:#ccc;margin:4px 0">${dot} <strong>${name}</strong> — ${detail}</div>`
+    return `<div style="font-size:13px;color:var(--text-secondary);margin:4px 0">${dot} <strong>${name}</strong> — ${detail}</div>`
   }).join('')
 }
 
@@ -1815,10 +1952,7 @@ function closeSettings() {
   document.getElementById('settingsOverlay').style.display = 'none'
 }
 
-function switchSettingsTab(tabName) {
-  document.querySelectorAll('.settings-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName))
-  document.querySelectorAll('.settings-tab-content').forEach(c => c.classList.toggle('active', c.id === `tab-${tabName}`))
-}
+// switchSettingsTab removed — settings is now a single scrollable page
 
 async function saveSettings() {
   const config = {
@@ -1843,6 +1977,8 @@ async function saveSettings() {
       return
     }
   }
+  // Theme
+  config.theme = _currentTheme === 'default' ? undefined : _currentTheme
   const codingAgent = document.getElementById('cfgCodingAgent').value
   await window.api.saveConfig(config)
   await window.api.setCodingAgent(codingAgent)
@@ -1859,7 +1995,7 @@ async function saveSettings() {
 
 async function toggleMembers() {
   document.getElementById('membersOverlay').style.display = 'flex'
-  await refreshMemberList()
+  await Promise.all([refreshMemberList(), refreshAgentList()])
 }
 function closeMembers() { document.getElementById('membersOverlay').style.display = 'none' }
 
@@ -1879,9 +2015,9 @@ async function refreshMemberList() {
       if (!ws) continue
       const el = document.createElement('div')
       el.className = 'member-item'
-      const avatar = ws.identity?.avatar || '🤖'
-      const isEmoji = avatar.length <= 4 && !avatar.includes('.')
-      const avatarHtml = isEmoji ? avatar : `<img src="file://${esc(ws.path + '/' + avatar)}" style="width:16px;height:16px;border-radius:50%">`
+      const avatar = ws.identity?.avatar || ''
+      const isEmoji = !avatar.includes('.')
+      const avatarHtml = isEmoji ? (avatar || IC.bot) : `<img src="file://${esc(ws.path + '/' + avatar)}" style="width:16px;height:16px;border-radius:50%">`
       const ownerBadge = i === 0 ? ' <span class="hint" style="font-size:10px">(群主)</span>' : ''
       const removeBtn = i > 0 ? `<span class="del-btn" onclick="removeParticipant('${esc(ws.id)}')">✕</span>` : ''
       el.innerHTML = `<span>${avatarHtml} ${esc(ws.identity?.name || ws.id)}${ownerBadge}</span>${removeBtn}`
@@ -1898,13 +2034,13 @@ async function refreshMemberList() {
       for (const w of nonParticipants) {
         optionsHtml += `<option value="${esc(w.id)}">${esc(w.identity?.name || w.id)}</option>`
       }
-      addEl.innerHTML = `<select id="addParticipantSelect" style="flex:1;background:#111;color:#e0e0e0;border:1px solid #333;border-radius:4px;padding:4px;font-size:12px">${optionsHtml}</select><button onclick="addParticipantFromSelect()" style="margin-left:4px" class="icon-btn">+</button>`
+      addEl.innerHTML = `<select id="addParticipantSelect" style="flex:1;background:var(--bg-surface);color:var(--text-primary);border:1px solid var(--border-muted);border-radius:4px;padding:4px;font-size:12px">${optionsHtml}</select><button onclick="addParticipantFromSelect()" style="margin-left:4px" class="icon-btn">+</button>`
       list.appendChild(addEl)
     }
 
     if (participants.length > 0) {
       const hr = document.createElement('hr')
-      hr.style.cssText = 'border-color:#1a1a1a;margin:8px 0'
+      hr.style.cssText = 'border-color:var(--border-default);margin:8px 0'
       list.appendChild(hr)
     }
   }
@@ -1912,13 +2048,13 @@ async function refreshMemberList() {
   // Always show user
   const userEl = document.createElement('div')
   userEl.className = 'member-item'
-  userEl.innerHTML = '<span>👤 You</span>'
+  userEl.innerHTML = `<span>${IC.user} You</span>`
   list.appendChild(userEl)
   // Show lightweight agents
   for (const a of sessionAgents) {
     const el = document.createElement('div')
     el.className = 'member-item'
-    el.innerHTML = `<span>🤖 ${esc(a.name)}</span><span class="hint" style="margin:0 8px;font-size:11px">${esc((a.role || '').slice(0, 40))}</span><span class="del-btn" onclick="removeSessionAgent('${a.id}')">✕</span>`
+    el.innerHTML = `<span>${IC.bot} ${esc(a.name)}</span><span class="hint" style="margin:0 8px;font-size:11px">${esc((a.role || '').slice(0, 40))}</span><span class="del-btn" onclick="removeSessionAgent('${a.id}')">✕</span>`
     list.appendChild(el)
   }
   // Populate template dropdown (exclude those already added as session agents)
@@ -2016,8 +2152,8 @@ async function triggerAgentResponse(agentId, agentName, prompt, sendSessionId) {
 
 // ── Agent manager ──
 
-function openAgentManager() { closeMembers(); document.getElementById('agentManagerOverlay').style.display = 'flex'; refreshAgentList() }
-function closeAgentManager() { document.getElementById('agentManagerOverlay').style.display = 'none' }
+function openAgentManager() { openPeopleManager() }
+function closeAgentManager() { closeMembers() }
 
 async function refreshAgentList() {
   const agents = await window.api.listAgents()
@@ -2041,7 +2177,7 @@ async function refreshAgentList() {
     list.appendChild(el)
   }
   if (!agents.length) {
-    list.innerHTML = '<p style="color:#555;font-size:13px;text-align:center;padding:16px">No agents yet. Create one below.</p>'
+    list.innerHTML = '<p style="color:var(--text-ghost);font-size:13px;text-align:center;padding:16px">No agents yet. Create one below.</p>'
   }
 }
 
@@ -2077,7 +2213,7 @@ async function refreshTaskBar() {
   count.textContent = `(${done}/${tasks.length})`
   const list = document.getElementById('taskListUI')
   list.className = taskBarCollapsed ? 'task-list-ui collapsed' : 'task-list-ui'
-  const icon = { pending: '⏳', 'in-progress': '🔄', done: '✅' }
+  const icon = { pending: IC.clock, 'in-progress': IC.refresh, done: IC.check }
   list.innerHTML = tasks.map(t => {
     const cls = t.status === 'done' ? 'task-item done' : t.status === 'in-progress' ? 'task-item in-progress' : 'task-item'
     return `<div class="${cls}">
