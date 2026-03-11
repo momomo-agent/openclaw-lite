@@ -2088,15 +2088,24 @@ async function send() {
       _statusIsAiAuthored = false
       setActivity(sendSessionId, 'idle')
       requestHandlers.delete(myRequestId)
-      // Show error inline in the card (preserves tool steps)
+      // F209: Show error inline in the card (preserves tool steps)
       const errEl = document.createElement('div')
-      errEl.className = 'msg-content'
+      errEl.className = 'msg-content error-message'
       errEl.style.color = 'var(--status-error)'
       errEl.textContent = err.message || String(err)
+      errEl.dataset.error = 'true'
       flowContainer.appendChild(errEl)
       if (!getFullText().trim()) {
         // Remove empty firstTextEl placeholder
         if (!firstTextEl.textContent.trim() && !firstTextEl.innerHTML.includes('md-content')) firstTextEl.remove()
+      }
+      // F209: Persist error to database
+      if (sendSessionId) {
+        const s = await window.api.loadSession(sendSessionId)
+        if (s) {
+          s.messages.push({ role: 'assistant', content: `Error: ${err.message || String(err)}`, isError: true })
+          await window.api.saveSession(s)
+        }
       }
     }
   }
