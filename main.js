@@ -211,18 +211,23 @@ function getToolsWithMcp() {
 const TOOLS_PROXY = { get tools() { return getToolsWithMcp(); } };
 const TOOLS = getToolsWithMcp();  // Initial snapshot for module-load-time references
 
-// Group chat: delegate_to tool schema (injected dynamically for group owner)
+// Group chat tools (injected dynamically for group owner)
 const DELEGATE_TO_TOOL = {
   name: 'delegate_to',
-  description: 'Delegate the user\'s message to another participant in the group chat. The participant will respond using their own personality, memory, and skills. Use this when the user is asking about or talking to a specific participant, or when another participant\'s expertise is more relevant.',
+  description: 'Route the user\'s message to another participant. They will respond directly to the user in their own voice.',
   input_schema: {
     type: 'object',
     properties: {
-      participant_name: { type: 'string', description: 'The name of the participant to delegate to (must match a participant in the group)' },
-      message: { type: 'string', description: 'The message to pass to the participant (include the user\'s original intent, add context if needed)' },
+      participant_name: { type: 'string', description: 'Name of the participant to delegate to' },
+      message: { type: 'string', description: 'The message to pass (include the user\'s original intent)' },
     },
     required: ['participant_name', 'message'],
   },
+};
+const STAY_SILENT_TOOL = {
+  name: 'stay_silent',
+  description: 'Stay silent — do not produce any visible response. Use this after delegate_to when you have nothing to add.',
+  input_schema: { type: 'object', properties: {}, required: [] },
 };
 
 // Agent tool filtering: lightweight agents get a subset of tools (legacy)
@@ -238,9 +243,12 @@ function getToolsForAgent() {
 async function executeTool(name, input, config, { sessionId: _sid, agentName: _aname } = {}) {
   const sid = _sid || currentSessionId
   const aname = _aname || currentAgentName
-  // ── Group chat: delegate_to — route message to another participant ──
+  // ── Group chat tools ──
   if (name === 'delegate_to') {
     return await handleDelegateTo(input, config, sid)
+  }
+  if (name === 'stay_silent') {
+    return 'OK'
   }
 
   // MCP tools: mcp__ prefix → route to MCP manager
@@ -830,11 +838,11 @@ ${roster}
 ### Rules
 1. **User mentions another participant** → call \`delegate_to\`. Even casual mentions count ("paul 怎么样" → delegate to Paul).
 2. **User talks to you or sends a general message** → respond yourself.
-3. **After delegate_to** → you get the delegate's response. You may: delegate to another participant, add genuine context, or reply \`NO_REPLY\` to stay silent. Staying silent is the default — only speak if you add real value.
+3. **After delegate_to** → you see what the delegate said. You may: call \`delegate_to\` again (chain to another participant), add genuine context (respond as text), or call \`stay_silent\` (default — use this when you have nothing to add).
 4. **Never restate or summarize** what a delegate just said.`
 
-        // Inject delegate_to tool for group chat owner
-        chatTools = [...chatTools, DELEGATE_TO_TOOL]
+        // Inject group chat tools for the orchestrator
+        chatTools = [...chatTools, DELEGATE_TO_TOOL, STAY_SILENT_TOOL]
       }
     } catch {}
   }
@@ -1328,7 +1336,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
     for (const tc of toolCalls) assistantContent.push({ type: 'tool_use', id: tc.id, name: tc.name, input: JSON.parse(tc.json || '{}') })
     msgs.push({ role: 'assistant', content: assistantContent })
 
-    const SILENT_TOOLS = ['ui_status_set', 'notify']
+    const SILENT_TOOLS = ['ui_status_set', 'notify', 'delegate_to', 'stay_silent']
     const toolResults = []
     let loopBlocked = false
     for (const tc of toolCalls) {
@@ -1503,7 +1511,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
     msgs.push(assistantMsg)
 
     // Execute tools and add results
-    const SILENT_TOOLS_OAI = ['ui_status_set', 'notify']
+    const SILENT_TOOLS_OAI = ['ui_status_set', 'notify', 'delegate_to', 'stay_silent']
     for (const tc of tcList) {
       let input = {}
       try { input = JSON.parse(tc.args || '{}') } catch {}

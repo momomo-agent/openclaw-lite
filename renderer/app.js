@@ -457,7 +457,12 @@ function renderSessionItem(s, wsMap) {
   // Subtitle: build lastMsg with sender prefix for group chats
   let lastMsg = s.lastMessage || ''
   if (isGroup && s.lastSender && lastMsg) {
-    lastMsg = `${s.lastSender}: ${lastMsg}`
+    let senderName = s.lastSender
+    if (s.lastSenderWsId && wsMap) {
+      const ws = wsMap.get(s.lastSenderWsId)
+      if (ws?.identity?.name) senderName = ws.identity.name
+    }
+    lastMsg = `${senderName}: ${lastMsg}`
   }
   el.dataset.lastMsg = lastMsg
 
@@ -546,14 +551,18 @@ async function switchSession(id) {
   }
   const agents = await window.api.listAgents()
   for (const m of session.messages) {
-    const sender = m.sender || (m.role === 'user' ? 'You' : ownerName)
+    // Resolve name from workspace identity (always current), fall back to stored sender
+    let sender = m.sender || (m.role === 'user' ? 'You' : ownerName)
     let msgAvatar = undefined
     if (m.role === 'assistant') {
       if (m.senderWorkspaceId) {
         const ws = allWorkspaces.find(w => w.id === m.senderWorkspaceId)
+        if (ws?.identity?.name) sender = ws.identity.name
         msgAvatar = ws?.identity?.avatar || '🤖'
       } else {
         msgAvatar = ownerAvatar
+        // Owner message (no senderWorkspaceId) — use current owner name
+        if (m.sender && m.sender !== 'You') sender = ownerName
       }
     }
     addCard(m.role, m.content, sender, false, m.toolSteps, msgAvatar)
@@ -1309,12 +1318,14 @@ async function send() {
       const finalText = getFullText() || result?.answer || ''
       const lastSegment = getLastSegment()
 
-      // NO_REPLY filtering — suppress silent replies
-      // After delegation, owner may output NO_REPLY, partial "NO_", or empty text → all mean silence
+      // Silence detection — owner called stay_silent, or said NO_REPLY, or empty after delegation
       const hasDelegateMessages = _pendingDelegateMessages.length > 0
       const postDelegateText = lastSegment.trim()
-      const isNoReply = finalText.trim() === 'NO_REPLY' || postDelegateText === 'NO_REPLY'
-        || (hasDelegateMessages && (!postDelegateText || postDelegateText.toUpperCase().startsWith('NO_')))
+      const toolStepsArr = getToolSteps()
+      const calledStaySilent = toolStepsArr.some(t => t.name === 'stay_silent')
+      const isNoReply = calledStaySilent
+        || finalText.trim() === 'NO_REPLY' || postDelegateText === 'NO_REPLY'
+        || (hasDelegateMessages && !postDelegateText)
 
       let actualSender = targetAgentName
       let actualWorkspaceId = targetWorkspaceId || null
