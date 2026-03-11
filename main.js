@@ -1292,7 +1292,8 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
     let loopBlocked = false
     for (const tc of toolCalls) {
       const input = JSON.parse(tc.json || '{}')
-      // Loop detection (three-level: warning → critical → circuit-breaker)
+      // Record call first, then detect (OpenClaw-aligned: record → detect → execute → recordOutcome)
+      loopDetector.recordToolCall(tc.name, input)
       const loopCheck = loopDetector.check(tc.name, input)
       if (loopCheck.blocked) {
         console.warn(`[Paw] ${loopCheck.reason}`)
@@ -1306,7 +1307,14 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
       }
       const silent = SILENT_TOOLS.includes(tc.name)
       if (!silent) pushStatus(win, 'tool', `Running ${tc.name}...`)
-      const result = await executeTool(tc.name, input, config)
+      let result, execError
+      try {
+        result = await executeTool(tc.name, input, config)
+      } catch (err) {
+        execError = err
+        result = `Error: ${err.message}`
+      }
+      loopDetector.recordOutcome(tc.name, input, result, execError)
       if (!silent) {
         win.webContents.send('chat-tool-step', { requestId, name: tc.name, output: String(result).slice(0, 500) })
       }
@@ -1456,7 +1464,8 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
     for (const tc of tcList) {
       let input = {}
       try { input = JSON.parse(tc.args || '{}') } catch {}
-      // Loop detection (three-level)
+      // Record call first, then detect (OpenClaw-aligned)
+      loopDetector.recordToolCall(tc.name, input)
       const loopCheck = loopDetector.check(tc.name, input)
       if (loopCheck.blocked) {
         console.warn(`[Paw] ${loopCheck.reason}`)
@@ -1469,7 +1478,14 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
       }
       const silent = SILENT_TOOLS_OAI.includes(tc.name)
       if (!silent) pushStatus(win, 'tool', `Running ${tc.name}...`)
-      const result = await executeTool(tc.name, input, config)
+      let result, execError
+      try {
+        result = await executeTool(tc.name, input, config)
+      } catch (err) {
+        execError = err
+        result = `Error: ${err.message}`
+      }
+      loopDetector.recordOutcome(tc.name, input, result, execError)
       if (!silent) {
         win.webContents.send('chat-tool-step', { requestId, name: tc.name, output: String(result).slice(0, 500) })
       }
