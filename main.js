@@ -311,7 +311,9 @@ async function executeTool(name, input, config, { sessionId: _sid, agentName: _a
 }
 
 // Persist directory choices
-const PREFS_PATH = path.join(app.getPath('userData'), 'prefs.json')
+const os = require('os')
+const GLOBAL_DIR = path.join(os.homedir(), '.paw')
+const PREFS_PATH = path.join(GLOBAL_DIR, 'prefs.json')
 
 function loadPrefs() {
   try { return JSON.parse(fs.readFileSync(PREFS_PATH, 'utf8')) } catch { return {} }
@@ -319,6 +321,7 @@ function loadPrefs() {
 function savePrefs(p) {
   const existing = loadPrefs()
   const merged = { ...existing, ...p }
+  fs.mkdirSync(GLOBAL_DIR, { recursive: true })
   fs.writeFileSync(PREFS_PATH, JSON.stringify(merged, null, 2))
 }
 
@@ -353,7 +356,7 @@ app.whenReady().then(() => {
   codingAgents.init()
 
   // Initialize workspace registry
-  workspaceRegistry.initRegistry(app.getPath('userData'))
+  workspaceRegistry.initRegistry()
 
   // Support --claw-dir CLI arg
   const clawDirArg = process.argv.find(a => a.startsWith('--claw-dir='))
@@ -443,10 +446,11 @@ ipcMain.handle('get-prefs', () => {
 ipcMain.handle('get-user-profile', () => {
   const prefs = loadPrefs()
   // Ensure user avatar file exists — auto-assign 0.png if missing
-  const avatarPath = prefs.userAvatar ? path.join(app.getPath('userData'), prefs.userAvatar) : null
+  const avatarPath = prefs.userAvatar ? path.join(GLOBAL_DIR, prefs.userAvatar) : null
   if (!prefs.userAvatar || (avatarPath && !fs.existsSync(avatarPath))) {
     const src = path.join(__dirname, 'renderer', 'avatars', '0.png')
-    const dest = path.join(app.getPath('userData'), 'user-avatar.png')
+    const dest = path.join(GLOBAL_DIR, 'user-avatar.png')
+    fs.mkdirSync(GLOBAL_DIR, { recursive: true })
     try { fs.copyFileSync(src, dest) } catch {}
     prefs.userAvatar = 'user-avatar.png'
     savePrefs(prefs)
@@ -459,11 +463,13 @@ ipcMain.handle('set-user-profile', (_, { userName, presetIndex, customPath }) =>
   if (userName !== undefined) prefs.userName = userName
   if (presetIndex !== undefined) {
     const src = path.join(__dirname, 'renderer', 'avatars', `${presetIndex}.png`)
-    const dest = path.join(app.getPath('userData'), 'user-avatar.png')
+    const dest = path.join(GLOBAL_DIR, 'user-avatar.png')
+    fs.mkdirSync(GLOBAL_DIR, { recursive: true })
     try { fs.copyFileSync(src, dest) } catch {}
     prefs.userAvatar = 'user-avatar.png'
   } else if (customPath) {
-    const dest = path.join(app.getPath('userData'), 'user-avatar.png')
+    const dest = path.join(GLOBAL_DIR, 'user-avatar.png')
+    fs.mkdirSync(GLOBAL_DIR, { recursive: true })
     try { fs.copyFileSync(customPath, dest) } catch {}
     prefs.userAvatar = 'user-avatar.png'
   }
@@ -472,7 +478,7 @@ ipcMain.handle('set-user-profile', (_, { userName, presetIndex, customPath }) =>
 })
 
 ipcMain.handle('get-user-avatar-path', () => {
-  return path.join(app.getPath('userData'), 'user-avatar.png')
+  return path.join(GLOBAL_DIR, 'user-avatar.png')
 })
 
 ipcMain.handle('reset-claw-dir', () => {

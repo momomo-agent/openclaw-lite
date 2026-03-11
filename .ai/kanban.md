@@ -1,5 +1,30 @@
 # Kanban — Paw 全局看板
 
+## 下一个：M35 — 存储统一
+
+### P0 存储统一
+| Feature | 状态 | 说明 |
+|---------|------|------|
+| F200 全局配置迁移到 ~/.paw/ | ⬜ 待做 | settings.json / workspaces.json / prefs.json / user-avatar 全部移到 ~/.paw/，替换 app.getPath('userData') |
+| F201 启动自动迁移 | ⬜ 待做 | 检测旧路径（~/Library/Application Support/Paw/），自动迁移到 ~/.paw/，一次性 |
+| F202 Session 存储归属 | ⬜ 待做 | 每个 workspace 各自存 .paw/sessions.db；私聊存对应 workspace，群聊存群主 workspace；messages metadata 保留 sender + senderWorkspaceId；participants 列表记录群成员 |
+| F203 @mention 自动补全 | ⬜ 待做 | 输入 @ 弹出参与者列表，选中插入名字；支持模糊搜索；群聊和私聊都可用 |
+| F204 工具调用显示优化 | ⬜ 待做 | 折叠状态只显示一句话概括做了什么（如"读取并编辑了 3 个文件"），不罗列每个步骤；展开后才显示具体步骤列表；输入参数人话化 |
+| F205 Workspace 管理 | ⬜ 待做 | 添加已有文件夹 / 创建新 workspace / 删除 |
+| F206 Coding Agent 管理 | ⬜ 待做 | 添加 coding agent：选择引擎（检测本机已装的 CC/Codex/Pi/OpenCode）+ 选择项目文件夹；可添加多个（同引擎不同项目）；没有人格/记忆/SOUL.md |
+| F207 新建对话页修正 | ⬜ 待做 | Workspace（带人格）和 Coding Agent（纯工具+项目）分开展示；coding agent 不显示记忆/人格相关选项 |
+| F208 冷启动页 | ⬜ 待做 | 首次启动引导添加或创建第一个 workspace |
+| F209 错误消息持久化 | ⬜ 待做 | API 报错、工具执行失败等错误信息存入 messages 表（role=error 或 metadata 标记），切换回来能看到 |
+| F210 输入框/附件跟随对话 | ⬜ 待做 | 切换 session 时保存当前输入框内容和附件到内存（不持久化），切回来恢复草稿 |
+| F211 回复失败重试 | ⬜ 待做 | API 报错或回复失败时显示重试按钮，点击重新发送 |
+| F212 Cmd+Shift+S 切换侧边栏 | ⬜ 待做 | 快捷键显示/隐藏侧边栏 |
+
+---
+
+## 已完成：M34 — UI Polish ✅
+
+---
+
 ## 已完成：M33 — Skill Creator + MCP + Cron 对齐 OpenClaw ✅
 
 ### P1 Skill Creator + Frontmatter ✅

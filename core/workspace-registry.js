@@ -3,13 +3,16 @@
 
 const path = require('path')
 const fs = require('fs')
+const os = require('os')
 const { loadWorkspaceIdentity, saveWorkspaceIdentity } = require('./workspace-identity')
 
+const GLOBAL_DIR = path.join(os.homedir(), '.paw')
 let _registryPath = null
 let _workspaces = []  // [{ id, path, identity }]
 
-function initRegistry(userDataPath) {
-  _registryPath = path.join(userDataPath, 'workspaces.json')
+function initRegistry() {
+  fs.mkdirSync(GLOBAL_DIR, { recursive: true })
+  _registryPath = path.join(GLOBAL_DIR, 'workspaces.json')
   _load()
 }
 
