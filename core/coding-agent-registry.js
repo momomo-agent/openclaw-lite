@@ -4,7 +4,8 @@
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
-const { v4: uuidv4 } = require('uuid')
+const crypto = require('crypto')
+function uuidv4() { return crypto.randomUUID() }
 
 const GLOBAL_DIR = path.join(os.homedir(), '.paw')
 const REGISTRY_PATH = path.join(GLOBAL_DIR, 'coding-agents.json')
