@@ -1287,6 +1287,122 @@ input.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send() }
 })
 
+// F203: @mention autocomplete
+let mentionDropdown = null
+let mentionMatches = []
+let mentionSelectedIndex = 0
+
+input.addEventListener('input', async (e) => {
+  const text = input.value
+  const cursorPos = input.selectionStart
+  const beforeCursor = text.slice(0, cursorPos)
+  const atMatch = beforeCursor.match(/@(\w*)$/)
+
+  if (atMatch) {
+    const query = atMatch[1].toLowerCase()
+    const participants = []
+
+    // Get session agents
+    if (currentSessionId) {
+      const agents = await window.api.listSessionAgents(currentSessionId)
+      agents.forEach(a => participants.push({ name: a.name, type: 'agent' }))
+    }
+
+    // Get all workspaces
+    const workspaces = await window.api.listWorkspaces()
+    workspaces.forEach(ws => participants.push({ name: ws.identity?.name || 'Unnamed', type: 'workspace' }))
+
+    // Filter by query
+    mentionMatches = participants.filter(p => p.name.toLowerCase().includes(query))
+
+    if (mentionMatches.length > 0) {
+      mentionSelectedIndex = 0
+      showMentionDropdown()
+    } else {
+      hideMentionDropdown()
+    }
+  } else {
+    hideMentionDropdown()
+  }
+})
+
+input.addEventListener('keydown', e => {
+  if (!mentionDropdown || mentionDropdown.style.display === 'none') return
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    mentionSelectedIndex = (mentionSelectedIndex + 1) % mentionMatches.length
+    updateMentionSelection()
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    mentionSelectedIndex = (mentionSelectedIndex - 1 + mentionMatches.length) % mentionMatches.length
+    updateMentionSelection()
+  } else if (e.key === 'Enter' || e.key === 'Tab') {
+    if (mentionMatches.length > 0) {
+      e.preventDefault()
+      insertMention(mentionMatches[mentionSelectedIndex].name)
+    }
+  } else if (e.key === 'Escape') {
+    hideMentionDropdown()
+  }
+})
+
+function showMentionDropdown() {
+  if (!mentionDropdown) {
+    mentionDropdown = document.createElement('div')
+    mentionDropdown.className = 'mention-dropdown'
+    document.body.appendChild(mentionDropdown)
+  }
+
+  mentionDropdown.innerHTML = mentionMatches.map((m, i) =>
+    `<div class="mention-item ${i === mentionSelectedIndex ? 'selected' : ''}" data-index="${i}">
+      <span class="mention-icon">${m.type === 'agent' ? IC.bot : IC.folder}</span>
+      <span class="mention-name">${esc(m.name)}</span>
+    </div>`
+  ).join('')
+
+  // Position above input
+  const inputRect = input.getBoundingClientRect()
+  mentionDropdown.style.left = inputRect.left + 'px'
+  mentionDropdown.style.bottom = (window.innerHeight - inputRect.top + 8) + 'px'
+  mentionDropdown.style.display = 'block'
+
+  // Click handler
+  mentionDropdown.querySelectorAll('.mention-item').forEach(item => {
+    item.onclick = () => insertMention(mentionMatches[parseInt(item.dataset.index)].name)
+  })
+}
+
+function hideMentionDropdown() {
+  if (mentionDropdown) mentionDropdown.style.display = 'none'
+}
+
+function updateMentionSelection() {
+  if (!mentionDropdown) return
+  mentionDropdown.querySelectorAll('.mention-item').forEach((item, i) => {
+    item.className = i === mentionSelectedIndex ? 'mention-item selected' : 'mention-item'
+  })
+}
+
+function insertMention(name) {
+  const text = input.value
+  const cursorPos = input.selectionStart
+  const beforeCursor = text.slice(0, cursorPos)
+  const afterCursor = text.slice(cursorPos)
+  const atMatch = beforeCursor.match(/@(\w*)$/)
+
+  if (atMatch) {
+    const newText = beforeCursor.slice(0, -atMatch[0].length) + '@' + name + ' ' + afterCursor
+    input.value = newText
+    const newPos = beforeCursor.length - atMatch[0].length + name.length + 2
+    input.setSelectionRange(newPos, newPos)
+    input.focus()
+  }
+
+  hideMentionDropdown()
+  input.dispatchEvent(new Event('input'))
+}
+
 // Cmd+K to focus input
 document.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); input.focus() }

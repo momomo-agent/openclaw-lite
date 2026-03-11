@@ -290,6 +290,19 @@ button:hover { background: var(--border-muted); }
 .attach-chip .remove { cursor: pointer; color: var(--text-faint); margin-left: 4px; }
 .attach-chip .remove:hover { color: var(--status-error); }
 
+/* F203: @mention autocomplete */
+.mention-dropdown {
+  position: fixed; background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); max-height: 200px;
+  overflow-y: auto; z-index: 10000; min-width: 200px; display: none;
+}
+.mention-item {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  cursor: pointer; font-size: 13px; color: var(--text-primary);
+}
+.mention-item:hover, .mention-item.selected { background: var(--bg-hover); }
+.mention-icon { opacity: 0.6; }
+
 /* (global watson status removed — now per-session) */
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
