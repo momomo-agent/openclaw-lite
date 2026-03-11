@@ -77,20 +77,29 @@ function humanizeToolStep(name, input) {
 }
 
 function summarizeToolSteps(steps) {
-  // Group by action verb for a natural summary
-  const actions = []
-  const seen = new Set()
+  // F204: Group by action type and count occurrences
+  const typeCounts = {}
   for (const s of steps) {
     const h = humanizeToolStep(s.name, s.input)
     if (h.hidden) continue
-    const key = h.text
-    if (!seen.has(key)) { seen.add(key); actions.push(h) }
+    const verb = h.text.split(' ')[0] // Extract verb (Read, Wrote, etc.)
+    typeCounts[verb] = (typeCounts[verb] || 0) + 1
   }
-  if (!actions.length) return null
-  // Show up to 3 actions, then "+N more"
-  const shown = actions.slice(0, 3).map(a => `${a.icon} ${a.text}`)
-  const rest = actions.length - 3
-  return shown.join('  ') + (rest > 0 ? `  +${rest}` : '')
+
+  const types = Object.keys(typeCounts)
+  if (!types.length) return null
+
+  // Build one-sentence summary
+  const parts = types.slice(0, 3).map(verb => {
+    const count = typeCounts[verb]
+    if (verb === 'Read' || verb === 'Edited' || verb === 'Wrote') {
+      return count > 1 ? `${verb.toLowerCase()} ${count} files` : `${verb.toLowerCase()} 1 file`
+    }
+    return count > 1 ? `${verb.toLowerCase()} ${count} times` : verb.toLowerCase()
+  })
+
+  const summary = parts.join(', ').replace(/, ([^,]*)$/, ' and $1')
+  return summary.charAt(0).toUpperCase() + summary.slice(1)
 }
 
 // ── Feature flags (loaded at init) ──
