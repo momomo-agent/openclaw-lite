@@ -1107,6 +1107,11 @@ ${roster}
       if (target === modelsToTry[modelsToTry.length - 1]) {
         console.error('[Paw] all models failed:', err.message)
         pushStatus(mainWindow, 'error', err.message.slice(0, 80))
+        // F209: Save error as message
+        if (clawDir && sessionId) {
+          const errorText = `❌ Error: ${err.message}`
+          sessionStore.saveMessage(clawDir, sessionId, { role: 'assistant', content: errorText, metadata: { isError: true } })
+        }
         throw err
       }
     }

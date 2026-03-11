@@ -77,29 +77,29 @@ function humanizeToolStep(name, input) {
 }
 
 function summarizeToolSteps(steps) {
-  // F204: Group by action type and count occurrences
-  const typeCounts = {}
+  // F204: Group by verb category and generate Chinese sentence
+  const cats = { read: 0, edit: 0, exec: 0, search: 0, other: 0 }
+  const samples = { read: [], edit: [], search: [] }
   for (const s of steps) {
     const h = humanizeToolStep(s.name, s.input)
     if (h.hidden) continue
-    const verb = h.text.split(' ')[0] // Extract verb (Read, Wrote, etc.)
-    typeCounts[verb] = (typeCounts[verb] || 0) + 1
+    const n = s.name.toLowerCase()
+    if (n.includes('read') || n.includes('glob')) { cats.read++; if (samples.read.length < 1 && s.input?.file_path) samples.read.push(s.input.file_path.split('/').pop()) }
+    else if (n.includes('edit') || n.includes('write')) { cats.edit++; if (samples.edit.length < 1 && s.input?.file_path) samples.edit.push(s.input.file_path.split('/').pop()) }
+    else if (n.includes('exec') || n.includes('bash')) cats.exec++
+    else if (n.includes('grep') || n.includes('search')) { cats.search++; if (samples.search.length < 1 && s.input?.pattern) samples.search.push(s.input.pattern) }
+    else cats.other++
   }
-
-  const types = Object.keys(typeCounts)
-  if (!types.length) return null
-
-  // Build one-sentence summary
-  const parts = types.slice(0, 3).map(verb => {
-    const count = typeCounts[verb]
-    if (verb === 'Read' || verb === 'Edited' || verb === 'Wrote') {
-      return count > 1 ? `${verb.toLowerCase()} ${count} files` : `${verb.toLowerCase()} 1 file`
-    }
-    return count > 1 ? `${verb.toLowerCase()} ${count} times` : verb.toLowerCase()
-  })
-
-  const summary = parts.join(', ').replace(/, ([^,]*)$/, ' and $1')
-  return summary.charAt(0).toUpperCase() + summary.slice(1)
+  const total = cats.read + cats.edit + cats.exec + cats.search + cats.other
+  if (!total) return null
+  // Generate one Chinese sentence
+  if (cats.read && !cats.edit && !cats.exec && !cats.search) return `读取了 ${cats.read} 个文件`
+  if (cats.edit && !cats.read && cats.edit === 1 && samples.edit[0]) return `编辑了 ${samples.edit[0]}`
+  if (cats.edit && !cats.read) return `编辑了 ${cats.edit} 个文件`
+  if (cats.read && cats.edit) return `读取并编辑了 ${cats.read + cats.edit} 个文件`
+  if (cats.search && samples.search[0]) return `搜索了 ${samples.search[0]}`
+  if (cats.exec) return `执行了 ${cats.exec} 个命令`
+  return `执行了 ${total} 个操作`
 }
 
 // ── Feature flags (loaded at init) ──
@@ -839,7 +839,7 @@ async function switchSession(id) {
         if (m.sender && m.sender !== 'You') sender = ownerName
       }
     }
-    addCard(m.role, m.content, sender, false, m.toolSteps, msgAvatar, msgWsPath)
+    addCard(m.role, m.content, sender, false, m.toolSteps, msgAvatar, msgWsPath, m.metadata)
     if (m.role === 'user') history.push({ prompt: m.content, answer: '' })
     if (m.role === 'assistant' && history.length) history[history.length - 1].answer = m.content
   }
@@ -875,7 +875,7 @@ async function showNewChatSelector(workspaces) {
 
   // Fetch coding agents registry
   let codingAgentsData = { available: [], registry: [] }
-  try { codingAgentsData = await window.api.codingAgentsList() } catch
+  try { codingAgentsData = await window.api.codingAgentsList() } catch {}
 
   const overlay = document.createElement('div')
   overlay.id = 'newChatOverlay'
@@ -1438,6 +1438,8 @@ function insertMention(name) {
 // Cmd+K to focus input
 document.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); input.focus() }
+  // F212: Cmd+Shift+S to toggle sidebar
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); toggleSidebar() }
 })
 
 // Auto-resize textarea
@@ -1465,6 +1467,8 @@ function _updateSendBtn() {
 let pendingFiles = []
 // F210: Draft cache per session (memory only)
 const draftCache = new Map() // sessionId -> { text, attachments }
+// F211: Last user message for retry
+let lastUserMessage = { text: '', files: [] }
 
 function handleFiles(fileList) {
   for (const f of fileList) {
@@ -1935,6 +1939,9 @@ async function send() {
   addCard('user', text + (attachHtml ? `<div>${attachHtml}</div>` : ''), _userProfile.userName || 'You', true)
   setActivity(sendSessionId, 'thinking')
 
+  // F211: Store last user message for retry
+  lastUserMessage = { text, files: [...files] }
+
   // ── IM-style: save user message immediately (don't wait for response) ──
   if (sendSessionId) {
     try {
@@ -2118,7 +2125,7 @@ async function send() {
       const errEl = document.createElement('div')
       errEl.className = 'msg-content error-message'
       errEl.style.color = 'var(--status-error)'
-      errEl.textContent = err.message || String(err)
+      errEl.innerHTML = `${esc(err.message || String(err))} <button class="retry-btn" onclick="retryLastMessage()">Retry</button>`
       errEl.dataset.error = 'true'
       flowContainer.appendChild(errEl)
       if (!getFullText().trim()) {
@@ -2140,14 +2147,28 @@ async function send() {
   input.focus()
 }
 
-function addCard(role, content, sender, rawHtml, toolSteps, avatarOverride, wsPath) {
+// F211: Retry last message on failure
+function retryLastMessage() {
+  if (!lastUserMessage.text) return
+  input.value = lastUserMessage.text
+  pendingFiles = [...lastUserMessage.files]
+  renderAttachPreview()
+  send()
+}
+window.retryLastMessage = retryLastMessage
+
+function addCard(role, content, sender, rawHtml, toolSteps, avatarOverride, wsPath, metadata) {
   const card = document.createElement('div')
   card.className = `msg-card ${role}`
   const avatarDisplay = _renderAvatar(avatarOverride, role, wsPath)
   const nameClass = role === 'user' ? 'msg-name user-name' : 'msg-name'
   const time = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
 
-  if (role === 'error') {
+  // F209+F211: Error message with retry button
+  if (metadata?.isError || role === 'error') {
+    card.classList.add('msg-error')
+    card.innerHTML = `<div class="msg-avatar">${IC.warn}</div><div class="msg-body"><div class="msg-content" style="color:var(--status-error);border-left:3px solid var(--status-error);padding-left:8px">${esc(content)}</div><button class="retry-btn" onclick="retryLastMessage()" style="margin-top:8px;padding:4px 12px;background:var(--accent);border:none;border-radius:4px;cursor:pointer;font-size:12px">🔄 重试</button></div>`
+  } else if (role === 'error') {
     card.innerHTML = `<div class="msg-avatar">${IC.warn}</div><div class="msg-body"><div class="msg-content" style="color:var(--status-error)">${esc(content)}</div></div>`
   } else if (role === 'agent-to-agent') {
     card.innerHTML = `<div class="msg-avatar">${IC.chat}</div><div class="msg-body"><div class="msg-header"><span class="msg-name a2a-name">${esc(sender||'Agent')}</span><span class="msg-time">${time}</span></div><div class="msg-content md-content a2a-content">${marked.parse(content||'')}</div></div>`
