@@ -199,6 +199,20 @@ const TOOLS = LEGACY_AGENT_FEATURES
   ? getAnthropicToolsArray()
   : getAnthropicToolsArray().filter(t => !LEGACY_TOOL_NAMES.has(t.name));
 
+// Group chat: delegate_to tool schema (injected dynamically for group owner)
+const DELEGATE_TO_TOOL = {
+  name: 'delegate_to',
+  description: 'Delegate the user\'s message to another participant in the group chat. The participant will respond using their own personality, memory, and skills. Use this when the user is asking about or talking to a specific participant, or when another participant\'s expertise is more relevant.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      participant_name: { type: 'string', description: 'The name of the participant to delegate to (must match a participant in the group)' },
+      message: { type: 'string', description: 'The message to pass to the participant (include the user\'s original intent, add context if needed)' },
+    },
+    required: ['participant_name', 'message'],
+  },
+};
+
 // Agent tool filtering: lightweight agents get a subset of tools (legacy)
 const AGENT_ALLOWED_TOOLS = new Set([
   'ui_status_set', 'memory_search', 'memory_get',
@@ -210,6 +224,11 @@ function getToolsForAgent() {
 
 // Auto-assign: find best matching agent for a task title based on role keyword overlap
 async function executeTool(name, input, config) {
+  // ── Group chat: delegate_to — route message to another participant ──
+  if (name === 'delegate_to') {
+    return await handleDelegateTo(input, config)
+  }
+
   // Try registry first for pluggable tools
   const tool = getTool(name);
   if (tool) {
@@ -743,19 +762,44 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
     }
   }
 
-  // Group chat: inject participant roster into system prompt
+  // Group chat: inject orchestrator instructions + delegate_to tool
+  let _isGroupChat = false
   if (currentSessionId && clawDir) {
     try {
       const participants = sessionStore.getSessionParticipants(clawDir, currentSessionId)
       if (participants.length > 1) {
-        const names = participants.map(pid => {
+        _isGroupChat = true
+        const participantInfos = participants.map(pid => {
           const w = workspaceRegistry.getWorkspace(pid)
-          return w?.identity?.name || pid
+          return {
+            id: pid,
+            name: w?.identity?.name || pid,
+            description: w?.identity?.description || '',
+          }
         })
-        const currentWsId = targetWorkspaceId || participants[0]
-        const currentWs = workspaceRegistry.getWorkspace(currentWsId)
-        const myName = currentWs?.identity?.name || 'Assistant'
-        systemPrompt += `\n\n---\n\n## Group Chat\nYou are **${myName}** in a group conversation.\nParticipants: ${names.join(', ')}.\nMessages from other participants are prefixed with [Name]. Reply as yourself (${myName}).`
+        const ownerWsId = targetWorkspaceId || participants[0]
+        const ownerWs = workspaceRegistry.getWorkspace(ownerWsId)
+        const myName = ownerWs?.identity?.name || 'Assistant'
+        const roster = participantInfos.map(p => `- **${p.name}**${p.description ? ': ' + p.description : ''}`).join('\n')
+
+        systemPrompt += `\n\n---\n\n## Group Chat — You Are the Orchestrator
+You are **${myName}**, the owner of this group chat.
+
+### Participants
+${roster}
+
+### Orchestration Rules
+1. **When the user asks about, mentions, or talks to another participant** → use the \`delegate_to\` tool to let them respond in their own voice.
+   - Example: "Paul 介绍一下自己" → delegate_to Paul with the user's message
+   - Example: "让 Alice 写个方案" → delegate_to Alice
+2. **When the user's message is general or directed at you** → respond yourself as ${myName}.
+3. **When unsure who should respond** → respond yourself, but mention other participants' expertise if relevant.
+4. **The delegated participant will respond in their own personality and with their own memory/skills.** Their response will be returned to you — present it as-is, do NOT rewrite or summarize it.
+5. **Messages from participants are prefixed with [Name] in the chat history.**
+6. **Ignore heartbeat polls in group chat.** Do not respond with HEARTBEAT_OK.`
+
+        // Inject delegate_to tool for group chat owner
+        chatTools = [...chatTools, DELEGATE_TO_TOOL]
       }
     } catch {}
   }
@@ -931,6 +975,123 @@ function getSessionWorkspacePath(workspaceId) {
   return null  // fallback to default clawDir in prompt-builder
 }
 
+// ── Group Chat: delegate_to handler ──
+// Owner calls this tool to route a message to another participant.
+// We build the participant's system prompt, call LLM, and return their response.
+async function handleDelegateTo(input, config) {
+  const { participant_name, message } = input
+  if (!participant_name || !message) return 'Error: participant_name and message are required'
+  if (!currentSessionId || !clawDir) return 'Error: no active session'
+
+  // Find participant workspace by name
+  const participants = sessionStore.getSessionParticipants(clawDir, currentSessionId)
+  const workspaces = participants.map(pid => workspaceRegistry.getWorkspace(pid)).filter(Boolean)
+  const targetWs = workspaces.find(w => {
+    const n = (w.identity?.name || '').toLowerCase()
+    const q = participant_name.toLowerCase()
+    return n === q || n.startsWith(q) || q.startsWith(n)
+  })
+  if (!targetWs) return `Error: participant "${participant_name}" not found in group. Available: ${workspaces.map(w => w.identity?.name).join(', ')}`
+
+  console.log(`[delegate_to] routing to ${targetWs.identity?.name} (${targetWs.id})`)
+
+  // Build target participant's system prompt
+  const targetPrompt = await coreBuildSystemPrompt(targetWs.path)
+
+  // Add group context to their prompt
+  const names = workspaces.map(w => w.identity?.name || w.id)
+  const myName = targetWs.identity?.name || 'Assistant'
+  const groupContext = `\n\n---\n\n## Group Chat\nYou are **${myName}** in a group conversation.\nParticipants: ${names.join(', ')}.\nThe user is talking to you. Respond as yourself (${myName}). Be natural and in-character.`
+  const fullPrompt = targetPrompt + groupContext
+
+  // Build conversation context — load recent messages from session
+  const delegateMessages = []
+  try {
+    const fullSession = sessionStore.loadSession(clawDir, currentSessionId)
+    if (fullSession?.messages?.length) {
+      const recent = fullSession.messages.slice(-20)
+      for (const m of recent) {
+        if (m.role === 'user') {
+          delegateMessages.push({ role: 'user', content: m.content })
+        } else if (m.role === 'assistant') {
+          const senderLabel = m.sender && m.sender !== 'Assistant' ? `[${m.sender}]: ` : ''
+          delegateMessages.push({ role: 'assistant', content: senderLabel + (m.content || '') })
+        }
+      }
+    }
+  } catch {}
+
+  // Add the delegation message as the final user message
+  delegateMessages.push({ role: 'user', content: message })
+
+  // Full agent config
+  const llmConfig = (() => { try { return JSON.parse(fs.readFileSync(configPath(), 'utf8')) } catch { return {} } })()
+  const provider = llmConfig.provider || 'anthropic'
+  const fullConfig = { ...llmConfig, apiKey: config?.apiKey || llmConfig.apiKey, model: config?.model || llmConfig.model, baseUrl: config?.baseUrl || llmConfig.baseUrl }
+
+  // Delegate gets all tools EXCEPT delegate_to (no recursion)
+  const delegateTools = TOOLS.filter(t => t.name !== 'delegate_to')
+
+  try {
+    // Signal delegate start — frontend creates independent bubble
+    const avatar = targetWs.identity?.avatar || '🤖'
+    console.log(`[delegate_to] sending delegate-start: sender=${myName}, avatar=${avatar}, wsId=${targetWs.id}`)
+    const parentRequestId = _activeRequestId
+    if (mainWindow && parentRequestId) {
+      mainWindow.webContents.send('chat-delegate-start', { requestId: parentRequestId, sender: myName, workspaceId: targetWs.id, avatar })
+    }
+
+    // Create proxy win that remaps chat-* events to chat-delegate-* events
+    const proxyWin = {
+      webContents: {
+        send(channel, data) {
+          if (!mainWindow || !parentRequestId) return
+          if (channel === 'chat-token') {
+            mainWindow.webContents.send('chat-delegate-token', { requestId: parentRequestId, sender: myName, token: data.text, thinking: data.thinking || false })
+          } else if (channel === 'chat-tool-step') {
+            mainWindow.webContents.send('chat-delegate-token', { requestId: parentRequestId, sender: myName, toolStep: data })
+          } else if (channel === 'chat-text-start') {
+            // New round text start — no-op for delegate (text appends to same bubble)
+          } else if (channel === 'chat-round-info') {
+            mainWindow.webContents.send('chat-delegate-token', { requestId: parentRequestId, sender: myName, roundInfo: data })
+          } else if (channel === 'chat-status') {
+            // Delegate status — forward as-is for sidebar
+            mainWindow.webContents.send('chat-status', data)
+          }
+        }
+      }
+    }
+
+    // Save and restore active request state (delegate runs inside orchestrator's tool loop)
+    const savedRequestId = _activeRequestId
+    const savedAbortController = _activeAbortController
+
+    let result
+    if (provider === 'anthropic') {
+      result = await streamAnthropic(delegateMessages, fullPrompt, fullConfig, proxyWin, parentRequestId + '-delegate', delegateTools)
+    } else {
+      result = await streamOpenAI(delegateMessages, fullPrompt, fullConfig, proxyWin, parentRequestId + '-delegate', delegateTools)
+    }
+
+    // Restore parent state
+    _activeRequestId = savedRequestId
+    _activeAbortController = savedAbortController
+
+    const responseText = result?.answer || ''
+
+    // Signal delegate end — frontend finalizes bubble + saves message
+    if (mainWindow && parentRequestId) {
+      mainWindow.webContents.send('chat-delegate-end', { requestId: parentRequestId, sender: myName, workspaceId: targetWs.id, fullText: responseText })
+    }
+
+    console.log(`[delegate_to] ${myName} responded (${responseText.length} chars), sent delegate-end`)
+    return `[${myName} 的回复已直接展示给用户，请勿复述，只需继续编排]`
+  } catch (err) {
+    console.error(`[delegate_to] error:`, err.message)
+    return `Error delegating to ${myName}: ${err.message}`
+  }
+}
+
 // ── Coding Agent Streaming ──
 
 async function streamCodingAgent(agentId, prompt, { cwd, sessionId, requestId, win }) {
@@ -1096,6 +1257,9 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
           if (evt.type === 'content_block_start' && evt.content_block?.type === 'tool_use') {
             curBlock = { id: evt.content_block.id, name: evt.content_block.name, json: '' }
           } else if (evt.type === 'content_block_delta') {
+            if (evt.delta?.type === 'thinking_delta' && evt.delta?.thinking) {
+              win.webContents.send('chat-token', { requestId, text: evt.delta.thinking, thinking: true })
+            }
             if (evt.delta?.text && !curBlock) { roundText += evt.delta.text; fullText += evt.delta.text; win.webContents.send('chat-token', { requestId, text: evt.delta.text }) }
             if (evt.delta?.partial_json && curBlock) curBlock.json += evt.delta.partial_json
           } else if (evt.type === 'content_block_stop' && curBlock) {

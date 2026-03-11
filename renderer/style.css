@@ -376,6 +376,19 @@ button:hover { background: #2a2a2a; }
   display: flex; align-items: center; gap: 8px;
   color: #666; font-size: 13px; padding: 6px 0;
 }
+/* Thinking blocks (delegate + main) */
+.delegate-thinking {
+  margin: 4px 0 8px 0; border-radius: 8px;
+  background: #141414; border: 1px solid #1e1e1e;
+  font-size: 13px; color: #888;
+}
+.delegate-thinking summary {
+  padding: 6px 12px; cursor: pointer; user-select: none; color: #666;
+}
+.delegate-thinking .thinking-content {
+  padding: 4px 12px 8px; max-height: 300px; overflow-y: auto;
+  border-top: 1px solid #1e1e1e;
+}
 
 /* Tool group (live collapsed) */
 .tool-group-live, .tool-group-inline {

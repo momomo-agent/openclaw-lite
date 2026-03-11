@@ -94,6 +94,108 @@ window.api.onMemoryChanged(({ file }) => {
 // Tray menu: new chat
 window.api.onTrayNewChat(() => { newSession() })
 
+// Group chat delegation streaming — independent bubbles
+let _delegateState = null  // { card, textEl, fullText, sender, workspaceId }
+let _pendingDelegateMessages = []  // accumulated delegate messages to save after orchestrator finishes
+window.api.onDelegateStart(({ requestId, sender, workspaceId, avatar }) => {
+  console.log(`[delegate] START: sender=${sender}, avatar=${avatar}, wsId=${workspaceId}`)
+  // Capture orchestrator info from the current streaming card for later split
+  const lastCard = messages.querySelector('.msg-card.assistant:last-of-type')
+  const orchName = lastCard?.querySelector('.msg-name')?.textContent || 'Assistant'
+  const orchAvatar = lastCard?.querySelector('.msg-avatar')?.textContent || '🤖'
+  const card = document.createElement('div')
+  card.className = 'msg-card assistant'
+  const _t = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
+  card.innerHTML = `<div class="msg-avatar">${esc(avatar || '🤖')}</div><div class="msg-body"><div class="msg-header"><span class="msg-name">${esc(sender)}</span><span class="msg-time">${_t}</span></div><div class="msg-flow"><div class="msg-content md-content"></div><div class="inline-status"><span class="reading-indicator"><span></span><span></span><span></span></span> ${esc(sender)} thinking...</div></div></div>`
+  messages.appendChild(card)
+  messages.scrollTop = messages.scrollHeight
+  const textEl = card.querySelector('.msg-content.md-content')
+  _delegateState = { card, textEl, fullText: '', sender, workspaceId, requestId, orchestratorName: orchName, orchestratorAvatar: orchAvatar }
+})
+window.api.onDelegateToken(({ token, thinking, toolStep, roundInfo }) => {
+  if (!_delegateState) return
+  const flow = _delegateState.textEl.parentNode
+  if (toolStep) {
+    // Tool step — render in collapsible tool group (same pattern as main streaming)
+    const SILENT_TOOLS = ['ui_status_set', 'notify']
+    if (SILENT_TOOLS.includes(toolStep.name)) return
+    if (!_delegateState.toolGroup) {
+      _delegateState.toolGroup = document.createElement('div')
+      _delegateState.toolGroup.className = 'tool-group-inline'
+      _delegateState.toolGroup.innerHTML = '<div class="tool-group-header">🔧 <span class="tool-count">0</span> 个工具调用 <span class="tool-expand">▼</span></div><div class="tool-group-body"></div>'
+      const tg = _delegateState.toolGroup
+      tg.querySelector('.tool-group-header').onclick = () => {
+        const body = tg.querySelector('.tool-group-body')
+        const arrow = tg.querySelector('.tool-expand')
+        const show = body.style.display === 'none'
+        body.style.display = show ? 'block' : 'none'
+        arrow.textContent = show ? '▼' : '▶'
+      }
+      flow.insertBefore(_delegateState.toolGroup, _delegateState.textEl)
+    }
+    const body = _delegateState.toolGroup.querySelector('.tool-group-body')
+    const count = _delegateState.toolGroup.querySelector('.tool-count')
+    const item = document.createElement('div')
+    item.className = 'tool-step-item'
+    item.innerHTML = `<span class="tool-step-name">${esc(toolStep.name)}</span> <span class="tool-step-output">${esc(String(toolStep.output).slice(0, 80))}</span>`
+    body.appendChild(item)
+    count.textContent = body.children.length
+  } else if (roundInfo) {
+    // Round info — update tool group header
+    if (_delegateState.toolGroup) {
+      const header = _delegateState.toolGroup.querySelector('.tool-group-header')
+      if (header) {
+        const count = _delegateState.toolGroup.querySelector('.tool-count')?.textContent || '0'
+        const expand = _delegateState.toolGroup.querySelector('.tool-expand')?.textContent || '▼'
+        header.innerHTML = `🔧 <span class="tool-count">${count}</span> 个工具调用 <span class="tool-round">轮次 ${roundInfo.round}</span> <span class="tool-expand">${expand}</span>`
+      }
+    }
+    // New round — reset tool group so next tools create a new group
+    _delegateState.toolGroup = null
+  } else if (thinking) {
+    // Render thinking in a collapsible details block
+    if (!_delegateState.thinkingEl) {
+      _delegateState.thinkingText = ''
+      const details = document.createElement('details')
+      details.className = 'delegate-thinking'
+      details.innerHTML = '<summary>💭 Thinking...</summary><div class="thinking-content"></div>'
+      flow.insertBefore(details, _delegateState.textEl)
+      _delegateState.thinkingEl = details.querySelector('.thinking-content')
+    }
+    _delegateState.thinkingText += token
+    _delegateState.thinkingEl.innerHTML = marked.parse(_delegateState.thinkingText)
+  } else {
+    _delegateState.fullText += token
+    _delegateState.textEl.innerHTML = marked.parse(_delegateState.fullText)
+  }
+  messages.scrollTop = messages.scrollHeight
+})
+window.api.onDelegateEnd(({ sender, workspaceId, fullText }) => {
+  console.log(`[delegate] END: sender=${sender}, textLen=${fullText?.length || 0}`)
+  if (!_delegateState) return
+  // Remove inline status
+  const statusEl = _delegateState.card.querySelector('.inline-status')
+  if (statusEl) statusEl.remove()
+  // Finalize rendered text
+  const finalContent = fullText || _delegateState.fullText
+  _delegateState.textEl.innerHTML = linkifyPaths(marked.parse(finalContent))
+  // Collapse tool groups
+  _delegateState.card.querySelectorAll('.tool-group-inline').forEach(g => {
+    const body = g.querySelector('.tool-group-body')
+    const arrow = g.querySelector('.tool-expand')
+    if (body) body.style.display = 'none'
+    if (arrow) arrow.textContent = '▶'
+  })
+  // Queue delegate message — will be saved together with orchestrator's message to maintain correct order
+  _pendingDelegateMessages.push({ role: 'assistant', content: finalContent, sender, senderWorkspaceId: workspaceId })
+  // Signal orchestrator handler to create a new card for post-delegate continuation
+  const handler = requestHandlers.get(_delegateState.requestId)
+  if (handler) {
+    handler._pendingSplit = { name: _delegateState.orchestratorName, avatar: _delegateState.orchestratorAvatar }
+  }
+  _delegateState = null
+})
+
 // Claude Code events
 let ccOutputEl = null
 let ccOutputText = ''
@@ -356,19 +458,32 @@ async function switchSession(id) {
   }
   if (session.mode === 'coding') titleText = `⌨ ${titleText}`
   document.getElementById('sessionTitle').textContent = titleText
-  // Resolve owner name for assistant messages
+  // Resolve owner name + avatar for assistant messages
   let ownerName = 'Assistant'
+  let ownerAvatar = '🤖'
+  let allWorkspaces = []
   if (session.participants && session.participants.length > 0) {
     try {
-      const workspaces = await window.api.listWorkspaces()
-      const ownerWs = workspaces.find(w => w.id === session.participants[0])
+      allWorkspaces = await window.api.listWorkspaces()
+      const ownerWs = allWorkspaces.find(w => w.id === session.participants[0])
       if (ownerWs?.identity?.name) ownerName = ownerWs.identity.name
+      if (ownerWs?.identity?.avatar) ownerAvatar = ownerWs.identity.avatar
     } catch {}
   }
   const agents = await window.api.listAgents()
   for (const m of session.messages) {
     const sender = m.sender || (m.role === 'user' ? 'You' : ownerName)
-    addCard(m.role, m.content, sender, false, m.toolSteps)
+    // Resolve avatar: use senderWorkspaceId if available, else owner avatar
+    let msgAvatar = undefined
+    if (m.role === 'assistant') {
+      if (m.senderWorkspaceId) {
+        const ws = allWorkspaces.find(w => w.id === m.senderWorkspaceId)
+        msgAvatar = ws?.identity?.avatar || '🤖'
+      } else {
+        msgAvatar = ownerAvatar
+      }
+    }
+    addCard(m.role, m.content, sender, false, m.toolSteps, msgAvatar)
     if (m.role === 'user') history.push({ prompt: m.content, answer: '' })
     if (m.role === 'assistant' && history.length) history[history.length - 1].answer = m.content
   }
@@ -707,11 +822,11 @@ function buildAgentContext(sessionMsgs, agentName, isMain) {
 
 // ── Streaming Helpers (shared by main + agent responses) ──
 
-function createStreamingCard(agentName) {
+function createStreamingCard(agentName, avatar) {
   const card = document.createElement('div')
   card.className = 'msg-card assistant'
   const _t = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
-  card.innerHTML = `<div class="msg-avatar">🤖</div><div class="msg-body"><div class="msg-header"><span class="msg-name">${esc(agentName)}</span><span class="msg-time">${_t}</span></div><div class="msg-flow"></div></div>`
+  card.innerHTML = `<div class="msg-avatar">${esc(avatar || '🤖')}</div><div class="msg-body"><div class="msg-header"><span class="msg-name">${esc(agentName)}</span><span class="msg-time">${_t}</span></div><div class="msg-flow"></div></div>`
   messages.appendChild(card)
   messages.scrollTop = messages.scrollHeight
   const flowContainer = card.querySelector('.msg-flow')
@@ -728,18 +843,42 @@ function createStreamingCard(agentName) {
   return { card, flowContainer, firstTextEl }
 }
 
-function registerStreamHandlers(myRequestId, flowContainer, firstTextEl, sendSessionId) {
+function registerStreamHandlers(myRequestId, initialFlowContainer, firstTextEl, sendSessionId) {
   let currentTextEl = firstTextEl
   let segmentText = ''
   let fullText = ''
   let currentToolGroup = null
   let myToolSteps = []
-  const card = flowContainer.closest('.msg-card')
+  let flowContainer = initialFlowContainer
+  let card = flowContainer.closest('.msg-card')
+  let allCards = [card]
+  // Thinking state
+  let thinkingEl = null
+  let thinkingText = ''
   // Keep inline-status at bottom of flow
   const keepStatusAtBottom = () => { if (_activeStatusEl?.parentNode === flowContainer) flowContainer.appendChild(_activeStatusEl) }
 
-  requestHandlers.set(myRequestId, {
+  const handler = {
+    // Pending split: set by onDelegateEnd to create a new card on next onTextStart
+    _pendingSplit: null,
+
     onTextStart() {
+      // After delegate: create a new orchestrator card below the delegate bubble
+      if (handler._pendingSplit) {
+        const { name, avatar } = handler._pendingSplit
+        handler._pendingSplit = null
+        // Remove the old card's inline status before creating a new card
+        if (_activeStatusEl) { _activeStatusEl.remove(); _activeStatusEl = null }
+        const result = createStreamingCard(name, avatar)
+        card = result.card
+        flowContainer = result.flowContainer
+        currentTextEl = result.firstTextEl
+        currentToolGroup = null
+        segmentText = ''
+        allCards.push(card)
+        if (_activeStatusEl) flowContainer.appendChild(_activeStatusEl)
+        return
+      }
       if (currentToolGroup || myToolSteps.length > 0) {
         currentTextEl = document.createElement('div')
         currentTextEl.className = 'msg-content md-content'
@@ -752,6 +891,24 @@ function registerStreamHandlers(myRequestId, flowContainer, firstTextEl, sendSes
     onToken(d) {
       const t = typeof d === 'string' ? d : d.text
       if (!t) return
+      // Handle thinking tokens
+      if (d.thinking) {
+        if (!thinkingEl) {
+          const details = document.createElement('details')
+          details.className = 'delegate-thinking'
+          details.innerHTML = '<summary>💭 Thinking...</summary><div class="thinking-content"></div>'
+          flowContainer.insertBefore(details, currentTextEl)
+          thinkingEl = details.querySelector('.thinking-content')
+          thinkingText = ''
+          keepStatusAtBottom()
+        }
+        thinkingText += t
+        thinkingEl.innerHTML = marked.parse(thinkingText)
+        messages.scrollTop = messages.scrollHeight
+        return
+      }
+      // End of thinking — close thinking block if it was open
+      if (thinkingEl) { thinkingEl = null; thinkingText = '' }
       fullText += t
       segmentText += t
       if (currentToolGroup) {
@@ -766,7 +923,10 @@ function registerStreamHandlers(myRequestId, flowContainer, firstTextEl, sendSes
       messages.scrollTop = messages.scrollHeight
     },
     onToolStep(d) {
-      myToolSteps.push({ name: d.name, output: String(d.output).slice(0, 120) })
+      // delegate_to: show as "→ Name" without long output
+      const isDelegation = d.name === 'delegate_to'
+      const displayOutput = isDelegation ? '→ delegating...' : String(d.output).slice(0, 120)
+      myToolSteps.push({ name: d.name, output: displayOutput })
       if (sendSessionId) setSessionStatus(sendSessionId, 'running', '…')
       if (!currentToolGroup) {
         currentToolGroup = document.createElement('div')
@@ -804,9 +964,10 @@ function registerStreamHandlers(myRequestId, flowContainer, firstTextEl, sendSes
         }
       }
     }
-  })
+  }
+  requestHandlers.set(myRequestId, handler)
 
-  return { getFullText: () => fullText, getToolSteps: () => myToolSteps }
+  return { getFullText: () => fullText, getToolSteps: () => myToolSteps, getAllCards: () => allCards }
 }
 
 function finalizeCard(card, myRequestId, fullText) {
@@ -981,7 +1142,7 @@ async function send() {
   renderAttachPreview()
 
   // Detect @mention — route to workspace participant or legacy agent
-  let targetAgentId = null, targetAgentName = 'Assistant', targetWorkspaceId = null
+  let targetAgentId = null, targetAgentName = 'Assistant', targetWorkspaceId = null, targetAvatar = '🤖'
   const mention = text.match(/^@(\S+)[\s，,]/)
   if (mention && sendSessionId) {
     const q = mention[1].toLowerCase()
@@ -998,6 +1159,7 @@ async function send() {
         if (fuzzyWs) {
           targetWorkspaceId = fuzzyWs.id
           targetAgentName = fuzzyWs.identity?.name || 'Assistant'
+          targetAvatar = fuzzyWs.identity?.avatar || '🤖'
         }
       }
     } catch {}
@@ -1027,6 +1189,7 @@ async function send() {
         const workspaces = await window.api.listWorkspaces()
         const ownerWs = workspaces.find(w => w.id === participants[0])
         if (ownerWs?.identity?.name) targetAgentName = ownerWs.identity.name
+        if (ownerWs?.identity?.avatar) targetAvatar = ownerWs.identity.avatar
       }
     } catch {}
   }
@@ -1049,9 +1212,9 @@ async function send() {
       chatParams = { prompt: text, history, agentId: null, files, sessionId: sendSessionId, requestId: null, targetWorkspaceId: targetWorkspaceId || null }
     }
 
-    const { card, flowContainer, firstTextEl } = createStreamingCard(targetAgentName)
+    const { card, flowContainer, firstTextEl } = createStreamingCard(targetAgentName, targetAvatar)
     const myRequestId = await window.api.chatPrepare()
-    const { getFullText, getToolSteps } = registerStreamHandlers(myRequestId, flowContainer, firstTextEl, sendSessionId)
+    const { getFullText, getToolSteps, getAllCards } = registerStreamHandlers(myRequestId, flowContainer, firstTextEl, sendSessionId)
 
     chatParams.requestId = myRequestId
 
@@ -1062,13 +1225,33 @@ async function send() {
 
       // NO_REPLY filtering — suppress silent replies (OpenClaw-aligned)
       const isNoReply = finalText.trim() === 'NO_REPLY'
+
+      let actualSender = targetAgentName
+      let actualWorkspaceId = targetWorkspaceId || null
+      let displayText = finalText
+
       if (isNoReply) {
-        card.remove()
+        getAllCards().forEach(c => c.remove())
         // Don't save NO_REPLY to history
       } else {
-        finalizeCard(card, myRequestId, finalText)
+        // Finalize all orchestrator cards (may have split after delegate)
+        const allCards = getAllCards()
+        requestHandlers.delete(myRequestId)
+        for (const c of allCards) {
+          if (displayText.trim()) {
+            c.querySelectorAll('.msg-content.md-content').forEach(el => {
+              el.innerHTML = linkifyPaths(el.innerHTML)
+            })
+          }
+          c.querySelectorAll('.tool-group-inline').forEach(g => {
+            const body = g.querySelector('.tool-group-body')
+            const arrow = g.querySelector('.tool-expand')
+            if (body) body.style.display = 'none'
+            if (arrow) arrow.textContent = '▶'
+          })
+        }
 
-        if (!finalText.trim()) {
+        if (!displayText.trim()) {
           firstTextEl.innerHTML = '<span style="color:#666;font-style:italic">（无文本回复）</span>'
         }
       }
@@ -1079,19 +1262,22 @@ async function send() {
         setSessionStatus(sendSessionId, 'done', `已回复: ${summary}`)
       }
 
-      history.push({ prompt: text, answer: finalText })
+      history.push({ prompt: text, answer: displayText })
       if (sendSessionId) {
         const s = await window.api.loadSession(sendSessionId)
         if (s) {
           const toolSteps = getToolSteps()
-          const assistantMsg = { role: 'assistant', content: finalText, sender: targetAgentName, senderWorkspaceId: targetWorkspaceId || null }
+          const assistantMsg = { role: 'assistant', content: displayText, sender: actualSender, senderWorkspaceId: actualWorkspaceId }
           if (toolSteps.length) assistantMsg.toolSteps = toolSteps
-          s.messages.push(
-            { role: 'user', content: text, sender: 'You' },
-            assistantMsg
-          )
+          s.messages.push({ role: 'user', content: text, sender: 'You' })
+          // Insert delegate messages BEFORE orchestrator's final message (matches visual order)
+          if (_pendingDelegateMessages.length) {
+            s.messages.push(..._pendingDelegateMessages)
+            _pendingDelegateMessages = []
+          }
+          s.messages.push(assistantMsg)
           if (s.messages.length === 2) {
-            s.title = generateTitle(text, finalText)
+            s.title = generateTitle(text, displayText)
           }
           await window.api.saveSession(s)
           document.getElementById('sessionTitle').textContent = s.title
@@ -1119,10 +1305,10 @@ async function send() {
   input.focus()
 }
 
-function addCard(role, content, sender, rawHtml, toolSteps) {
+function addCard(role, content, sender, rawHtml, toolSteps, avatarOverride) {
   const card = document.createElement('div')
   card.className = `msg-card ${role}`
-  const avatar = role === 'user' ? '👤' : '🤖'
+  const avatar = avatarOverride || (role === 'user' ? '👤' : '🤖')
   const nameClass = role === 'user' ? 'msg-name user-name' : 'msg-name'
   const time = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
 

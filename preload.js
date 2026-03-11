@@ -89,6 +89,10 @@ contextBridge.exposeInMainWorld('api', {
   getCodingAgent: () => ipcRenderer.invoke('get-coding-agent'),
   setCodingAgent: (agent) => ipcRenderer.invoke('set-coding-agent', agent),
   listCodingAgents: () => ipcRenderer.invoke('list-coding-agents'),
+  // Group chat delegation (streaming)
+  onDelegateStart: (cb) => { ipcRenderer.on('chat-delegate-start', (_, d) => cb(d)) },
+  onDelegateToken: (cb) => { ipcRenderer.on('chat-delegate-token', (_, d) => cb(d)) },
+  onDelegateEnd: (cb) => { ipcRenderer.on('chat-delegate-end', (_, d) => cb(d)) },
   // Claude Code
   onCcStatus: (cb) => { ipcRenderer.removeAllListeners('cc-status'); ipcRenderer.on('cc-status', (_, d) => cb(d)) },
   onCcOutput: (cb) => { ipcRenderer.removeAllListeners('cc-output'); ipcRenderer.on('cc-output', (_, d) => cb(d)) },
