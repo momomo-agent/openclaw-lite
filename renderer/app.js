@@ -3,24 +3,28 @@
 // ── Feature flags (loaded at init) ──
 let _featureFlags = { legacyAgentFeatures: false }
 
-// ── Per-Session Status ──
-const sessionStatus = new Map() // sessionId -> { level, text, aiAuthored }
+// ── Per-Session Status (three-layer design) ──
+// Layer 1: Activity dot — transient, not persisted, reflects real-time agent state
+const activityState = new Map() // sessionId -> level ('idle'|'thinking'|'running'|'tool'|'done'|'need_you')
+// Layer 2: AI status — persisted to SQLite, set by ui_status_set tool
+const aiStatus = new Map()      // sessionId -> text ('' = none)
 
-function setSessionStatus(sessionId, level, text, aiAuthored = false) {
-  const cur = sessionStatus.get(sessionId)
-  // AI-authored status has priority — don't let programmatic status overwrite it
-  // unless it's also AI-authored, or we're going to idle/done
-  if (cur?.aiAuthored && !aiAuthored && level !== 'idle' && level !== 'done') return
-  sessionStatus.set(sessionId, { level, text, aiAuthored })
+function setActivity(sessionId, level) {
+  activityState.set(sessionId, level)
   const item = document.querySelector(`.session-item[data-id="${sessionId}"]`)
   const dot = item?.querySelector('.session-status-dot')
-  const t = item?.querySelector('.session-status-text')
   if (dot) dot.className = `session-status-dot ${level}`
-  if (t) t.textContent = text || ''
-  if (item) item.classList.toggle('has-ai-status', aiAuthored && level !== 'idle')
-  // Persist to SQLite
+}
+
+function setAiStatus(sessionId, text) {
+  aiStatus.set(sessionId, text || '')
+  const item = document.querySelector(`.session-item[data-id="${sessionId}"]`)
+  const aiEl = item?.querySelector('.session-ai-status')
+  if (aiEl) aiEl.textContent = text || ''
+  if (item) item.classList.toggle('has-ai-status', !!text)
+  // Persist AI status to SQLite
   if (window.api.updateSessionStatus) {
-    window.api.updateSessionStatus(sessionId, level, text)
+    window.api.updateSessionStatus(sessionId, activityState.get(sessionId) || 'idle', text || '')
   }
 }
 
@@ -67,28 +71,24 @@ window.api.onStatus(({ state, detail }) => {
   }
 })
 
-// Watson status — AI-authored, highest priority (drives both sidebar + inline)
-window.api.onWatsonStatus(({ level, text, requestId }) => {
-  if (currentSessionId) {
-    setSessionStatus(currentSessionId, level, text || '', true)
+// Watson status — AI-authored, drives AI status layer + inline indicator
+window.api.onWatsonStatus(({ level, text, requestId, sessionId: evtSessionId }) => {
+  // Use event's sessionId (session-scoped), fallback to current
+  const targetSid = evtSessionId || currentSessionId
+  if (targetSid) {
+    setActivity(targetSid, level)
+    setAiStatus(targetSid, text || '')
   }
-  // Also update inline indicator with AI-authored text
-  if (_activeStatusEl && text) {
+  // Only update inline indicator if this is the currently displayed session
+  if (targetSid === currentSessionId && _activeStatusEl && text) {
     _statusIsAiAuthored = true
     updateInlineStatus(text)
   }
 })
 
-// Memory change listener
+// Memory change listener — temporary flash, doesn't touch AI status
 window.api.onMemoryChanged(({ file }) => {
-  if (currentSessionId) {
-    const prev = sessionStatus.get(currentSessionId)
-    setSessionStatus(currentSessionId, 'idle', `记忆更新: ${file || ''}`)
-    setTimeout(() => {
-      const cur = sessionStatus.get(currentSessionId)
-      if (cur?.text?.startsWith('记忆更新')) setSessionStatus(currentSessionId, prev?.level || 'idle', prev?.text || '')
-    }, 3000)
-  }
+  // No-op for sidebar — memory changes don't affect status display
 })
 
 // Tray menu: new chat
@@ -97,22 +97,25 @@ window.api.onTrayNewChat(() => { newSession() })
 // Group chat delegation streaming — independent bubbles
 let _delegateState = null  // { card, textEl, fullText, sender, workspaceId }
 let _pendingDelegateMessages = []  // accumulated delegate messages to save after orchestrator finishes
-window.api.onDelegateStart(({ requestId, sender, workspaceId, avatar }) => {
+window.api.onDelegateStart(({ requestId, sender, workspaceId, avatar, sessionId: evtSid }) => {
+  // Ignore delegate events from other sessions
+  if (evtSid && evtSid !== currentSessionId) return
   console.log(`[delegate] START: sender=${sender}, avatar=${avatar}, wsId=${workspaceId}`)
   // Capture orchestrator info from the current streaming card for later split
-  const lastCard = messages.querySelector('.msg-card.assistant:last-of-type')
+  const lastCard = _msgContainer?.querySelector('.msg-card.assistant:last-of-type')
   const orchName = lastCard?.querySelector('.msg-name')?.textContent || 'Assistant'
   const orchAvatar = lastCard?.querySelector('.msg-avatar')?.textContent || '🤖'
   const card = document.createElement('div')
   card.className = 'msg-card assistant'
   const _t = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
   card.innerHTML = `<div class="msg-avatar">${esc(avatar || '🤖')}</div><div class="msg-body"><div class="msg-header"><span class="msg-name">${esc(sender)}</span><span class="msg-time">${_t}</span></div><div class="msg-flow"><div class="msg-content md-content"></div><div class="inline-status"><span class="reading-indicator"><span></span><span></span><span></span></span> ${esc(sender)} thinking...</div></div></div>`
-  messages.appendChild(card)
+  _msgContainer?.appendChild(card) || messages.appendChild(card)
   messages.scrollTop = messages.scrollHeight
   const textEl = card.querySelector('.msg-content.md-content')
   _delegateState = { card, textEl, fullText: '', sender, workspaceId, requestId, orchestratorName: orchName, orchestratorAvatar: orchAvatar }
 })
-window.api.onDelegateToken(({ token, thinking, toolStep, roundInfo }) => {
+window.api.onDelegateToken(({ token, thinking, toolStep, roundInfo, sessionId: evtSid }) => {
+  if (evtSid && evtSid !== currentSessionId) return
   if (!_delegateState) return
   const flow = _delegateState.textEl.parentNode
   if (toolStep) {
@@ -170,7 +173,8 @@ window.api.onDelegateToken(({ token, thinking, toolStep, roundInfo }) => {
   }
   messages.scrollTop = messages.scrollHeight
 })
-window.api.onDelegateEnd(({ sender, workspaceId, fullText }) => {
+window.api.onDelegateEnd(({ sender, workspaceId, fullText, sessionId: evtSid }) => {
+  if (evtSid && evtSid !== currentSessionId) return
   console.log(`[delegate] END: sender=${sender}, textLen=${fullText?.length || 0}`)
   if (!_delegateState) return
   // Remove inline status
@@ -285,6 +289,48 @@ document.addEventListener('click', async (e) => {
 let history = []
 let currentSessionId = null
 
+// ── Session container cache (IM-style) ──
+// Each session has its own DOM container inside #messages.
+// Switching sessions hides/shows containers — in-flight streaming is preserved.
+const sessionContainers = new Map() // sessionId -> { el, history }
+let _msgContainer = null  // currently active container (alias for convenience)
+
+function getSessionContainer(sessionId) {
+  let entry = sessionContainers.get(sessionId)
+  if (!entry) {
+    const el = document.createElement('div')
+    el.className = 'session-container'
+    el.dataset.sid = sessionId
+    entry = { el, history: [] }
+    sessionContainers.set(sessionId, entry)
+  }
+  return entry
+}
+
+function activateContainer(sessionId) {
+  // Hide all existing containers
+  for (const [sid, entry] of sessionContainers) {
+    entry.el.style.display = sid === sessionId ? '' : 'none'
+  }
+  const entry = getSessionContainer(sessionId)
+  // Ensure it's in the DOM
+  if (!entry.el.parentNode) {
+    messages.appendChild(entry.el)
+  }
+  entry.el.style.display = ''
+  _msgContainer = entry.el
+  history = entry.history
+  return entry
+}
+
+function destroyContainer(sessionId) {
+  const entry = sessionContainers.get(sessionId)
+  if (entry) {
+    entry.el.remove()
+    sessionContainers.delete(sessionId)
+  }
+}
+
 // ── Setup screen ──
 
 async function init() {
@@ -367,8 +413,9 @@ async function refreshSessionList() {
   }
 
   for (const s of sessions) {
-    if (!sessionStatus.has(s.id) && s.statusLevel) {
-      sessionStatus.set(s.id, { level: s.statusLevel, text: s.statusText || '' })
+    // Restore AI status from DB (activity is transient — always starts idle)
+    if (!aiStatus.has(s.id) && s.statusText) {
+      aiStatus.set(s.id, s.statusText)
     }
     const primaryWs = (s.participants && s.participants.length > 0) ? s.participants[0] : null
     if (primaryWs && wsMap.has(primaryWs)) {
@@ -418,11 +465,14 @@ function renderSessionItem(s) {
   const el = document.createElement('div')
   el.className = 'session-item' + (s.id === currentSessionId ? ' active' : '')
   el.dataset.id = s.id
-  const st = sessionStatus.get(s.id) || { level: 'idle', text: '' }
-  const statusText = (st.level === 'idle' || st.level === 'done') ? (s.lastMessage || '') : (st.text || s.lastMessage || '')
+  // Three-layer status
+  const activity = activityState.get(s.id) || 'idle'
+  const aiText = aiStatus.get(s.id) || ''
+  const lastMsg = s.lastMessage || ''
   const modeIcon = s.mode === 'coding' ? '⌨ ' : ''
   const groupIcon = (s.participants?.length > 1) ? '👥 ' : ''
-  el.innerHTML = `<div class="session-item-main"><span class="session-title">${groupIcon}${modeIcon}${esc(s.title)}</span></div><div class="session-item-meta"><span class="session-status-dot ${st.level}"></span><span class="session-status-text">${esc(statusText)}</span><span class="del-btn" onclick="event.stopPropagation();deleteSession('${s.id}')">✕</span></div>`
+  if (aiText) el.classList.add('has-ai-status')
+  el.innerHTML = `<div class="session-item-main"><span class="session-title">${groupIcon}${modeIcon}${esc(s.title)}</span></div><div class="session-item-meta"><span class="session-status-dot ${activity}"></span><span class="session-ai-status">${esc(aiText)}</span><span class="session-last-msg">${esc(lastMsg)}</span><span class="del-btn" onclick="event.stopPropagation();deleteSession('${s.id}')">✕</span></div>`
   let clickTimer = null
   el.onclick = () => {
     if (clickTimer) clearTimeout(clickTimer)
@@ -445,8 +495,7 @@ async function switchSession(id) {
   const session = await window.api.loadSession(id)
   if (!session) return
   currentSessionId = id
-  history = []
-  messages.innerHTML = ''
+
   // Show workspace name in header + coding mode badge
   let titleText = session.title
   if (session.participants && session.participants.length > 0) {
@@ -458,7 +507,19 @@ async function switchSession(id) {
   }
   if (session.mode === 'coding') titleText = `⌨ ${titleText}`
   document.getElementById('sessionTitle').textContent = titleText
-  // Resolve owner name + avatar for assistant messages
+
+  // Activate container — if already cached (in-flight streaming), reuse it
+  const entry = activateContainer(id)
+
+  // If container already has content (e.g. from in-flight streaming), just show it
+  if (entry.el.children.length > 0) {
+    messages.scrollTop = messages.scrollHeight
+    await refreshSessionList()
+    if (_featureFlags.legacyAgentFeatures) await refreshTaskBar()
+    return
+  }
+
+  // Otherwise, build from DB
   let ownerName = 'Assistant'
   let ownerAvatar = '🤖'
   let allWorkspaces = []
@@ -473,7 +534,6 @@ async function switchSession(id) {
   const agents = await window.api.listAgents()
   for (const m of session.messages) {
     const sender = m.sender || (m.role === 'user' ? 'You' : ownerName)
-    // Resolve avatar: use senderWorkspaceId if available, else owner avatar
     let msgAvatar = undefined
     if (m.role === 'assistant') {
       if (m.senderWorkspaceId) {
@@ -487,6 +547,7 @@ async function switchSession(id) {
     if (m.role === 'user') history.push({ prompt: m.content, answer: '' })
     if (m.role === 'assistant' && history.length) history[history.length - 1].answer = m.content
   }
+  messages.scrollTop = messages.scrollHeight
   await refreshSessionList()
   if (_featureFlags.legacyAgentFeatures) await refreshTaskBar()
 }
@@ -507,8 +568,7 @@ async function createNewSession(workspaceId, mode) {
     : 'New Chat'
   const session = await window.api.createSession(opts)
   currentSessionId = session.id
-  history = []
-  messages.innerHTML = ''
+  activateContainer(session.id)
   const titleDisplay = session.mode === 'coding' ? `⌨ ${session.title}` : session.title
   document.getElementById('sessionTitle').textContent = titleDisplay
   await refreshSessionList()
@@ -634,8 +694,7 @@ async function showNewChatSelector(workspaces) {
       const opts = { title: 'Group Chat', participants: participantIds }
       const session = await window.api.createSession(opts)
       currentSessionId = session.id
-      history = []
-      messages.innerHTML = ''
+      activateContainer(session.id)
       document.getElementById('sessionTitle').textContent = session.title
       overlay.remove()
       await refreshSessionList()
@@ -661,6 +720,7 @@ function _makeAgentItem(ws, onclick) {
 async function deleteSession(id) {
   if (!confirm('确定要删除这个对话吗？')) return
   await window.api.deleteSession(id)
+  destroyContainer(id)
   if (id === currentSessionId) {
     const sessions = await window.api.listSessions()
     if (sessions.length) await switchSession(sessions[0].id)
@@ -827,7 +887,7 @@ function createStreamingCard(agentName, avatar) {
   card.className = 'msg-card assistant'
   const _t = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
   card.innerHTML = `<div class="msg-avatar">${esc(avatar || '🤖')}</div><div class="msg-body"><div class="msg-header"><span class="msg-name">${esc(agentName)}</span><span class="msg-time">${_t}</span></div><div class="msg-flow"></div></div>`
-  messages.appendChild(card)
+  _msgContainer?.appendChild(card) || messages.appendChild(card)
   messages.scrollTop = messages.scrollHeight
   const flowContainer = card.querySelector('.msg-flow')
   const firstTextEl = document.createElement('div')
@@ -927,7 +987,7 @@ function registerStreamHandlers(myRequestId, initialFlowContainer, firstTextEl, 
       const isDelegation = d.name === 'delegate_to'
       const displayOutput = isDelegation ? '→ delegating...' : String(d.output).slice(0, 120)
       myToolSteps.push({ name: d.name, output: displayOutput })
-      if (sendSessionId) setSessionStatus(sendSessionId, 'running', '…')
+      if (sendSessionId) setActivity(sendSessionId, 'running')
       if (!currentToolGroup) {
         currentToolGroup = document.createElement('div')
         currentToolGroup.className = 'tool-group-inline'
@@ -967,7 +1027,7 @@ function registerStreamHandlers(myRequestId, initialFlowContainer, firstTextEl, 
   }
   requestHandlers.set(myRequestId, handler)
 
-  return { getFullText: () => fullText, getToolSteps: () => myToolSteps, getAllCards: () => allCards }
+  return { getFullText: () => fullText, getLastSegment: () => segmentText, getToolSteps: () => myToolSteps, getAllCards: () => allCards }
 }
 
 function finalizeCard(card, myRequestId, fullText) {
@@ -1104,8 +1164,9 @@ async function send() {
           s.messages = []
           await window.api.saveSession(s)
         }
-        // Clear chat UI
-        document.querySelectorAll('.msg-card').forEach(c => c.remove())
+        // Destroy and recreate session container
+        destroyContainer(currentSessionId)
+        activateContainer(currentSessionId)
         addCard('assistant', 'Session 已重置。', 'System', true)
       }
       return
@@ -1121,13 +1182,13 @@ async function send() {
     if (cmd === '/compact') {
       input.value = ''
       addCard('user', text, 'You', true)
-      setSessionStatus(currentSessionId, 'thinking', '压缩中...')
+      setActivity(currentSessionId, 'thinking')
       // Force compaction by setting the flag
       const chatParams = { prompt: arg || '请压缩历史对话', history, agentId: null, files: [], sessionId: currentSessionId, requestId: null, forceCompact: true }
       // Use normal chat flow — compaction runs in main.js
       // For now, just inform the user
       addCard('assistant', '对话历史已标记压缩，下次发送消息时将自动执行 compaction。', 'System', true)
-      setSessionStatus(currentSessionId, 'idle', '')
+      setActivity(currentSessionId, 'idle')
       return
     }
   }
@@ -1197,7 +1258,19 @@ async function send() {
   // Show user message with attachments
   const attachHtml = files.map(f => f.type.startsWith('image/') ? `<img src="${f.data}" style="max-height:120px;border-radius:6px;margin-top:4px">` : `<div class="attach-chip">📄 ${esc(f.name)}</div>`).join('')
   addCard('user', text + (attachHtml ? `<div>${attachHtml}</div>` : ''), 'You', true)
-  setSessionStatus(sendSessionId, 'thinking', '…')
+  setActivity(sendSessionId, 'thinking')
+
+  // ── IM-style: save user message immediately (don't wait for response) ──
+  if (sendSessionId) {
+    try {
+      const s = await window.api.loadSession(sendSessionId)
+      if (s) {
+        s.messages.push({ role: 'user', content: text, sender: 'You' })
+        await window.api.saveSession(s)
+        await refreshSessionList()
+      }
+    } catch (e) { console.warn('[save user msg]', e) }
+  }
 
   // ── Case 1: @mention → direct to single agent ──
   // ── Case 2: everything else → Main (orchestrator delegates via send_message) ──
@@ -1214,7 +1287,7 @@ async function send() {
 
     const { card, flowContainer, firstTextEl } = createStreamingCard(targetAgentName, targetAvatar)
     const myRequestId = await window.api.chatPrepare()
-    const { getFullText, getToolSteps, getAllCards } = registerStreamHandlers(myRequestId, flowContainer, firstTextEl, sendSessionId)
+    const { getFullText, getLastSegment, getToolSteps, getAllCards } = registerStreamHandlers(myRequestId, flowContainer, firstTextEl, sendSessionId)
 
     chatParams.requestId = myRequestId
 
@@ -1222,26 +1295,81 @@ async function send() {
       const result = await window.api.chat(chatParams)
       if (_activeStatusEl) { _activeStatusEl.remove(); _activeStatusEl = null }
       const finalText = getFullText() || result?.answer || ''
+      const lastSegment = getLastSegment()
 
       // NO_REPLY filtering — suppress silent replies (OpenClaw-aligned)
-      const isNoReply = finalText.trim() === 'NO_REPLY'
+      // Check last segment for NO_REPLY (post-delegate the fullText includes pre-delegate text)
+      const isNoReply = finalText.trim() === 'NO_REPLY' || (lastSegment.trim() === 'NO_REPLY')
+      const hasDelegateMessages = _pendingDelegateMessages.length > 0
 
       let actualSender = targetAgentName
       let actualWorkspaceId = targetWorkspaceId || null
-      let displayText = finalText
+      // Strip NO_REPLY from display text; keep pre-delegate text if any
+      let displayText = isNoReply && lastSegment.trim() === 'NO_REPLY'
+        ? finalText.replace(/\n?NO_REPLY\s*$/, '').trim()
+        : finalText
 
       if (isNoReply) {
-        getAllCards().forEach(c => c.remove())
-        // Don't save NO_REPLY to history
+        // If there were delegate messages, keep the first card (has tool calls) but remove post-delegate cards
+        const allCards = getAllCards()
+        if (hasDelegateMessages && allCards.length > 1) {
+          // Remove only the post-delegate split cards (index 1+)
+          for (let i = 1; i < allCards.length; i++) allCards[i].remove()
+          // Finalize the first card
+          for (const c of allCards) {
+            if (!c.parentNode) continue
+            c.querySelectorAll('.msg-content.md-content').forEach(el => { el.innerHTML = linkifyPaths(el.innerHTML) })
+            // Auto-hide thinking in delegate-only cards
+            const allDelegate = Array.from(c.querySelectorAll('.tool-step-item')).every(item => item.textContent.includes('delegate_to'))
+            if (allDelegate) c.querySelectorAll('.delegate-thinking').forEach(t => t.remove())
+            c.querySelectorAll('.tool-group-inline').forEach(g => {
+              const body = g.querySelector('.tool-group-body')
+              const arrow = g.querySelector('.tool-expand')
+              if (body) body.style.display = 'none'
+              if (arrow) arrow.textContent = '▶'
+            })
+          }
+        } else if (!hasDelegateMessages) {
+          // Pure NO_REPLY with no delegates — remove everything
+          allCards.forEach(c => c.remove())
+        } else {
+          // Has delegates but single card — finalize it
+          for (const c of allCards) {
+            c.querySelectorAll('.tool-group-inline').forEach(g => {
+              const body = g.querySelector('.tool-group-body')
+              const arrow = g.querySelector('.tool-expand')
+              if (body) body.style.display = 'none'
+              if (arrow) arrow.textContent = '▶'
+            })
+          }
+        }
+        requestHandlers.delete(myRequestId)
       } else {
         // Finalize all orchestrator cards (may have split after delegate)
         const allCards = getAllCards()
         requestHandlers.delete(myRequestId)
+
+        // If post-delegate card has no meaningful text, remove it
+        if (hasDelegateMessages && allCards.length > 1 && !displayText.trim()) {
+          for (let i = 1; i < allCards.length; i++) allCards[i].remove()
+        }
+
         for (const c of allCards) {
+          if (!c.parentNode) continue // already removed
           if (displayText.trim()) {
             c.querySelectorAll('.msg-content.md-content').forEach(el => {
               el.innerHTML = linkifyPaths(el.innerHTML)
             })
+          }
+          // Auto-hide thinking in cards where the only tool is delegate_to
+          const toolGroups = c.querySelectorAll('.tool-group-inline')
+          const thinkingBlocks = c.querySelectorAll('.delegate-thinking')
+          if (toolGroups.length > 0 && thinkingBlocks.length > 0) {
+            // Check if all tool steps in this card are delegate_to
+            const allDelegate = Array.from(c.querySelectorAll('.tool-step-item')).every(item =>
+              item.textContent.includes('delegate_to')
+            )
+            if (allDelegate) thinkingBlocks.forEach(t => t.remove())
           }
           c.querySelectorAll('.tool-group-inline').forEach(g => {
             const body = g.querySelector('.tool-group-body')
@@ -1251,33 +1379,33 @@ async function send() {
           })
         }
 
-        if (!displayText.trim()) {
+        // Only show empty placeholder if no delegate messages were sent
+        if (!displayText.trim() && !hasDelegateMessages) {
           firstTextEl.innerHTML = '<span style="color:#666;font-style:italic">（无文本回复）</span>'
         }
       }
 
-      const curStatus = sessionStatus.get(sendSessionId)
-      if (!curStatus?.aiAuthored) {
-        const summary = text.length > 15 ? text.slice(0, 15) + '…' : text
-        setSessionStatus(sendSessionId, 'done', `已回复: ${summary}`)
-      }
+      setActivity(sendSessionId, 'done')
 
       history.push({ prompt: text, answer: displayText })
       if (sendSessionId) {
         const s = await window.api.loadSession(sendSessionId)
         if (s) {
           const toolSteps = getToolSteps()
-          const assistantMsg = { role: 'assistant', content: displayText, sender: actualSender, senderWorkspaceId: actualWorkspaceId }
-          if (toolSteps.length) assistantMsg.toolSteps = toolSteps
-          s.messages.push({ role: 'user', content: text, sender: 'You' })
-          // Insert delegate messages BEFORE orchestrator's final message (matches visual order)
-          if (_pendingDelegateMessages.length) {
-            s.messages.push(..._pendingDelegateMessages)
-            _pendingDelegateMessages = []
+          // User message already saved on send (IM-style), only append assistant/delegate messages
+          const delegateMsgs = [..._pendingDelegateMessages]
+          _pendingDelegateMessages = []
+          if (delegateMsgs.length) {
+            s.messages.push(...delegateMsgs)
           }
-          s.messages.push(assistantMsg)
-          if (s.messages.length === 2) {
-            s.title = generateTitle(text, displayText)
+          // Only save orchestrator's final message if it has meaningful content
+          if (displayText.trim() && !isNoReply) {
+            const assistantMsg = { role: 'assistant', content: displayText, sender: actualSender, senderWorkspaceId: actualWorkspaceId }
+            if (toolSteps.length) assistantMsg.toolSteps = toolSteps
+            s.messages.push(assistantMsg)
+          }
+          if (s.messages.length <= 2) {
+            s.title = generateTitle(text, displayText || delegateMsgs[0]?.content || '')
           }
           await window.api.saveSession(s)
           document.getElementById('sessionTitle').textContent = s.title
@@ -1287,7 +1415,7 @@ async function send() {
     } catch (err) {
       if (_activeStatusEl) { _activeStatusEl.remove(); _activeStatusEl = null }
       _statusIsAiAuthored = false
-      setSessionStatus(sendSessionId, 'idle', '出错')
+      setActivity(sendSessionId, 'idle')
       requestHandlers.delete(myRequestId)
       // Show error inline in the card (preserves tool steps)
       const errEl = document.createElement('div')
@@ -1302,6 +1430,7 @@ async function send() {
     }
   }
 
+  sendBtn.disabled = false
   input.focus()
 }
 
@@ -1335,7 +1464,7 @@ function addCard(role, content, sender, rawHtml, toolSteps, avatarOverride) {
     }
   }
 
-  messages.appendChild(card)
+  _msgContainer?.appendChild(card) || messages.appendChild(card)
   messages.scrollTop = messages.scrollHeight
 }
 
@@ -1613,7 +1742,8 @@ async function changeWorkspace() {
   if (dir) {
     closeSettings()
     // Reload the app with the new workspace
-    sessionStatus.clear()
+    activityState.clear()
+    aiStatus.clear()
     currentSessionId = null
     history = []
     await enterChat()

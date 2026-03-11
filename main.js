@@ -223,10 +223,12 @@ function getToolsForAgent() {
 }
 
 // Auto-assign: find best matching agent for a task title based on role keyword overlap
-async function executeTool(name, input, config) {
+async function executeTool(name, input, config, { sessionId: _sid, agentName: _aname } = {}) {
+  const sid = _sid || currentSessionId
+  const aname = _aname || currentAgentName
   // ── Group chat: delegate_to — route message to another participant ──
   if (name === 'delegate_to') {
-    return await handleDelegateTo(input, config)
+    return await handleDelegateTo(input, config, sid)
   }
 
   // Try registry first for pluggable tools
@@ -234,8 +236,8 @@ async function executeTool(name, input, config) {
   if (tool) {
     const context = {
       clawDir,
-      sessionId: currentSessionId,
-      agentName: currentAgentName,
+      sessionId: sid,
+      agentName: aname,
       mainWindow,
       sessionStore,
       memoryIndex,
@@ -728,7 +730,7 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
   // Resolve agent: lightweight (session-level, legacy) or template (agents/ directory)
   let agent = null
   let isLightweight = false
-  if (LEGACY_AGENT_FEATURES && agentId && agentId.startsWith('a') && clawDir && currentSessionId) {
+  if (LEGACY_AGENT_FEATURES && agentId && agentId.startsWith('a') && clawDir && sessionId) {
     // Try lightweight agent first
     const sessionAgent = sessionStore.getSessionAgent(clawDir, agentId)
     if (sessionAgent) {
@@ -751,7 +753,7 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
   let chatTools = TOOLS
   if (isLightweight && agent?.role) {
     // Lightweight agent: compact prompt, filtered tools
-    const sessionAgents = sessionStore.listSessionAgents(clawDir, currentSessionId) || []
+    const sessionAgents = sessionStore.listSessionAgents(clawDir, sessionId) || []
     systemPrompt = coreBuildAgentPrompt(agent, focus || '', sessionAgents)
     chatTools = getToolsForAgent()
   } else {
@@ -764,9 +766,9 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
 
   // Group chat: inject orchestrator instructions + delegate_to tool
   let _isGroupChat = false
-  if (currentSessionId && clawDir) {
+  if (sessionId && clawDir) {
     try {
-      const participants = sessionStore.getSessionParticipants(clawDir, currentSessionId)
+      const participants = sessionStore.getSessionParticipants(clawDir, sessionId)
       if (participants.length > 1) {
         _isGroupChat = true
         const participantInfos = participants.map(pid => {
@@ -794,9 +796,10 @@ ${roster}
    - Example: "让 Alice 写个方案" → delegate_to Alice
 2. **When the user's message is general or directed at you** → respond yourself as ${myName}.
 3. **When unsure who should respond** → respond yourself, but mention other participants' expertise if relevant.
-4. **The delegated participant will respond in their own personality and with their own memory/skills.** Their response will be returned to you — present it as-is, do NOT rewrite or summarize it.
-5. **Messages from participants are prefixed with [Name] in the chat history.**
-6. **Ignore heartbeat polls in group chat.** Do not respond with HEARTBEAT_OK.`
+4. **The delegated participant will respond in their own personality and with their own memory/skills.** Their response is shown directly to the user — do NOT rewrite, summarize, or comment on it.
+5. **After delegate_to returns**, if you have nothing meaningful to add, respond with exactly \`NO_REPLY\`. Do NOT echo, summarize, or acknowledge the delegate's response. Only respond if you need to orchestrate further (e.g., delegate to another participant or add your own perspective).
+6. **Messages from participants are prefixed with [Name] in the chat history.**
+7. **Ignore heartbeat polls in group chat.** Do not respond with HEARTBEAT_OK.`
 
         // Inject delegate_to tool for group chat owner
         chatTools = [...chatTools, DELEGATE_TO_TOOL]
@@ -805,9 +808,9 @@ ${roster}
   }
 
   // F046: Inject other agents' recent messages for visibility
-  if (agent && currentSessionId && clawDir) {
+  if (agent && sessionId && clawDir) {
     try {
-      const session = sessionStore.loadSession(clawDir, currentSessionId)
+      const session = sessionStore.loadSession(clawDir, sessionId)
       if (session?.messages?.length) {
         const otherMsgs = session.messages
           .filter(m => m.role === 'assistant' && m.sender && m.sender !== agent.name)
@@ -903,10 +906,10 @@ ${roster}
       let result
       const streamConfig = { apiKey, baseUrl, model: target.model, tavilyKey: config.tavilyKey, maxToolRounds: config.maxToolRounds, maxTokens: config.maxTokens }
       if (target.provider === 'anthropic') {
-        result = await streamAnthropic(finalMessages, systemPrompt, streamConfig, mainWindow, requestId, chatTools)
+        result = await streamAnthropic(finalMessages, systemPrompt, streamConfig, mainWindow, requestId, chatTools, sessionId)
         _lastAnthropicCallTime = Date.now()
       } else {
-        result = await streamOpenAI(finalMessages, systemPrompt, streamConfig, mainWindow, requestId, chatTools)
+        result = await streamOpenAI(finalMessages, systemPrompt, streamConfig, mainWindow, requestId, chatTools, sessionId)
       }
       // Track token usage
       if (result?.usage && sessionId) {
@@ -957,16 +960,17 @@ function getSessionMode(sessionId) {
   return sessionStore.getSessionMode(clawDir, sessionId)
 }
 
-function getSessionWorkspacePath(workspaceId) {
+function getSessionWorkspacePath(workspaceId, sessionId) {
   // If explicit workspaceId provided, use it directly
   if (workspaceId) {
     const wsObj = workspaceRegistry.getWorkspace(workspaceId)
     if (wsObj?.path) return wsObj.path
   }
   // Otherwise resolve from session participants (owner = participants[0])
-  if (!currentSessionId || !clawDir) return null
+  const sid = sessionId || currentSessionId
+  if (!sid || !clawDir) return null
   try {
-    const participants = sessionStore.getSessionParticipants(clawDir, currentSessionId)
+    const participants = sessionStore.getSessionParticipants(clawDir, sid)
     if (participants.length > 0) {
       const wsObj = workspaceRegistry.getWorkspace(participants[0])
       if (wsObj?.path) return wsObj.path
@@ -978,13 +982,13 @@ function getSessionWorkspacePath(workspaceId) {
 // ── Group Chat: delegate_to handler ──
 // Owner calls this tool to route a message to another participant.
 // We build the participant's system prompt, call LLM, and return their response.
-async function handleDelegateTo(input, config) {
+async function handleDelegateTo(input, config, sessionId) {
   const { participant_name, message } = input
   if (!participant_name || !message) return 'Error: participant_name and message are required'
-  if (!currentSessionId || !clawDir) return 'Error: no active session'
+  if (!sessionId || !clawDir) return 'Error: no active session'
 
   // Find participant workspace by name
-  const participants = sessionStore.getSessionParticipants(clawDir, currentSessionId)
+  const participants = sessionStore.getSessionParticipants(clawDir, sessionId)
   const workspaces = participants.map(pid => workspaceRegistry.getWorkspace(pid)).filter(Boolean)
   const targetWs = workspaces.find(w => {
     const n = (w.identity?.name || '').toLowerCase()
@@ -1007,7 +1011,7 @@ async function handleDelegateTo(input, config) {
   // Build conversation context — load recent messages from session
   const delegateMessages = []
   try {
-    const fullSession = sessionStore.loadSession(clawDir, currentSessionId)
+    const fullSession = sessionStore.loadSession(clawDir, sessionId)
     if (fullSession?.messages?.length) {
       const recent = fullSession.messages.slice(-20)
       for (const m of recent) {
@@ -1038,7 +1042,7 @@ async function handleDelegateTo(input, config) {
     console.log(`[delegate_to] sending delegate-start: sender=${myName}, avatar=${avatar}, wsId=${targetWs.id}`)
     const parentRequestId = _activeRequestId
     if (mainWindow && parentRequestId) {
-      mainWindow.webContents.send('chat-delegate-start', { requestId: parentRequestId, sender: myName, workspaceId: targetWs.id, avatar })
+      mainWindow.webContents.send('chat-delegate-start', { requestId: parentRequestId, sender: myName, workspaceId: targetWs.id, avatar, sessionId })
     }
 
     // Create proxy win that remaps chat-* events to chat-delegate-* events
@@ -1047,16 +1051,16 @@ async function handleDelegateTo(input, config) {
         send(channel, data) {
           if (!mainWindow || !parentRequestId) return
           if (channel === 'chat-token') {
-            mainWindow.webContents.send('chat-delegate-token', { requestId: parentRequestId, sender: myName, token: data.text, thinking: data.thinking || false })
+            mainWindow.webContents.send('chat-delegate-token', { requestId: parentRequestId, sender: myName, token: data.text, thinking: data.thinking || false, sessionId })
           } else if (channel === 'chat-tool-step') {
-            mainWindow.webContents.send('chat-delegate-token', { requestId: parentRequestId, sender: myName, toolStep: data })
+            mainWindow.webContents.send('chat-delegate-token', { requestId: parentRequestId, sender: myName, toolStep: data, sessionId })
           } else if (channel === 'chat-text-start') {
             // New round text start — no-op for delegate (text appends to same bubble)
           } else if (channel === 'chat-round-info') {
-            mainWindow.webContents.send('chat-delegate-token', { requestId: parentRequestId, sender: myName, roundInfo: data })
+            mainWindow.webContents.send('chat-delegate-token', { requestId: parentRequestId, sender: myName, roundInfo: data, sessionId })
           } else if (channel === 'chat-status') {
-            // Delegate status — forward as-is for sidebar
-            mainWindow.webContents.send('chat-status', data)
+            // Delegate status — forward with sessionId
+            mainWindow.webContents.send('chat-status', { ...data, sessionId })
           }
         }
       }
@@ -1068,9 +1072,9 @@ async function handleDelegateTo(input, config) {
 
     let result
     if (provider === 'anthropic') {
-      result = await streamAnthropic(delegateMessages, fullPrompt, fullConfig, proxyWin, parentRequestId + '-delegate', delegateTools)
+      result = await streamAnthropic(delegateMessages, fullPrompt, fullConfig, proxyWin, parentRequestId + '-delegate', delegateTools, sessionId)
     } else {
-      result = await streamOpenAI(delegateMessages, fullPrompt, fullConfig, proxyWin, parentRequestId + '-delegate', delegateTools)
+      result = await streamOpenAI(delegateMessages, fullPrompt, fullConfig, proxyWin, parentRequestId + '-delegate', delegateTools, sessionId)
     }
 
     // Restore parent state
@@ -1081,7 +1085,7 @@ async function handleDelegateTo(input, config) {
 
     // Signal delegate end — frontend finalizes bubble + saves message
     if (mainWindow && parentRequestId) {
-      mainWindow.webContents.send('chat-delegate-end', { requestId: parentRequestId, sender: myName, workspaceId: targetWs.id, fullText: responseText })
+      mainWindow.webContents.send('chat-delegate-end', { requestId: parentRequestId, sender: myName, workspaceId: targetWs.id, fullText: responseText, sessionId })
     }
 
     console.log(`[delegate_to] ${myName} responded (${responseText.length} chars), sent delegate-end`)
@@ -1125,15 +1129,17 @@ async function streamCodingAgent(agentId, prompt, { cwd, sessionId, requestId, w
 
 // ── Anthropic Streaming ──
 
-async function streamAnthropic(messages, systemPrompt, config, win, requestId, tools) {
+async function streamAnthropic(messages, systemPrompt, config, win, requestId, tools, sessionId) {
   _activeRequestId = requestId
   _activeAbortController = new AbortController()
+  // Session-scoped IPC helper — injects sessionId into every payload
+  const ipc = (channel, data) => win?.webContents?.send(channel, { ...data, sessionId })
   // Agent timeout — prevent infinite waits (OpenClaw default: 600s)
   const timeoutMs = (config.timeoutSeconds || 600) * 1000
   const timeoutId = setTimeout(() => {
     console.warn(`[Paw] Agent timeout after ${config.timeoutSeconds || 600}s`)
     _activeAbortController?.abort(new Error('Agent timeout'))
-    win?.webContents?.send('chat-status', { text: '超时', requestId })
+    ipc('chat-status', { text: '超时', requestId })
   }, timeoutMs)
   const activeTools = tools || TOOLS
   const base = (config.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '')
@@ -1158,7 +1164,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
   // OpenClaw-aligned: no hard round limit. Loop detection + timeout guard against stuck loops.
   for (let round = 0; ; round++) {
     roundText = ''
-    if (round > 0) win.webContents.send('chat-text-start', { requestId })
+    if (round > 0) ipc('chat-text-start', { requestId })
     pushStatus(win, 'thinking', 'Thinking...')
 
     // Build system with cache_control for prompt caching
@@ -1217,7 +1223,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
       // Context overflow detection — auto-compact and retry
       if (isContextOverflowError(res.status, errText)) {
         console.warn('[Paw] Context overflow detected, attempting compaction...')
-        win.webContents.send('chat-status', { text: '上下文溢出，压缩中...', requestId })
+        ipc('chat-status', { text: '上下文溢出，压缩中...', requestId })
         const compactResult = await compactHistory(msgs, { apiKey: getApiKey(config), baseUrl: config.baseUrl, model: config.model, provider: 'anthropic' })
         if (compactResult.length < msgs.length) {
           msgs.splice(0, msgs.length, ...compactResult)
@@ -1258,9 +1264,9 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
             curBlock = { id: evt.content_block.id, name: evt.content_block.name, json: '' }
           } else if (evt.type === 'content_block_delta') {
             if (evt.delta?.type === 'thinking_delta' && evt.delta?.thinking) {
-              win.webContents.send('chat-token', { requestId, text: evt.delta.thinking, thinking: true })
+              ipc('chat-token', { requestId, text: evt.delta.thinking, thinking: true })
             }
-            if (evt.delta?.text && !curBlock) { roundText += evt.delta.text; fullText += evt.delta.text; win.webContents.send('chat-token', { requestId, text: evt.delta.text }) }
+            if (evt.delta?.text && !curBlock) { roundText += evt.delta.text; fullText += evt.delta.text; ipc('chat-token', { requestId, text: evt.delta.text }) }
             if (evt.delta?.partial_json && curBlock) curBlock.json += evt.delta.partial_json
           } else if (evt.type === 'content_block_stop' && curBlock) {
             toolCalls.push(curBlock); curBlock = null
@@ -1298,7 +1304,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
       if (loopCheck.blocked) {
         console.warn(`[Paw] ${loopCheck.reason}`)
         toolResults.push({ type: 'tool_result', tool_use_id: tc.id, content: loopCheck.reason })
-        win.webContents.send('chat-tool-step', { requestId, name: tc.name, output: loopCheck.reason })
+        ipc('chat-tool-step', { requestId, name: tc.name, output: loopCheck.reason })
         loopBlocked = true
         continue
       }
@@ -1309,38 +1315,40 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
       if (!silent) pushStatus(win, 'tool', `Running ${tc.name}...`)
       let result, execError
       try {
-        result = await executeTool(tc.name, input, config)
+        result = await executeTool(tc.name, input, config, { sessionId })
       } catch (err) {
         execError = err
         result = `Error: ${err.message}`
       }
       loopDetector.recordOutcome(tc.name, input, result, execError)
       if (!silent) {
-        win.webContents.send('chat-tool-step', { requestId, name: tc.name, output: String(result).slice(0, 500) })
+        ipc('chat-tool-step', { requestId, name: tc.name, output: String(result).slice(0, 500) })
       }
       toolResults.push({ type: 'tool_result', tool_use_id: tc.id, content: truncateToolResult(result) })
     }
     // Send round info to renderer
     if (toolCalls.length > 0) {
-      win.webContents.send('chat-round-info', { requestId, round: round + 1 })
+      ipc('chat-round-info', { requestId, round: round + 1 })
     }
     msgs.push({ role: 'user', content: toolResults })
     fullText += '\n'
-    win.webContents.send('chat-token', { requestId, text: '\n' })
+    ipc('chat-token', { requestId, text: '\n' })
   }
 }
 
 // ── OpenAI Streaming ──
 
-async function streamOpenAI(messages, systemPrompt, config, win, requestId, tools) {
+async function streamOpenAI(messages, systemPrompt, config, win, requestId, tools, sessionId) {
   _activeRequestId = requestId
   _activeAbortController = new AbortController()
+  // Session-scoped IPC helper — injects sessionId into every payload
+  const ipc = (channel, data) => win?.webContents?.send(channel, { ...data, sessionId })
   // Agent timeout
   const timeoutMs = (config.timeoutSeconds || 600) * 1000
   const timeoutId = setTimeout(() => {
     console.warn(`[Paw] Agent timeout after ${config.timeoutSeconds || 600}s`)
     _activeAbortController?.abort(new Error('Agent timeout'))
-    win?.webContents?.send('chat-status', { text: '超时', requestId })
+    ipc('chat-status', { text: '超时', requestId })
   }, timeoutMs)
   const activeTools = tools || TOOLS
   const base = (config.baseUrl || 'https://api.openai.com').replace(/\/+$/, '')
@@ -1371,7 +1379,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
   // OpenClaw-aligned: no hard round limit
   for (let round = 0; ; round++) {
     roundText = ''
-    if (round > 0) win.webContents.send('chat-text-start', { requestId })
+    if (round > 0) ipc('chat-text-start', { requestId })
     pushStatus(win, 'thinking', 'Thinking...')
 
     // Context window guard — enforce budget before API call
@@ -1391,7 +1399,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
       err.body = errText
       if (isContextOverflowError(res.status, errText)) {
         console.warn('[Paw] Context overflow detected (OpenAI), attempting compaction...')
-        win.webContents.send('chat-status', { text: '上下文溢出，压缩中...', requestId })
+        ipc('chat-status', { text: '上下文溢出，压缩中...', requestId })
         const compactResult = await compactHistory(msgs, { apiKey: getApiKey(config), baseUrl: config.baseUrl, model: config.model, provider: config.provider || 'openai' })
         if (compactResult.length < msgs.length) {
           msgs.splice(0, msgs.length, ...compactResult)
@@ -1426,7 +1434,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
           if (delta?.content) {
             roundText += delta.content
             fullText += delta.content
-            win.webContents.send('chat-token', { requestId, text: delta.content })
+            ipc('chat-token', { requestId, text: delta.content })
           }
           if (delta?.tool_calls) {
             for (const tc of delta.tool_calls) {
@@ -1442,11 +1450,11 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
     }
 
     const tcList = Object.values(toolCalls)
-    
+
     // Accumulate usage across rounds
     totalUsageInput += roundUsageInput
     totalUsageOutput += roundUsageOutput
-    
+
     if (!tcList.length || !tcList[0].name) {
       pushStatus(win, 'done', 'Done')
       clearTimeout(timeoutId)
@@ -1469,7 +1477,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
       const loopCheck = loopDetector.check(tc.name, input)
       if (loopCheck.blocked) {
         console.warn(`[Paw] ${loopCheck.reason}`)
-        win.webContents.send('chat-tool-step', { requestId, name: tc.name, output: loopCheck.reason })
+        ipc('chat-tool-step', { requestId, name: tc.name, output: loopCheck.reason })
         msgs.push({ role: 'tool', tool_call_id: tc.id, content: loopCheck.reason })
         continue
       }
@@ -1480,23 +1488,23 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
       if (!silent) pushStatus(win, 'tool', `Running ${tc.name}...`)
       let result, execError
       try {
-        result = await executeTool(tc.name, input, config)
+        result = await executeTool(tc.name, input, config, { sessionId })
       } catch (err) {
         execError = err
         result = `Error: ${err.message}`
       }
       loopDetector.recordOutcome(tc.name, input, result, execError)
       if (!silent) {
-        win.webContents.send('chat-tool-step', { requestId, name: tc.name, output: String(result).slice(0, 500) })
+        ipc('chat-tool-step', { requestId, name: tc.name, output: String(result).slice(0, 500) })
       }
       msgs.push({ role: 'tool', tool_call_id: tc.id, content: truncateToolResult(result) })
     }
     // Send round info to renderer
     if (tcList.length > 0) {
-      win.webContents.send('chat-round-info', { requestId, round: round + 1 })
+      ipc('chat-round-info', { requestId, round: round + 1 })
     }
     fullText += '\n'
-    win.webContents.send('chat-token', { requestId, text: '\n' })
+    ipc('chat-token', { requestId, text: '\n' })
   }
 }
 
@@ -1577,13 +1585,14 @@ ipcMain.handle('chat-cancel', () => {
   return false
 })
 
-function pushWatsonStatus(level, text, requestId) {
+function pushWatsonStatus(level, text, requestId, sessionId) {
   const rid = requestId || _activeRequestId
-  const payload = { level, text, requestId: rid }
+  const sid = sessionId || currentSessionId
+  const payload = { level, text, requestId: rid, sessionId: sid }
   mainWindow?.webContents?.send('watson-status', payload)
   // Persist status to SQLite
-  if (currentSessionId && clawDir) {
-    try { sessionStore.updateSessionStatus(clawDir, currentSessionId, level, text) } catch {}
+  if (sid && clawDir) {
+    try { sessionStore.updateSessionStatus(clawDir, sid, level, text) } catch {}
   }
   // Update tray
   _trayStatusText = text || '空闲待命中'
