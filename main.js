@@ -123,6 +123,7 @@ const { routeMessage: coreRouteMessage } = require('./core/router')
 const { streamAnthropicRaw: coreLlmAnthropicRaw, streamOpenAIRaw: coreLlmOpenAIRaw } = require('./core/llm-raw')
 const acpx = require('./core/acpx')
 const codingAgents = require('./core/coding-agents')
+const codingAgentRegistry = require('./core/coding-agent-registry')
 
 // Legacy globals - kept for backward compat, synced to state via syncState()
 let mainWindow
@@ -395,6 +396,7 @@ app.whenReady().then(() => {
   // Initialize acpx + coding agents
   acpx.init()
   codingAgents.init()
+  codingAgentRegistry.init()
 
   // Initialize workspace registry
   workspaceRegistry.initRegistry()
@@ -608,6 +610,28 @@ ipcMain.handle('set-coding-agent', (_, agent) => {
 
 ipcMain.handle('list-coding-agents', () => {
   return codingAgents.listAvailable()
+})
+
+// ── IPC: Coding Agent Registry (F206) ──
+
+ipcMain.handle('coding-agents-list', () => {
+  const available = codingAgents.listAvailable()
+  const registry = codingAgentRegistry.list()
+  return { available, registry }
+})
+
+ipcMain.handle('coding-agent-add', async (_, { engine, projectPath, name }) => {
+  if (!projectPath) {
+    const result = await dialog.showOpenDialog({ properties: ['openDirectory'], title: 'Select Project Folder' })
+    if (result.canceled || !result.filePaths[0]) return { ok: false, error: 'cancelled' }
+    projectPath = result.filePaths[0]
+  }
+  const agent = codingAgentRegistry.add({ engine, projectPath, name })
+  return { ok: true, agent }
+})
+
+ipcMain.handle('coding-agent-delete', (_, id) => {
+  return codingAgentRegistry.remove(id)
 })
 
 // ── IPC: Sessions ──

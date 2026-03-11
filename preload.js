@@ -97,6 +97,10 @@ contextBridge.exposeInMainWorld('api', {
   getCodingAgent: () => ipcRenderer.invoke('get-coding-agent'),
   setCodingAgent: (agent) => ipcRenderer.invoke('set-coding-agent', agent),
   listCodingAgents: () => ipcRenderer.invoke('list-coding-agents'),
+  // Coding agent registry (F206)
+  codingAgentsList: () => ipcRenderer.invoke('coding-agents-list'),
+  codingAgentAdd: (opts) => ipcRenderer.invoke('coding-agent-add', opts),
+  codingAgentDelete: (id) => ipcRenderer.invoke('coding-agent-delete', id),
   // Group chat delegation (streaming)
   onDelegateStart: (cb) => { ipcRenderer.on('chat-delegate-start', (_, d) => cb(d)) },
   onDelegateToken: (cb) => { ipcRenderer.on('chat-delegate-token', (_, d) => cb(d)) },

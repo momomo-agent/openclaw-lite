@@ -539,6 +539,14 @@ function previewTheme(theme) {
 async function init() {
   // Load feature flags
   try { _featureFlags = await window.api.getFeatureFlags() || _featureFlags } catch {}
+
+  // Check if workspaces exist (F208)
+  const workspaces = await window.api.listWorkspaces()
+  if (workspaces.length === 0) {
+    showSetupScreen()
+    return
+  }
+
   const prefs = await window.api.getPrefs()
   if (prefs.clawDir) { _clawDir = prefs.clawDir; enterChat() }
 }
@@ -549,13 +557,13 @@ function showSetupScreen() {
 }
 
 async function createNew() {
-  const dir = await window.api.createClawDir()
-  if (dir) { _clawDir = dir; enterChat() }
+  const result = await window.api.createWorkspace({})
+  if (result?.ok) enterChat()
 }
 
 async function openExisting() {
-  const dir = await window.api.selectClawDir()
-  if (dir) { _clawDir = dir; enterChat() }
+  const result = await window.api.addWorkspace()
+  if (result?.ok) enterChat()
 }
 
 async function enterChat() {
@@ -831,12 +839,11 @@ async function createNewSession(workspaceId, mode) {
 }
 
 async function showNewChatSelector(workspaces) {
-  // Remove existing overlay if any
   document.getElementById('newChatOverlay')?.remove()
 
-  // Fetch available coding agents
-  let codingAgentsList = []
-  try { codingAgentsList = await window.api.listCodingAgents() } catch {}
+  // Fetch coding agents registry
+  let codingAgentsData = { available: [], registry: [] }
+  try { codingAgentsData = await window.api.codingAgentsList() } catch
 
   const overlay = document.createElement('div')
   overlay.id = 'newChatOverlay'
@@ -850,60 +857,47 @@ async function showNewChatSelector(workspaces) {
   panel.style.display = 'flex'
   panel.style.flexDirection = 'column'
 
-  const hasCoding = codingAgentsList.length > 0
-  const hasGroup = workspaces.length > 1
-
-  // Header
   const header = document.createElement('div')
   header.className = 'people-header'
   header.innerHTML = `<span>New Chat</span><button class="icon-btn" onclick="document.getElementById('newChatOverlay')?.remove()">✕</button>`
   panel.appendChild(header)
 
-  // Scrollable body
   const body = document.createElement('div')
   body.style.cssText = 'flex:1;overflow-y:auto;padding:8px'
 
-  // ── Section: Chat ──
-  const chatSection = document.createElement('div')
-  chatSection.style.cssText = 'margin-bottom:12px'
-  const chatLabel = document.createElement('div')
-  chatLabel.className = 'settings-section-title'
-  chatLabel.style.cssText = 'padding:4px 8px'
-  chatLabel.textContent = 'Chat'
-  chatSection.appendChild(chatLabel)
+  // ── Section: Workspace ──
+  const wsSection = document.createElement('div')
+  wsSection.style.cssText = 'margin-bottom:12px'
+  const wsLabel = document.createElement('div')
+  wsLabel.className = 'settings-section-title'
+  wsLabel.style.cssText = 'padding:4px 8px'
+  wsLabel.textContent = 'Workspace'
+  wsSection.appendChild(wsLabel)
   for (const ws of workspaces) {
-    chatSection.appendChild(_makeAgentItem(ws, () => {
+    wsSection.appendChild(_makeAgentItem(ws, () => {
       overlay.remove()
       createNewSession(ws.id, 'chat')
     }))
   }
-  body.appendChild(chatSection)
+  body.appendChild(wsSection)
 
-  // ── Section: Coding ──
-  if (hasCoding) {
+  // ── Section: Coding Agent ──
+  if (codingAgentsData.registry.length > 0) {
     const codingSection = document.createElement('div')
     codingSection.style.cssText = 'margin-bottom:12px'
     const codingLabel = document.createElement('div')
     codingLabel.className = 'settings-section-title'
     codingLabel.style.cssText = 'padding:4px 8px'
-    codingLabel.textContent = 'Coding'
+    codingLabel.textContent = 'Coding Agent'
     codingSection.appendChild(codingLabel)
-    for (const ws of workspaces) {
+    for (const agent of codingAgentsData.registry) {
       const item = document.createElement('div')
       item.className = 'new-chat-item'
-      const avatar = ws.identity.avatar || ''
-      const isEmoji = !avatar.includes('.')
-      const avatarHtml = isEmoji ? `<span class="new-chat-avatar">${avatar || IC.bot}</span>` : `<img src="file://${esc(ws.path + '/.paw/' + avatar)}?t=${_avatarTs}" class="new-chat-avatar-img">`
-      let selectHtml = ''
-      if (codingAgentsList.length === 1) {
-        selectHtml = `<span class="new-chat-coding-label">${esc(codingAgentsList[0].name)}</span>`
-      } else {
-        selectHtml = `<select class="new-chat-coding-select">${codingAgentsList.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select>`
-      }
-      item.innerHTML = `${avatarHtml}<div class="new-chat-info"><div class="new-chat-name">${esc(ws.identity.name)}</div><div class="new-chat-desc">Coding Agent: ${selectHtml}</div></div>`
+      const engineIcon = agent.engine === 'claude' ? '🤖' : agent.engine === 'codex' ? '💻' : agent.engine === 'gemini' ? '✨' : '⚡'
+      item.innerHTML = `<span class="new-chat-avatar">${engineIcon}</span><div class="new-chat-info"><div class="new-chat-name">${esc(agent.name)}</div><div class="new-chat-desc">${esc(agent.projectPath)}</div></div>`
       item.onclick = () => {
         overlay.remove()
-        createNewSession(ws.id, 'coding')
+        createNewSession(null, 'coding')
       }
       codingSection.appendChild(item)
     }
@@ -911,7 +905,7 @@ async function showNewChatSelector(workspaces) {
   }
 
   // ── Section: Group Chat ──
-  if (hasGroup) {
+  if (workspaces.length > 1) {
     const groupSection = document.createElement('div')
     groupSection.style.cssText = 'margin-bottom:12px'
     const groupLabel = document.createElement('div')
