@@ -72,7 +72,7 @@ export default function MembersPanel({ visible, sessionId, onClose, onChanged }:
         <div className="settings-body">
           {/* Current participants */}
           <div className="settings-section">
-            <div className="settings-label">当前成员</div>
+            <div className="settings-section-title">当前成员</div>
 
             {/* User */}
             <div className="members-item">
@@ -96,10 +96,10 @@ export default function MembersPanel({ visible, sessionId, onClose, onChanged }:
                     <Avatar raw={ws.identity?.avatar} role="assistant" wsPath={ws.path} />
                   </div>
                   <span className="members-name">{ws.identity?.name || ws.id}</span>
-                  {i === 0 && participants.length > 1 && (
+                  {i === 0 && (
                     <span className="members-tag">群主</span>
                   )}
-                  {(i > 0 || participants.length === 1) && (
+                  {i > 0 && (
                     <button className="icon-btn members-remove" onClick={() => removeParticipant(pid)} title="移除">
                       <span className="ic">
                         <svg viewBox="0 0 24 24" width="14" height="14">
@@ -117,7 +117,7 @@ export default function MembersPanel({ visible, sessionId, onClose, onChanged }:
           {/* Add participant */}
           {nonParticipants.length > 0 && (
             <div className="settings-section">
-              <div className="settings-label">添加成员</div>
+              <div className="settings-section-title">添加成员</div>
               {nonParticipants.map(ws => (
                 <div key={ws.id} className="members-item members-item-add" onClick={() => addParticipant(ws.id)}>
                   <div className="members-avatar">
