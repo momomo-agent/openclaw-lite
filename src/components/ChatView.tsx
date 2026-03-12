@@ -7,11 +7,12 @@ import InputBar from './InputBar'
 import SettingsPanel from './SettingsPanel'
 
 export default function ChatView() {
-  const { currentSessionId, setActivity } = useAppState()
+  const { currentSessionId, setActivity, setStatus } = useAppState()
   const api = useIPC()
   const [messages, setMessages] = useState<Message[]>([])
   const [sessionTitle, setSessionTitle] = useState('New Chat')
   const [showSettings, setShowSettings] = useState(false)
+  const [streamingStatus, setStreamingStatus] = useState('')
   const currentRequestId = useRef<string | null>(null)
   const streamingMsg = useRef<Message | null>(null)
 
@@ -21,25 +22,58 @@ export default function ChatView() {
   }, [currentSessionId])
 
   useEffect(() => {
+    const handleTextStart = (data: any) => {
+      if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
+      streamingMsg.current = {
+        id: 'streaming-' + Date.now(),
+        role: 'assistant',
+        content: '',
+        timestamp: Date.now(),
+        toolSteps: [],
+        thinking: ''
+      }
+      setMessages(prev => [...prev, streamingMsg.current!])
+      setStreamingStatus('Thinking...')
+    }
+
     const handleToken = (data: any) => {
       if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
+      if (!streamingMsg.current) return
 
-      if (data.type === 'chat-text-start') {
-        streamingMsg.current = {
-          id: 'streaming-' + Date.now(),
-          role: 'assistant',
-          content: '',
-          timestamp: Date.now(),
-          toolSteps: []
-        }
-        setMessages(prev => [...prev, streamingMsg.current!])
-      } else if (data.type === 'chat-token' && streamingMsg.current) {
-        streamingMsg.current.content += data.delta || ''
-        setMessages(prev => [...prev.slice(0, -1), { ...streamingMsg.current! }])
-      } else if (data.type === 'chat-tool-step' && streamingMsg.current) {
-        const step: ToolStep = { name: data.tool, input: data.input, output: data.output }
-        streamingMsg.current.toolSteps = [...(streamingMsg.current.toolSteps || []), step]
-        setMessages(prev => [...prev.slice(0, -1), { ...streamingMsg.current! }])
+      const text = data.text || data.delta || ''
+      if (data.thinking) {
+        streamingMsg.current.thinking = (streamingMsg.current.thinking || '') + text
+      } else {
+        streamingMsg.current.content += text
+      }
+      setMessages(prev => [...prev.slice(0, -1), { ...streamingMsg.current! }])
+    }
+
+    const handleToolStep = (data: any) => {
+      if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
+      if (!streamingMsg.current) return
+
+      const step: ToolStep = { name: data.name || data.tool, input: data.input, output: data.output }
+      streamingMsg.current.toolSteps = [...(streamingMsg.current.toolSteps || []), step]
+      setMessages(prev => [...prev.slice(0, -1), { ...streamingMsg.current! }])
+      if (currentSessionId) setActivity(currentSessionId, 'running')
+    }
+
+    const handleRoundInfo = (data: any) => {
+      if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
+      setStreamingStatus('')
+    }
+
+    const handleStatus = (data: any) => {
+      if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
+      if (data.text) setStreamingStatus(data.text)
+    }
+
+    const handleWatsonStatus = (data: any) => {
+      if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
+      if (data.text) {
+        setStreamingStatus(data.text)
+        if (currentSessionId) setStatus(currentSessionId, data.text)
       }
     }
 
@@ -47,6 +81,7 @@ export default function ChatView() {
       if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
       currentRequestId.current = null
       streamingMsg.current = null
+      setStreamingStatus('')
       if (currentSessionId) {
         setActivity(currentSessionId, 'idle')
         await loadSession()
@@ -65,10 +100,16 @@ export default function ChatView() {
       setMessages(prev => [...prev, errorMsg])
       currentRequestId.current = null
       streamingMsg.current = null
+      setStreamingStatus('')
       if (currentSessionId) setActivity(currentSessionId, 'idle')
     }
 
+    api.onTextStart?.(handleTextStart)
     api.onToken?.(handleToken)
+    api.onToolStep?.(handleToolStep)
+    api.onRoundInfo?.(handleRoundInfo)
+    api.onStatus?.(handleStatus)
+    api.onWatsonStatus?.(handleWatsonStatus)
     api.onChatDone?.(handleDone)
     api.onChatError?.(handleError)
   }, [currentSessionId])
@@ -117,7 +158,7 @@ export default function ChatView() {
           </button>
         </div>
       </div>
-      <MessageList messages={messages} sessionId={currentSessionId || ''} />
+      <MessageList messages={messages} sessionId={currentSessionId || ''} streamingStatus={streamingStatus} />
       <InputBar sessionId={currentSessionId} onSend={handleSend} />
       <SettingsPanel visible={showSettings} onClose={() => setShowSettings(false)} />
     </div>

@@ -20,6 +20,7 @@ export interface Message {
   timestamp: number
   sender?: string
   workspaceId?: string
+  workspacePath?: string
   avatar?: string
   toolSteps?: ToolStep[]
   thinking?: string

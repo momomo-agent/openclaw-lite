@@ -7,7 +7,7 @@ import ChatView from './components/ChatView'
 import './styles/global.css'
 
 function AppContent() {
-  const { setSessions, setWorkspaces, setActivity, setStatus } = useAppState()
+  const { setSessions, setWorkspaces, setActivity, setStatus, setUserProfile } = useAppState()
   const api = useIPC()
   const { setTheme } = useTheme()
 
@@ -24,6 +24,9 @@ function AppContent() {
 
     const config = await api.getConfig()
     setTheme(config?.theme || 'light')
+
+    const profile = await api.getUserProfile()
+    if (profile) setUserProfile(profile)
 
     // Listen to status updates
     api.onWatsonStatus?.((data: any) => {

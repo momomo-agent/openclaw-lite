@@ -1,5 +1,5 @@
 import { createContext, useContext, ReactNode, useState } from 'react'
-import { Session, Workspace, ActivityLevel } from '../types'
+import { Session, Workspace, ActivityLevel, UserProfile } from '../types'
 
 interface AppState {
   currentSessionId: string | null
@@ -7,6 +7,7 @@ interface AppState {
   workspaces: Workspace[]
   activityState: Map<string, ActivityLevel>
   aiStatus: Map<string, string>
+  userProfile: UserProfile | null
 }
 
 interface AppContextType extends AppState {
@@ -15,6 +16,7 @@ interface AppContextType extends AppState {
   setWorkspaces: (workspaces: Workspace[]) => void
   setActivity: (sessionId: string, level: ActivityLevel) => void
   setStatus: (sessionId: string, text: string) => void
+  setUserProfile: (profile: UserProfile) => void
 }
 
 const AppContext = createContext<AppContextType | null>(null)
@@ -25,6 +27,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [activityState, setActivityState] = useState<Map<string, ActivityLevel>>(new Map())
   const [aiStatus, setAiStatus] = useState<Map<string, string>>(new Map())
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
 
   const setActivity = (sessionId: string, level: ActivityLevel) => {
     setActivityState(prev => new Map(prev).set(sessionId, level))
@@ -40,6 +43,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       sessions, setSessions,
       workspaces, setWorkspaces,
       activityState, aiStatus,
+      userProfile, setUserProfile,
       setActivity, setStatus
     }}>
       {children}
