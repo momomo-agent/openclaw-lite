@@ -1,31 +1,100 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { useAppState } from '../store'
 
 interface InputBarProps {
   sessionId: string | null
   onSend: (text: string, files: File[]) => void
 }
 
-export default function InputBar({ onSend }: InputBarProps) {
+export default function InputBar({ sessionId, onSend }: InputBarProps) {
+  const { workspaces } = useAppState()
   const [text, setText] = useState('')
   const [files, setFiles] = useState<File[]>([])
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // F229: Draft per session
+  const drafts = useRef<Map<string, { text: string; files: File[] }>>(new Map())
+  const prevSessionId = useRef<string | null>(null)
+
+  useEffect(() => {
+    // Save draft for previous session
+    if (prevSessionId.current && (text || files.length)) {
+      drafts.current.set(prevSessionId.current, { text, files })
+    }
+    // Restore draft for new session
+    if (sessionId) {
+      const draft = drafts.current.get(sessionId)
+      setText(draft?.text || '')
+      setFiles(draft?.files || [])
+      drafts.current.delete(sessionId)
+    } else {
+      setText('')
+      setFiles([])
+    }
+    prevSessionId.current = sessionId
+  }, [sessionId])
+
+  // F224: @mention autocomplete
+  const [mentionOpen, setMentionOpen] = useState(false)
+  const [mentionFilter, setMentionFilter] = useState('')
+  const [mentionIdx, setMentionIdx] = useState(0)
+  const mentionStartPos = useRef(-1)
+
+  const agentNames = workspaces.map(w => w.identity?.name || w.id)
+
+  const filteredMentions = mentionFilter
+    ? agentNames.filter(n => n.toLowerCase().includes(mentionFilter.toLowerCase()))
+    : agentNames
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value
+    const pos = e.target.selectionStart
+    setText(val)
+
+    // Check for @ trigger
+    const beforeCursor = val.slice(0, pos)
+    const atIdx = beforeCursor.lastIndexOf('@')
+    if (atIdx >= 0 && (atIdx === 0 || /\s/.test(beforeCursor[atIdx - 1]))) {
+      const query = beforeCursor.slice(atIdx + 1)
+      if (!query.includes(' ')) {
+        mentionStartPos.current = atIdx
+        setMentionFilter(query)
+        setMentionOpen(true)
+        setMentionIdx(0)
+        return
+      }
+    }
+    setMentionOpen(false)
+  }
+
+  const insertMention = useCallback((name: string) => {
+    const start = mentionStartPos.current
+    if (start < 0) return
+    const after = text.slice(textareaRef.current?.selectionStart || text.length)
+    setText(text.slice(0, start) + '@' + name + ' ' + after)
+    setMentionOpen(false)
+    textareaRef.current?.focus()
+  }, [text])
 
   const handleSend = () => {
     if (!text.trim() && files.length === 0) return
     onSend(text, files)
     setText('')
     setFiles([])
+    // Clear draft
+    if (sessionId) drafts.current.delete(sessionId)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (mentionOpen && filteredMentions.length > 0) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIdx(i => Math.min(i + 1, filteredMentions.length - 1)); return }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setMentionIdx(i => Math.max(i - 1, 0)); return }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); insertMention(filteredMentions[mentionIdx]); return }
+      if (e.key === 'Escape') { setMentionOpen(false); return }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
-    }
-  }
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setFiles(Array.from(e.target.files))
     }
   }
 
@@ -42,6 +111,27 @@ export default function InputBar({ onSend }: InputBarProps) {
             ))}
           </div>
         )}
+        {/* F224: Mention dropdown */}
+        {mentionOpen && filteredMentions.length > 0 && (
+          <div style={{
+            position: 'absolute', bottom: '100%', left: 12, marginBottom: 4,
+            background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+            borderRadius: 6, padding: '4px 0', minWidth: 160, zIndex: 100,
+            boxShadow: '0 4px 12px rgba(0,0,0,.3)'
+          }}>
+            {filteredMentions.map((name, i) => (
+              <div key={name}
+                onClick={() => insertMention(name)}
+                style={{
+                  padding: '6px 12px', cursor: 'pointer', fontSize: 13,
+                  background: i === mentionIdx ? 'var(--accent-dim)' : 'transparent',
+                  color: 'var(--text-primary)'
+                }}>
+                @{name}
+              </div>
+            ))}
+          </div>
+        )}
         <div className="input-bar">
           <button className="icon-btn attach-btn" onClick={() => document.getElementById('fileInput')?.click()}>
             <span className="ic">
@@ -50,10 +140,11 @@ export default function InputBar({ onSend }: InputBarProps) {
               </svg>
             </span>
           </button>
-          <input type="file" id="fileInput" style={{ display: 'none' }} multiple onChange={handleFileChange} />
+          <input type="file" id="fileInput" style={{ display: 'none' }} multiple onChange={(e) => e.target.files && setFiles(prev => [...prev, ...Array.from(e.target.files!)])} />
           <textarea
+            ref={textareaRef}
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={handleChange}
             onKeyDown={handleKeyDown}
             placeholder="Ask anything... (@name to target)"
             rows={1}

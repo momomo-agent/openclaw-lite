@@ -970,14 +970,14 @@
     "id": "F220",
     "category": "ux",
     "description": "React: 图片头像系统（MessageItem + Sidebar 对齐 _renderAvatar）",
-    "passes": false,
+    "passes": true,
     "milestone": "M36"
   },
   {
     "id": "F221",
     "category": "core",
     "description": "React: Streaming 完整对齐（独立事件 + inline status + thinking）",
-    "passes": false,
+    "passes": true,
     "milestone": "M36"
   },
   {
@@ -1012,7 +1012,7 @@
     "id": "F226",
     "category": "core",
     "description": "React: User Profile 系统",
-    "passes": false,
+    "passes": true,
     "milestone": "M36"
   },
   {

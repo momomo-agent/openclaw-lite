@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Session, Workspace } from '../types'
 import { useAppState } from '../store'
 import { useIPC } from '../hooks/useIPC'
+import { Avatar } from './Avatar'
 
 interface SessionItemProps {
   session: Session
@@ -10,15 +11,6 @@ interface SessionItemProps {
   onClick: () => void
   onContextMenu: (e: React.MouseEvent) => void
 }
-
-const BotIcon = () => (
-  <span className="ic">
-    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/>
-      <path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>
-    </svg>
-  </span>
-)
 
 const GroupIcon = () => (
   <span className="ic">
@@ -35,18 +27,20 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu }: 
   const statusText = aiStatus.get(session.id) || ''
 
   const isGroup = (session.participants?.length || 0) > 1
-  // Find workspace: try participants first, then workspaceId from listAllSessions
   const wsId = session.participants?.[0] || session.workspaceId
   const ws = wsId ? workspaces.find(w => w.id === wsId) : workspaces[0]
 
-  // Avatar: group icon, workspace PNG, or bot SVG
-  let avatarEl: React.ReactNode = <BotIcon />
+  let avatarEl: React.ReactNode
   if (isGroup) {
     avatarEl = <GroupIcon />
-  } else if (ws?.identity?.avatar?.includes('.') && ws?.path) {
-    avatarEl = <img src={`file://${ws.path}/.paw/${ws.identity.avatar}`} className="avatar-img" alt="" />
-  } else if (ws?.identity?.avatar) {
-    avatarEl = <>{ws.identity.avatar}</>
+  } else {
+    avatarEl = (
+      <Avatar
+        raw={ws?.identity?.avatar}
+        role="assistant"
+        wsPath={ws?.path}
+      />
+    )
   }
 
   const isRunning = activity === 'thinking' || activity === 'running' || activity === 'tool'
@@ -86,10 +80,42 @@ function formatTime(ts?: number): string {
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
 
+// F225: Context menu
+interface ContextMenuState {
+  visible: boolean
+  x: number
+  y: number
+  sessionId: string | null
+}
+
 export default function Sidebar() {
   const { sessions, workspaces, currentSessionId, setCurrentSessionId, setSessions } = useAppState()
   const api = useIPC()
   const [sidebarVisible, setSidebarVisible] = useState(true)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [ctxMenu, setCtxMenu] = useState<ContextMenuState>({ visible: false, x: 0, y: 0, sessionId: null })
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const [renameText, setRenameText] = useState('')
+
+  // F232: Cmd+Shift+S toggle sidebar
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey && e.shiftKey && e.key === 's') {
+        e.preventDefault()
+        setSidebarVisible(v => !v)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
+  // Close context menu on click outside
+  useEffect(() => {
+    if (!ctxMenu.visible) return
+    const close = () => setCtxMenu(prev => ({ ...prev, visible: false }))
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [ctxMenu.visible])
 
   const handleNewSession = async () => {
     const result = await api.createSession({})
@@ -99,6 +125,44 @@ export default function Sidebar() {
       setSessions(sessions)
     }
   }
+
+  const handleContextMenu = (e: React.MouseEvent, sessionId: string) => {
+    e.preventDefault()
+    setCtxMenu({ visible: true, x: e.clientX, y: e.clientY, sessionId })
+  }
+
+  const handleRename = (id: string) => {
+    const session = sessions.find(s => s.id === id)
+    setRenameText(session?.title || '')
+    setRenaming(id)
+    setCtxMenu(prev => ({ ...prev, visible: false }))
+  }
+
+  const submitRename = async () => {
+    if (!renaming || !renameText.trim()) return
+    await api.renameSession(renaming, renameText.trim())
+    setRenaming(null)
+    const updated = await api.listSessions()
+    setSessions(updated)
+  }
+
+  const handleDelete = async (id: string) => {
+    setCtxMenu(prev => ({ ...prev, visible: false }))
+    await api.deleteSession(id)
+    if (currentSessionId === id) setCurrentSessionId(null)
+    const updated = await api.listSessions()
+    setSessions(updated)
+  }
+
+  const handleExport = async (id: string) => {
+    setCtxMenu(prev => ({ ...prev, visible: false }))
+    await api.exportSession(id)
+  }
+
+  // F232: Filter sessions
+  const filtered = searchQuery
+    ? sessions.filter(s => s.title?.toLowerCase().includes(searchQuery.toLowerCase()))
+    : sessions
 
   return (
     <div className={`sidebar ${!sidebarVisible ? 'hidden' : ''}`}>
@@ -113,22 +177,67 @@ export default function Sidebar() {
           </span>
         </button>
       </div>
+      {/* F232: Search */}
+      <div style={{ padding: '0 8px 4px' }}>
+        <input
+          type="text"
+          className="session-search"
+          placeholder="搜索对话..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          style={{ width: '100%', padding: '4px 8px', fontSize: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', outline: 'none' }}
+        />
+      </div>
       <div className="session-list">
-        {sessions.map(s => (
-          <SessionItem
-            key={s.id}
-            session={s}
-            workspaces={workspaces}
-            isActive={s.id === currentSessionId}
-            onClick={() => setCurrentSessionId(s.id)}
-            onContextMenu={(e) => {
-              e.preventDefault()
-              // Context menu logic
-            }}
-          />
+        {filtered.map(s => (
+          renaming === s.id ? (
+            <div key={s.id} className="session-item active" style={{ padding: '8px 12px' }}>
+              <input
+                autoFocus
+                value={renameText}
+                onChange={(e) => setRenameText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') submitRename(); if (e.key === 'Escape') setRenaming(null) }}
+                onBlur={submitRename}
+                style={{ width: '100%', background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: 13, outline: 'none' }}
+              />
+            </div>
+          ) : (
+            <SessionItem
+              key={s.id}
+              session={s}
+              workspaces={workspaces}
+              isActive={s.id === currentSessionId}
+              onClick={() => setCurrentSessionId(s.id)}
+              onContextMenu={(e) => handleContextMenu(e, s.id)}
+            />
+          )
         ))}
       </div>
       <div className="sidebar-resize" id="sidebarResize"></div>
+
+      {/* F225: Context menu */}
+      {ctxMenu.visible && ctxMenu.sessionId && (
+        <div
+          className="context-menu"
+          style={{ position: 'fixed', left: ctxMenu.x, top: ctxMenu.y, zIndex: 9999,
+            background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6,
+            padding: '4px 0', minWidth: 140, boxShadow: '0 4px 12px rgba(0,0,0,.3)' }}
+        >
+          <div className="ctx-item" style={{ padding: '6px 16px', cursor: 'pointer', fontSize: 13 }}
+            onClick={() => handleRename(ctxMenu.sessionId!)}>
+            ✏️ 重命名
+          </div>
+          <div className="ctx-item" style={{ padding: '6px 16px', cursor: 'pointer', fontSize: 13 }}
+            onClick={() => handleExport(ctxMenu.sessionId!)}>
+            📤 导出
+          </div>
+          <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0' }} />
+          <div className="ctx-item" style={{ padding: '6px 16px', cursor: 'pointer', fontSize: 13, color: 'var(--status-error)' }}
+            onClick={() => handleDelete(ctxMenu.sessionId!)}>
+            🗑 删除
+          </div>
+        </div>
+      )}
     </div>
   )
 }

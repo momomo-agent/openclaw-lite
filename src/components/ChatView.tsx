@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useAppState } from '../store'
 import { useIPC } from '../hooks/useIPC'
 import { Message, ToolStep } from '../types'
@@ -7,7 +7,7 @@ import InputBar from './InputBar'
 import SettingsPanel from './SettingsPanel'
 
 export default function ChatView() {
-  const { currentSessionId, setActivity, setStatus } = useAppState()
+  const { currentSessionId, setActivity, setStatus, workspaces } = useAppState()
   const api = useIPC()
   const [messages, setMessages] = useState<Message[]>([])
   const [sessionTitle, setSessionTitle] = useState('New Chat')
@@ -15,13 +15,35 @@ export default function ChatView() {
   const [streamingStatus, setStreamingStatus] = useState('')
   const currentRequestId = useRef<string | null>(null)
   const streamingMsg = useRef<Message | null>(null)
+  const statusIsAiAuthored = useRef(false)
+
+  // F223: Session message cache — preserve messages when switching
+  const sessionCache = useRef<Map<string, { messages: Message[]; title: string }>>(new Map())
+
+  // F222: Delegate state
+  const delegateMsg = useRef<Message | null>(null)
 
   useEffect(() => {
     if (!currentSessionId) return
-    loadSession()
+    // Restore from cache if available, otherwise load from disk
+    const cached = sessionCache.current.get(currentSessionId)
+    if (cached) {
+      setMessages(cached.messages)
+      setSessionTitle(cached.title)
+    } else {
+      loadSession()
+    }
   }, [currentSessionId])
 
+  // Cache messages when they change
   useEffect(() => {
+    if (currentSessionId && messages.length > 0) {
+      sessionCache.current.set(currentSessionId, { messages, title: sessionTitle })
+    }
+  }, [messages, sessionTitle, currentSessionId])
+
+  useEffect(() => {
+    // --- Core streaming events ---
     const handleTextStart = (data: any) => {
       if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
       streamingMsg.current = {
@@ -30,17 +52,21 @@ export default function ChatView() {
         content: '',
         timestamp: Date.now(),
         toolSteps: [],
-        thinking: ''
+        thinking: '',
+        sender: data.agentName,
+        avatar: data.avatar,
+        workspacePath: data.wsPath
       }
-      setMessages(prev => [...prev, streamingMsg.current!])
       setStreamingStatus('Thinking...')
+      statusIsAiAuthored.current = false
+      setMessages(prev => [...prev, streamingMsg.current!])
     }
 
     const handleToken = (data: any) => {
       if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
       if (!streamingMsg.current) return
-
       const text = data.text || data.delta || ''
+      if (!text) return
       if (data.thinking) {
         streamingMsg.current.thinking = (streamingMsg.current.thinking || '') + text
       } else {
@@ -51,37 +77,107 @@ export default function ChatView() {
 
     const handleToolStep = (data: any) => {
       if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
-      if (!streamingMsg.current) return
-
-      const step: ToolStep = { name: data.name || data.tool, input: data.input, output: data.output }
-      streamingMsg.current.toolSteps = [...(streamingMsg.current.toolSteps || []), step]
-      setMessages(prev => [...prev.slice(0, -1), { ...streamingMsg.current! }])
+      const target = delegateMsg.current || streamingMsg.current
+      if (!target) return
+      const step: ToolStep = { name: data.name || data.tool, input: data.input, output: String(data.output).slice(0, 120) }
+      target.toolSteps = [...(target.toolSteps || []), step]
+      if (!statusIsAiAuthored.current) {
+        setStreamingStatus(`${data.name || data.tool}...`)
+      }
+      setMessages(prev => [...prev.slice(0, -1), { ...target }])
       if (currentSessionId) setActivity(currentSessionId, 'running')
     }
 
     const handleRoundInfo = (data: any) => {
       if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
-      setStreamingStatus('')
+      // Round done — don't clear status, let next text start or done handle it
     }
 
     const handleStatus = (data: any) => {
-      if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
-      if (data.text) setStreamingStatus(data.text)
+      if (data.state === 'done' || data.state === 'error') {
+        setStreamingStatus('')
+        statusIsAiAuthored.current = false
+      } else if (!statusIsAiAuthored.current && data.detail) {
+        setStreamingStatus(data.detail)
+      }
     }
 
     const handleWatsonStatus = (data: any) => {
-      if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
-      if (data.text) {
+      if (data.sessionId === currentSessionId && data.text) {
+        statusIsAiAuthored.current = true
         setStreamingStatus(data.text)
         if (currentSessionId) setStatus(currentSessionId, data.text)
       }
     }
 
+    // --- F222: Delegate events ---
+    const handleDelegateStart = (data: any) => {
+      if (data.sessionId && data.sessionId !== currentSessionId) return
+      const wsPath = data.workspaceId
+        ? workspaces.find(w => w.id === data.workspaceId)?.path
+        : undefined
+      delegateMsg.current = {
+        id: 'delegate-' + Date.now(),
+        role: 'assistant',
+        content: '',
+        timestamp: Date.now(),
+        sender: data.sender,
+        avatar: data.avatar,
+        workspacePath: wsPath,
+        toolSteps: [],
+        thinking: ''
+      }
+      setMessages(prev => [...prev, delegateMsg.current!])
+    }
+
+    const handleDelegateToken = (data: any) => {
+      if (!delegateMsg.current) return
+      if (data.sessionId && data.sessionId !== currentSessionId) return
+      const text = data.token || ''
+      if (!text) return
+      if (data.thinking) {
+        delegateMsg.current.thinking = (delegateMsg.current.thinking || '') + text
+      } else if (data.toolStep) {
+        // Tool step inside delegate — handled by handleToolStep
+      } else {
+        delegateMsg.current.content += text
+      }
+      setMessages(prev => [...prev.slice(0, -1), { ...delegateMsg.current! }])
+    }
+
+    const handleDelegateEnd = (data: any) => {
+      if (!delegateMsg.current) return
+      if (data.fullText) delegateMsg.current.content = data.fullText
+      setMessages(prev => [...prev.slice(0, -1), { ...delegateMsg.current! }])
+      delegateMsg.current = null
+    }
+
+    // --- F227: Claude Code events ---
+    const handleCcStatus = (data: any) => {
+      if (data.status === 'running') {
+        setStreamingStatus(`Claude Code: ${data.task || 'working'}...`)
+      } else if (data.status === 'done') {
+        setStreamingStatus('')
+      } else if (data.status === 'error') {
+        setStreamingStatus(`CC error: ${data.error || 'unknown'}`)
+      }
+    }
+
+    const handleCcOutput = (data: any) => {
+      // CC output appended to current streaming message
+      if (!streamingMsg.current) return
+      streamingMsg.current.content += data.chunk || ''
+      setMessages(prev => [...prev.slice(0, -1), { ...streamingMsg.current! }])
+    }
+
+    // --- Done / Error ---
     const handleDone = async (data: any) => {
       if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
       currentRequestId.current = null
       streamingMsg.current = null
+      delegateMsg.current = null
       setStreamingStatus('')
+      statusIsAiAuthored.current = false
       if (currentSessionId) {
         setActivity(currentSessionId, 'idle')
         await loadSession()
@@ -90,26 +186,33 @@ export default function ChatView() {
 
     const handleError = (data: any) => {
       if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
-      const errorMsg: Message = {
+      setMessages(prev => [...prev, {
         id: 'error-' + Date.now(),
         role: 'error',
         content: data.error || 'An error occurred',
         timestamp: Date.now(),
         error: data.error
-      }
-      setMessages(prev => [...prev, errorMsg])
+      }])
       currentRequestId.current = null
       streamingMsg.current = null
+      delegateMsg.current = null
       setStreamingStatus('')
+      statusIsAiAuthored.current = false
       if (currentSessionId) setActivity(currentSessionId, 'idle')
     }
 
+    // Register all listeners
     api.onTextStart?.(handleTextStart)
     api.onToken?.(handleToken)
     api.onToolStep?.(handleToolStep)
     api.onRoundInfo?.(handleRoundInfo)
     api.onStatus?.(handleStatus)
     api.onWatsonStatus?.(handleWatsonStatus)
+    api.onDelegateStart?.(handleDelegateStart)
+    api.onDelegateToken?.(handleDelegateToken)
+    api.onDelegateEnd?.(handleDelegateEnd)
+    api.onCcStatus?.(handleCcStatus)
+    api.onCcOutput?.(handleCcOutput)
     api.onChatDone?.(handleDone)
     api.onChatError?.(handleError)
   }, [currentSessionId])
@@ -125,21 +228,33 @@ export default function ChatView() {
 
   const handleSend = async (text: string, files: File[]) => {
     if (!currentSessionId) return
-
-    const userMsg: Message = {
+    setMessages(prev => [...prev, {
       id: Date.now().toString(),
       role: 'user',
       content: text,
       timestamp: Date.now()
-    }
-    setMessages(prev => [...prev, userMsg])
-
+    }])
     const requestId = Date.now().toString()
     currentRequestId.current = requestId
     setActivity(currentSessionId, 'thinking')
-
     await api.chat({ sessionId: currentSessionId, message: text, requestId, attachments: files })
   }
+
+  // F228: Retry last message
+  const handleRetry = useCallback(async () => {
+    if (!currentSessionId) return
+    // Find last user message
+    let lastUserIdx = -1
+    for (let i = messages.length - 1; i >= 0; i--) { if (messages[i].role === 'user') { lastUserIdx = i; break } }
+    if (lastUserIdx < 0) return
+    const lastUserMsg = messages[lastUserIdx]
+    // Remove everything after last user message
+    setMessages(prev => prev.slice(0, lastUserIdx + 1))
+    const requestId = Date.now().toString()
+    currentRequestId.current = requestId
+    setActivity(currentSessionId, 'thinking')
+    await api.chat({ sessionId: currentSessionId, message: lastUserMsg.content, requestId })
+  }, [currentSessionId, messages])
 
   return (
     <div className="chat-main">
@@ -158,7 +273,12 @@ export default function ChatView() {
           </button>
         </div>
       </div>
-      <MessageList messages={messages} sessionId={currentSessionId || ''} streamingStatus={streamingStatus} />
+      <MessageList
+        messages={messages}
+        sessionId={currentSessionId || ''}
+        streamingStatus={streamingStatus}
+        onRetry={handleRetry}
+      />
       <InputBar sessionId={currentSessionId} onSend={handleSend} />
       <SettingsPanel visible={showSettings} onClose={() => setShowSettings(false)} />
     </div>
