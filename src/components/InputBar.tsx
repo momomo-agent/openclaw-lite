@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState } from 'react'
 
 interface InputBarProps {
   sessionId: string | null
@@ -8,14 +8,6 @@ interface InputBarProps {
 export default function InputBar({ onSend }: InputBarProps) {
   const [text, setText] = useState('')
   const [files, setFiles] = useState<File[]>([])
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
-      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 120) + 'px'
-    }
-  }, [text])
 
   const handleSend = () => {
     if (!text.trim() && files.length === 0) return
@@ -60,7 +52,6 @@ export default function InputBar({ onSend }: InputBarProps) {
           </button>
           <input type="file" id="fileInput" style={{ display: 'none' }} multiple onChange={handleFileChange} />
           <textarea
-            ref={textareaRef}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}

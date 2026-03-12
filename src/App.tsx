@@ -23,7 +23,7 @@ function AppContent() {
     setSessions(sessions)
 
     const config = await api.getConfig()
-    setTheme(config?.theme || 'default')
+    setTheme(config?.theme || 'light')
 
     // Listen to status updates
     api.onWatsonStatus?.((data: any) => {

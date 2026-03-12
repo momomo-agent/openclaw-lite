@@ -11,6 +11,24 @@ interface SessionItemProps {
   onContextMenu: (e: React.MouseEvent) => void
 }
 
+const BotIcon = () => (
+  <span className="ic">
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/>
+      <path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>
+    </svg>
+  </span>
+)
+
+const GroupIcon = () => (
+  <span className="ic">
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+    </svg>
+  </span>
+)
+
 function SessionItem({ session, workspaces, isActive, onClick, onContextMenu }: SessionItemProps) {
   const { activityState, aiStatus } = useAppState()
   const activity = activityState.get(session.id) || 'idle'
@@ -19,11 +37,14 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu }: 
   const isGroup = (session.participants?.length || 0) > 1
   const ws = workspaces.find(w => w.id === session.participants?.[0])
 
-  let avatarContent = '🤖'
+  // Avatar: group icon, workspace PNG, or bot SVG
+  let avatarEl: React.ReactNode = <BotIcon />
   if (isGroup) {
-    avatarContent = '👥'
+    avatarEl = <GroupIcon />
+  } else if (ws?.identity?.avatar?.includes('.') && ws?.path) {
+    avatarEl = <img src={`file://${ws.path}/.paw/${ws.identity.avatar}`} className="avatar-img" alt="" />
   } else if (ws?.identity?.avatar) {
-    avatarContent = ws.identity.avatar
+    avatarEl = <>{ws.identity.avatar}</>
   }
 
   const isRunning = activity === 'thinking' || activity === 'running' || activity === 'tool'
@@ -35,7 +56,7 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu }: 
       onClick={onClick}
       onContextMenu={onContextMenu}
     >
-      <div className="session-avatar">{avatarContent}</div>
+      <div className="session-avatar">{avatarEl}</div>
       <div className="session-body">
         <div className="session-row-top">
           <span className="session-title">{session.title}</span>

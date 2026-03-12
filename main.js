@@ -371,7 +371,14 @@ function createWindow() {
   // Load from Vite dev server in dev mode, built files in production
   const isDev = process.argv.includes('--dev') || process.env.NODE_ENV === 'development'
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5174/src/index.html')
+    // Try common Vite ports (sync probe via loadURL chain)
+    mainWindow.loadURL('http://localhost:5173/src/index.html').catch(() =>
+      mainWindow.loadURL('http://localhost:5174/src/index.html').catch(() =>
+        mainWindow.loadURL('http://localhost:5175/src/index.html').catch(() =>
+          mainWindow.loadFile('renderer/index.html')
+        )
+      )
+    )
     mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadFile('renderer/index.html')
