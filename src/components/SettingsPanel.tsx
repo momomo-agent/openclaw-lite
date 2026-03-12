@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useIPC } from '../hooks/useIPC'
+import { useAppState } from '../store'
 import { Config } from '../types'
 
 interface SettingsPanelProps {
@@ -25,13 +26,13 @@ const THEMES: ThemeDef[] = [
   { value: 'default', label: 'Dark', bg: '#0a0a0a', accent: '#fbbf24' },
   { value: 'codex', label: 'Codex', bg: '#f8faf8', accent: '#10a37f' },
   { value: 'claude', label: 'Claude', bg: '#faf8f6', accent: '#da7756' },
-  { value: 'nerv', label: 'NERV', bg: '#0a0008', accent: '#ff3030' },
 ]
 
 const AVATAR_PRESETS = [0, 1, 2, 3, 4, 5]
 
 export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) {
   const api = useIPC()
+  const { setUserProfile } = useAppState()
 
   // Config state
   const [config, setConfig] = useState<Config>({})
@@ -167,7 +168,8 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
       if (pendingAvatarRef.current) {
         Object.assign(profileOpts, pendingAvatarRef.current)
       }
-      await api.setUserProfile(profileOpts)
+      const updatedProfile = await api.setUserProfile(profileOpts)
+      if (updatedProfile) setUserProfile(updatedProfile)
 
       // Reconnect MCP
       if (api.mcpReconnect) {

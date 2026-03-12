@@ -266,11 +266,30 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
     setGroupSelected(new Set())
   }
 
+  const [closing, setClosing] = useState(false)
+  const animatedClose = () => { setClosing(true) }
+  const [editorClosing, setEditorClosing] = useState(false)
+  const closeEditor = () => { setEditorClosing(true) }
+
+  // Smooth height animation
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const [bodyHeight, setBodyHeight] = useState<number | undefined>(undefined)
+  useEffect(() => {
+    if (!bodyRef.current) return
+    const ro = new ResizeObserver(() => {
+      if (bodyRef.current) setBodyHeight(bodyRef.current.scrollHeight)
+    })
+    ro.observe(bodyRef.current)
+    return () => ro.disconnect()
+  }, [])
+
   return (
     <>
       {/* Agent list panel */}
-      <div className="overlay-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
-        <div className="new-chat-panel">
+      <div className={`overlay-backdrop${closing ? ' closing' : ''}`}
+        onClick={(e) => { if (e.target === e.currentTarget) animatedClose() }}>
+        <div className={`new-chat-panel${closing ? ' closing' : ''}`}
+          onAnimationEnd={() => { if (closing) { setClosing(false); onClose() } }}>
           <div className="people-header">
             <span>新建对话</span>
             <div style={{ display: 'flex', gap: 4 }}>
@@ -278,10 +297,11 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
                 onClick={() => managing ? exitManaging() : setManaging(true)}>
                 {managing ? '完成' : '管理'}
               </button>
-              <button className="icon-btn" onClick={onClose}><IconClose /></button>
+              <button className="icon-btn" onClick={animatedClose}><IconClose /></button>
             </div>
           </div>
-          <div className="ncs-body">
+          <div className="ncs-body" style={bodyHeight !== undefined ? { height: bodyHeight, transition: 'height 0.2s ease' } : {}}>
+            <div ref={bodyRef}>
             {workspaces.map(ws => (
               <div key={ws.id} className="ncs-agent-row"
                 onClick={() => {
@@ -351,15 +371,17 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
                   </div>
                 </div>
             )}
+            </div>
           </div>
         </div>
       </div>
 
       {/* Agent editor overlay (SetupScreen-style) */}
-      {editorMode && (
-        <div className="overlay-backdrop agent-editor-backdrop"
-          onClick={(e) => { if (e.target === e.currentTarget) setEditorMode(null) }}>
-          <div className="agent-editor">
+      {(editorMode || editorClosing) && (
+        <div className={`overlay-backdrop agent-editor-backdrop${editorClosing ? ' closing' : ''}`}
+          onClick={(e) => { if (e.target === e.currentTarget) closeEditor() }}>
+          <div className={`agent-editor${editorClosing ? ' closing' : ''}`}
+            onAnimationEnd={() => { if (editorClosing) { setEditorClosing(false); setEditorMode(null) } }}>
             <div style={{ textAlign: 'center' }}>
               <h1 style={{ fontSize: 21, fontWeight: 600, margin: '0 0 8px', letterSpacing: '-0.01em' }}>
                 {editorMode === 'create' ? '创建新助手' : '编辑助手'}
@@ -397,13 +419,13 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
             </button>
 
             <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-              <button onClick={() => setEditorMode(null)} style={editorLinkStyle}>
+              <button onClick={closeEditor} style={editorLinkStyle}>
                 取消
               </button>
               {editorMode === 'create' && (
                 <>
                   <span style={{ color: 'var(--border-muted)', fontSize: 12 }}>|</span>
-                  <button onClick={() => { setEditorMode(null); handleAddExisting() }} style={editorLinkStyle}>
+                  <button onClick={() => { closeEditor(); handleAddExisting() }} style={editorLinkStyle}>
                     我已有 workspace
                   </button>
                 </>

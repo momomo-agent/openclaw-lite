@@ -14,7 +14,6 @@ export default function ChatView() {
   const { currentSessionId, setCurrentSessionId, sessions, setSessions, setActivity, setStatus, workspaces, userProfile, sidebarVisible, setSidebarVisible } = useAppState()
   const api = useIPC()
   const [messages, setMessages] = useState<Message[]>([])
-  const [sessionTitle, setSessionTitle] = useState('New Chat')
   const [showSettings, setShowSettings] = useState(false)
   const [showMembers, setShowMembers] = useState(false)
   const [streamingStatus, setStreamingStatus] = useState('')
@@ -22,12 +21,13 @@ export default function ChatView() {
   const streamingMsg = useRef<Message | null>(null)
   const statusIsAiAuthored = useRef(false)
 
-  // Derive participants from sessions store (always live, never stale)
+  // Derive from sessions store (always live, never stale)
   const currentSession = sessions.find(s => s.id === currentSessionId)
+  const sessionTitle = currentSession?.title || 'New Chat'
   const sessionParticipants = currentSession?.participants || []
 
   // F223: Session message cache
-  const sessionCache = useRef<Map<string, { messages: Message[]; title: string }>>(new Map())
+  const sessionCache = useRef<Map<string, Message[]>>(new Map())
 
   // F222/F242: Delegate state
   const delegateMsg = useRef<Message | null>(null)
@@ -41,8 +41,7 @@ export default function ChatView() {
     if (!currentSessionId) return
     const cached = sessionCache.current.get(currentSessionId)
     if (cached) {
-      setMessages(cached.messages)
-      setSessionTitle(cached.title)
+      setMessages(cached)
     } else {
       loadSession()
     }
@@ -50,7 +49,7 @@ export default function ChatView() {
 
   useEffect(() => {
     if (currentSessionId && messages.length > 0) {
-      sessionCache.current.set(currentSessionId, { messages, title: sessionTitle })
+      sessionCache.current.set(currentSessionId, messages)
     }
   }, [messages, sessionTitle, currentSessionId])
 
@@ -341,7 +340,6 @@ export default function ChatView() {
             }
           }
           setMessages(dbMessages)
-          setSessionTitle(formatSessionTitle(session))
           // F239: Auto-generate title from first user message
           if (session.title === 'New Chat' || session.title === '新对话') {
             const firstUser = dbMessages.find((m: any) => m.role === 'user')
@@ -350,11 +348,11 @@ export default function ChatView() {
               if (title.length > 30) title = title.slice(0, 30) + '...'
               if (!title) title = (firstUser.content || '').slice(0, 30).trim() || 'New Chat'
               await api.renameSession(doneSessionId, title)
-              setSessionTitle(formatSessionTitle({ ...session, title }))
-              const updated = await api.listSessions()
-              setSessions(updated)
             }
           }
+          // Refresh sessions to pick up title changes
+          const updated = await api.listSessions()
+          setSessions(updated)
         } catch (err) {
           console.error('[ChatView] handleDone loadSession error:', err)
         }
@@ -399,23 +397,11 @@ export default function ChatView() {
     }
   }, [currentSessionId])
 
-  // Format header title: main shows "wsName · sessionTitle" for sessions with participants
-  const formatSessionTitle = (session: any): string => {
-    let title = session.title
-    if (session.mode === 'coding') title = `⌨ ${title}`
-    if (session.participants?.length > 0) {
-      const ws = workspaces.find(w => w.id === session.participants[0])
-      if (ws?.identity?.name) title = `${ws.identity.name} · ${title}`
-    }
-    return title
-  }
-
   const loadSession = async () => {
     if (!currentSessionId) return
     const session = await api.loadSession(currentSessionId)
     if (session) {
       setMessages(session.messages || [])
-      setSessionTitle(formatSessionTitle(session))
     }
   }
 
