@@ -365,6 +365,7 @@ async function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      webSecurity: !isDev, // Allow file:// in dev for workspace avatars
     },
   })
 
@@ -373,7 +374,7 @@ async function createWindow() {
   if (isDev) {
     // Wait for Vite to be ready, then load
     const http = require('http')
-    const waitForVite = (port, retries = 30) => new Promise((resolve) => {
+    const waitForVite = (port, retries = 10) => new Promise((resolve) => {
       const check = (n) => {
         if (n <= 0) return resolve(null)
         const req = http.get(`http://localhost:${port}/src/index.html`, (res) => {
