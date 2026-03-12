@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Session, Workspace } from '../types'
 import { useAppState } from '../store'
 import { useIPC } from '../hooks/useIPC'
 import { Avatar } from './Avatar'
+import { stripMarkdown } from '../utils/markdown'
 import NewChatSelector from './NewChatSelector'
 
 interface SessionItemProps {
@@ -13,15 +14,6 @@ interface SessionItemProps {
   onContextMenu: (e: React.MouseEvent) => void
 }
 
-const GroupIcon = () => (
-  <span className="ic">
-    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
-      <path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-    </svg>
-  </span>
-)
-
 function SessionItem({ session, workspaces, isActive, onClick, onContextMenu }: SessionItemProps) {
   const { activityState, aiStatus } = useAppState()
   const activity = activityState.get(session.id) || 'idle'
@@ -31,9 +23,10 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu }: 
   const wsId = session.participants?.[0] || session.workspaceId
   const ws = wsId ? workspaces.find(w => w.id === wsId) : workspaces[0]
 
+  // F251: Group sessions use group.png
   let avatarEl: React.ReactNode
   if (isGroup) {
-    avatarEl = <GroupIcon />
+    avatarEl = <img src="avatars/group.png" className="avatar-img" />
   } else {
     avatarEl = (
       <Avatar
@@ -45,7 +38,22 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu }: 
   }
 
   const isRunning = activity === 'thinking' || activity === 'running' || activity === 'tool'
-  const subtitle = isRunning ? (statusText || '思考中...') : (session.lastMessage || '')
+
+  // F251: Sender prefix for group chat + stripMd
+  let subtitle = ''
+  if (isRunning) {
+    subtitle = statusText || '思考中...'
+  } else if (session.lastMessage) {
+    const stripped = stripMarkdown(session.lastMessage)
+    if (isGroup && session.lastSender) {
+      subtitle = `${session.lastSender}: ${stripped}`
+    } else if (isGroup && session.lastSenderWsId) {
+      const senderWs = workspaces.find(w => w.id === session.lastSenderWsId)
+      subtitle = senderWs?.identity?.name ? `${senderWs.identity.name}: ${stripped}` : stripped
+    } else {
+      subtitle = stripped
+    }
+  }
 
   return (
     <div
@@ -98,6 +106,43 @@ export default function Sidebar() {
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameText, setRenameText] = useState('')
   const [showNewChat, setShowNewChat] = useState(false)
+
+  // F250: Sidebar resize
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = localStorage.getItem('sidebarWidth')
+    return saved ? parseInt(saved) : 260
+  })
+  const resizing = useRef(false)
+  const sidebarRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!resizing.current) return
+      const w = Math.min(400, Math.max(180, e.clientX))
+      setSidebarWidth(w)
+    }
+    const handleMouseUp = () => {
+      if (resizing.current) {
+        resizing.current = false
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+        localStorage.setItem('sidebarWidth', String(sidebarRef.current?.offsetWidth || 260))
+      }
+    }
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [])
+
+  const handleResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault()
+    resizing.current = true
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }
 
   // F232: Cmd+Shift+S toggle sidebar
   useEffect(() => {
@@ -186,7 +231,11 @@ export default function Sidebar() {
     : sessions
 
   return (
-    <div className={`sidebar ${!sidebarVisible ? 'hidden' : ''}`}>
+    <div
+      ref={sidebarRef}
+      className={`sidebar ${!sidebarVisible ? 'hidden' : ''}`}
+      style={sidebarVisible ? { width: sidebarWidth, minWidth: sidebarWidth } : undefined}
+    >
       <div className="sidebar-header">
         <button className="icon-btn" onClick={handleNewSession}>+</button>
         <button className="icon-btn" onClick={() => setSidebarVisible(!sidebarVisible)}>
@@ -234,7 +283,8 @@ export default function Sidebar() {
           )
         ))}
       </div>
-      <div className="sidebar-resize" id="sidebarResize"></div>
+      {/* F250: Resize handle */}
+      <div className="sidebar-resize" onMouseDown={handleResizeStart}></div>
 
       {/* F225: Context menu */}
       {ctxMenu.visible && ctxMenu.sessionId && (

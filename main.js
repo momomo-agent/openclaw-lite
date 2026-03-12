@@ -392,11 +392,11 @@ async function createWindow() {
     if (port) {
       mainWindow.loadURL(`http://localhost:${port}/src/index.html`)
     } else {
-      mainWindow.loadFile('renderer/index.html')
+      mainWindow.loadFile('renderer/src/index.html')
     }
     mainWindow.webContents.openDevTools()
   } else {
-    mainWindow.loadFile('renderer/index.html')
+    mainWindow.loadFile('renderer/src/index.html')
   }
 
   mainWindow.webContents.on('console-message', (_, level, msg) => {

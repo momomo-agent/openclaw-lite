@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react'
 import { AppProvider, useAppState } from './store'
 import { useIPC } from './hooks/useIPC'
 import { useTheme } from './hooks/useTheme'
+import { setClawDir as setMarkdownClawDir } from './utils/markdown'
 import Sidebar from './components/Sidebar'
 import ChatView from './components/ChatView'
 import SetupScreen from './components/SetupScreen'
 import './styles/global.css'
 
 function AppContent() {
-  const { setSessions, setWorkspaces, setActivity, setStatus, setUserProfile, setCurrentSessionId } = useAppState()
+  const { setSessions, setWorkspaces, setActivity, setStatus, setUserProfile, setCurrentSessionId, setClawDir, setFeatureFlags } = useAppState()
   const api = useIPC()
   const { setTheme } = useTheme()
   const [ready, setReady] = useState(false)
@@ -41,6 +42,16 @@ function AppContent() {
 
     const ws = await api.listWorkspaces()
     setWorkspaces(ws)
+
+    // Set clawDir from first workspace for markdown image resolution
+    if (ws.length > 0 && ws[0].path) {
+      setClawDir(ws[0].path)
+      setMarkdownClawDir(ws[0].path)
+    }
+
+    // Load feature flags
+    const prefs = await api.getPrefs?.()
+    if (prefs?.featureFlags) setFeatureFlags(prefs.featureFlags)
 
     const sessions = await api.listSessions()
     setSessions(sessions)

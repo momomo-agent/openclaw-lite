@@ -8,6 +8,8 @@ interface AppState {
   activityState: Map<string, ActivityLevel>
   aiStatus: Map<string, string>
   userProfile: UserProfile | null
+  clawDir: string | null
+  featureFlags: Record<string, boolean>
 }
 
 interface AppContextType extends AppState {
@@ -17,6 +19,8 @@ interface AppContextType extends AppState {
   setActivity: (sessionId: string, level: ActivityLevel) => void
   setStatus: (sessionId: string, text: string) => void
   setUserProfile: (profile: UserProfile) => void
+  setClawDir: (dir: string | null) => void
+  setFeatureFlags: (flags: Record<string, boolean>) => void
 }
 
 const AppContext = createContext<AppContextType | null>(null)
@@ -28,6 +32,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activityState, setActivityState] = useState<Map<string, ActivityLevel>>(new Map())
   const [aiStatus, setAiStatus] = useState<Map<string, string>>(new Map())
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+  const [clawDir, setClawDir] = useState<string | null>(null)
+  const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({})
 
   const setActivity = (sessionId: string, level: ActivityLevel) => {
     setActivityState(prev => new Map(prev).set(sessionId, level))
@@ -44,6 +50,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       workspaces, setWorkspaces,
       activityState, aiStatus,
       userProfile, setUserProfile,
+      clawDir, setClawDir,
+      featureFlags, setFeatureFlags,
       setActivity, setStatus
     }}>
       {children}

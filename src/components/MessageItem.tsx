@@ -14,7 +14,7 @@ interface MessageItemProps {
 }
 
 export default function MessageItem({ message, isStreaming, statusText, userAvatarPath, onRetry }: MessageItemProps) {
-  const { workspaces } = useAppState()
+  const { workspaces, userProfile } = useAppState()
   const isUser = message.role === 'user'
   const isError = message.role === 'error'
   const isA2A = message.role === 'agent-to-agent'
@@ -22,10 +22,19 @@ export default function MessageItem({ message, isStreaming, statusText, userAvat
 
   const renderContent = (text: string) => linkifyPaths(renderMarkdown(text))
 
+  // F247: Image attachments on user messages
+  const attachments = (message as any).attachments as { name: string; type: string; url?: string }[] | undefined
+
   return (
     <div className={`msg-card ${message.role}${isError ? ' msg-error' : ''}`}>
       <div className="msg-avatar">
-        {isError ? <span>⚠️</span> : isA2A ? <span>💬</span> : (
+        {isError ? <span>⚠️</span> : isA2A ? (
+          <span className="ic">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+          </span>
+        ) : (
           <Avatar
             raw={message.avatar}
             role={isUser ? 'user' : 'assistant'}
@@ -37,7 +46,7 @@ export default function MessageItem({ message, isStreaming, statusText, userAvat
       <div className="msg-body">
         <div className="msg-header">
           <span className={`msg-name ${isUser ? 'user-name' : ''}${isA2A ? ' a2a-name' : ''}`}>
-            {message.sender || (isUser ? 'You' : isError ? 'Error' : 'Assistant')}
+            {message.sender || (isUser ? (userProfile?.userName || 'You') : isError ? 'Error' : 'Assistant')}
           </span>
           <span className="msg-time">
             {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -51,7 +60,11 @@ export default function MessageItem({ message, isStreaming, statusText, userAvat
             </details>
           )}
           {message.toolSteps && message.toolSteps.length > 0 && (
-            <ToolGroup steps={message.toolSteps} />
+            <ToolGroup
+              steps={message.toolSteps}
+              isStreaming={isStreaming}
+              roundPurpose={(message as any).roundPurpose}
+            />
           )}
           {isError ? (
             <>
@@ -66,10 +79,22 @@ export default function MessageItem({ message, isStreaming, statusText, userAvat
               )}
             </>
           ) : (
-            <div
-              className={`msg-content md-content${isA2A ? ' a2a-content' : ''}`}
-              dangerouslySetInnerHTML={{ __html: renderContent(message.content) }}
-            />
+            <>
+              {/* F247: Image attachments inline */}
+              {isUser && attachments && attachments.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+                  {attachments.filter(a => a.url).map((a, i) => (
+                    <img key={i} src={a.url} alt={a.name}
+                      style={{ maxWidth: 300, maxHeight: 200, borderRadius: 8, objectFit: 'contain' }}
+                    />
+                  ))}
+                </div>
+              )}
+              <div
+                className={`msg-content md-content${isA2A ? ' a2a-content' : ''}`}
+                dangerouslySetInnerHTML={{ __html: renderContent(message.content) }}
+              />
+            </>
           )}
           {isStreaming && statusText && (
             <div className="inline-status">

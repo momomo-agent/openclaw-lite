@@ -9,7 +9,7 @@ import TaskBar from './TaskBar'
 import SettingsPanel from './SettingsPanel'
 
 export default function ChatView() {
-  const { currentSessionId, setCurrentSessionId, setSessions, setActivity, setStatus, workspaces } = useAppState()
+  const { currentSessionId, setCurrentSessionId, setSessions, setActivity, setStatus, workspaces, userProfile } = useAppState()
   const api = useIPC()
   const [messages, setMessages] = useState<Message[]>([])
   const [sessionTitle, setSessionTitle] = useState('New Chat')
@@ -20,15 +20,18 @@ export default function ChatView() {
   const streamingMsg = useRef<Message | null>(null)
   const statusIsAiAuthored = useRef(false)
 
-  // F223: Session message cache — preserve messages when switching
+  // F223: Session message cache
   const sessionCache = useRef<Map<string, { messages: Message[]; title: string }>>(new Map())
 
-  // F222: Delegate state
+  // F222/F242: Delegate state
   const delegateMsg = useRef<Message | null>(null)
+  const pendingDelegateMsgs = useRef<Message[]>([])
+
+  // F243: CC output state
+  const [ccOutput, setCcOutput] = useState<{ task: string; lines: string[]; running: boolean } | null>(null)
 
   useEffect(() => {
     if (!currentSessionId) return
-    // Restore from cache if available, otherwise load from disk
     const cached = sessionCache.current.get(currentSessionId)
     if (cached) {
       setMessages(cached.messages)
@@ -38,12 +41,43 @@ export default function ChatView() {
     }
   }, [currentSessionId])
 
-  // Cache messages when they change
   useEffect(() => {
     if (currentSessionId && messages.length > 0) {
       sessionCache.current.set(currentSessionId, { messages, title: sessionTitle })
     }
   }, [messages, sessionTitle, currentSessionId])
+
+  // F248 + F249: Global click handler for file links and external links
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      const link = target.closest('a') as HTMLAnchorElement | null
+      if (!link) return
+
+      // F248: File links
+      const filePath = link.dataset?.path || link.getAttribute('data-path')
+      if (filePath) {
+        e.preventDefault()
+        const ext = filePath.split('.').pop()?.toLowerCase() || ''
+        const previewExts = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'pdf']
+        if (previewExts.includes(ext)) {
+          api.openFilePreview?.(filePath) || api.openFile?.(filePath)
+        } else {
+          api.openFile?.(filePath)
+        }
+        return
+      }
+
+      // F249: External links
+      const href = link.getAttribute('href')
+      if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
+        e.preventDefault()
+        api.openExternal?.(href)
+      }
+    }
+    document.addEventListener('click', handleClick)
+    return () => document.removeEventListener('click', handleClick)
+  }, [api])
 
   useEffect(() => {
     // --- Core streaming events ---
@@ -82,7 +116,7 @@ export default function ChatView() {
       if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
       const target = delegateMsg.current || streamingMsg.current
       if (!target) return
-      const step: ToolStep = { name: data.name || data.tool, input: data.input, output: String(data.output).slice(0, 120) }
+      const step: ToolStep = { name: data.name || data.tool, input: data.input, output: String(data.output || '').slice(0, 120) }
       target.toolSteps = [...(target.toolSteps || []), step]
       if (!statusIsAiAuthored.current) {
         setStreamingStatus(`${data.name || data.tool}...`)
@@ -93,7 +127,13 @@ export default function ChatView() {
 
     const handleRoundInfo = (data: any) => {
       if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
-      // Round done — don't clear status, let next text start or done handle it
+      // F237: Round info — update tool group purpose if available
+      const target = delegateMsg.current || streamingMsg.current
+      if (target && data.purpose) {
+        // Store round purpose on the message for ToolGroup to use
+        ;(target as any).roundPurpose = data.purpose
+        setMessages(prev => [...prev.slice(0, -1), { ...target }])
+      }
     }
 
     const handleStatus = (data: any) => {
@@ -109,11 +149,15 @@ export default function ChatView() {
       if (data.sessionId === currentSessionId && data.text) {
         statusIsAiAuthored.current = true
         setStreamingStatus(data.text)
-        if (currentSessionId) setStatus(currentSessionId, data.text)
+        if (currentSessionId) {
+          setStatus(currentSessionId, data.text)
+          // Persist AI status to SQLite
+          api.updateSessionStatus?.(currentSessionId, 'running', data.text)
+        }
       }
     }
 
-    // --- F222: Delegate events ---
+    // --- F222/F242: Delegate events ---
     const handleDelegateStart = (data: any) => {
       if (data.sessionId && data.sessionId !== currentSessionId) return
       const wsPath = data.workspaceId
@@ -127,6 +171,7 @@ export default function ChatView() {
         sender: data.sender,
         avatar: data.avatar,
         workspacePath: wsPath,
+        workspaceId: data.workspaceId,
         toolSteps: [],
         thinking: ''
       }
@@ -140,8 +185,6 @@ export default function ChatView() {
       if (!text) return
       if (data.thinking) {
         delegateMsg.current.thinking = (delegateMsg.current.thinking || '') + text
-      } else if (data.toolStep) {
-        // Tool step inside delegate — handled by handleToolStep
       } else {
         delegateMsg.current.content += text
       }
@@ -150,27 +193,58 @@ export default function ChatView() {
 
     const handleDelegateEnd = (data: any) => {
       if (!delegateMsg.current) return
-      if (data.fullText) delegateMsg.current.content = data.fullText
-      setMessages(prev => [...prev.slice(0, -1), { ...delegateMsg.current! }])
+      if (data.fullText !== undefined) delegateMsg.current.content = data.fullText
+
+      // F242: NO_REPLY / stay_silent detection — remove empty cards
+      const content = delegateMsg.current.content.trim()
+      const isNoReply = !content || content === 'NO_REPLY' || content === '(silent)'
+      const hasOnlyHiddenTools = (delegateMsg.current.toolSteps || []).every(s =>
+        s.name === 'stay_silent' || s.name === 'ui_status_set'
+      )
+
+      if (isNoReply && hasOnlyHiddenTools && !delegateMsg.current.thinking) {
+        // Remove empty delegate card
+        setMessages(prev => prev.filter(m => m.id !== delegateMsg.current!.id))
+      } else {
+        // F242: Queue for DB save
+        pendingDelegateMsgs.current.push({ ...delegateMsg.current })
+        setMessages(prev => [...prev.slice(0, -1), { ...delegateMsg.current! }])
+      }
       delegateMsg.current = null
     }
 
-    // --- F227: Claude Code events ---
+    // --- F243: Claude Code events ---
     const handleCcStatus = (data: any) => {
       if (data.status === 'running') {
+        setCcOutput({ task: data.task || '', lines: [], running: true })
         setStreamingStatus(`Claude Code: ${data.task || 'working'}...`)
-      } else if (data.status === 'done') {
+      } else if (data.status === 'done' || data.status === 'error') {
+        setCcOutput(prev => prev ? { ...prev, running: false } : null)
         setStreamingStatus('')
-      } else if (data.status === 'error') {
-        setStreamingStatus(`CC error: ${data.error || 'unknown'}`)
       }
     }
 
     const handleCcOutput = (data: any) => {
-      // CC output appended to current streaming message
-      if (!streamingMsg.current) return
-      streamingMsg.current.content += data.chunk || ''
-      setMessages(prev => [...prev.slice(0, -1), { ...streamingMsg.current! }])
+      const chunk = data.chunk || ''
+      setCcOutput(prev => {
+        if (!prev) return null
+        const newLines = [...prev.lines, ...chunk.split('\n')]
+        // Keep last 50 lines
+        return { ...prev, lines: newLines.slice(-50) }
+      })
+      // Also append to streaming message
+      if (streamingMsg.current) {
+        streamingMsg.current.content += chunk
+        setMessages(prev => [...prev.slice(0, -1), { ...streamingMsg.current! }])
+      }
+    }
+
+    // --- F240: Auto-rotate ---
+    const handleAutoRotate = (data: any) => {
+      if (data.sessionId && data.sessionId !== currentSessionId) return
+      // Auto-rotate triggers next agent — the backend handles the actual chat call,
+      // we just need to update activity state
+      if (currentSessionId) setActivity(currentSessionId, 'thinking')
     }
 
     // --- Done / Error ---
@@ -179,11 +253,15 @@ export default function ChatView() {
       currentRequestId.current = null
       streamingMsg.current = null
       delegateMsg.current = null
+      pendingDelegateMsgs.current = []
+      setCcOutput(null)
       setStreamingStatus('')
       statusIsAiAuthored.current = false
       if (currentSessionId) {
         setActivity(currentSessionId, 'idle')
         await loadSession()
+        // F239: Auto-generate title
+        await maybeGenerateTitle()
       }
     }
 
@@ -199,9 +277,17 @@ export default function ChatView() {
       currentRequestId.current = null
       streamingMsg.current = null
       delegateMsg.current = null
+      setCcOutput(null)
       setStreamingStatus('')
       statusIsAiAuthored.current = false
       if (currentSessionId) setActivity(currentSessionId, 'idle')
+    }
+
+    // Task changes
+    const handleTasksChanged = (sid: string) => {
+      if (sid === currentSessionId) {
+        // TaskBar will auto-refresh via its own effect
+      }
     }
 
     // Register all listeners
@@ -218,6 +304,8 @@ export default function ChatView() {
     api.onCcOutput?.(handleCcOutput)
     api.onChatDone?.(handleDone)
     api.onChatError?.(handleError)
+    api.onAutoRotate?.(handleAutoRotate)
+    api.onTasksChanged?.(handleTasksChanged)
   }, [currentSessionId])
 
   const loadSession = async () => {
@@ -227,6 +315,26 @@ export default function ChatView() {
       setMessages(session.messages || [])
       setSessionTitle(session.title)
     }
+  }
+
+  // F239: Auto-generate title from first user message
+  const maybeGenerateTitle = async () => {
+    if (!currentSessionId) return
+    const session = await api.loadSession(currentSessionId)
+    if (!session) return
+    // Only generate if title is default and has messages
+    if (session.title && session.title !== 'New Chat' && session.title !== '新对话') return
+    const firstUser = (session.messages || []).find((m: any) => m.role === 'user')
+    if (!firstUser) return
+    const content = firstUser.content || ''
+    // Smart title extraction: first sentence or first 30 chars
+    let title = content.split(/[。！？\n.!?]/)[0].trim()
+    if (title.length > 30) title = title.slice(0, 30) + '...'
+    if (!title) title = content.slice(0, 30).trim() || 'New Chat'
+    await api.renameSession(currentSessionId, title)
+    setSessionTitle(title)
+    const updated = await api.listSessions()
+    setSessions(updated)
   }
 
   // Slash commands
@@ -255,17 +363,25 @@ export default function ChatView() {
       const msgCount = session?.messages?.length || 0
       const config = await api.getConfig()
       const usage = await api.getTokenUsage?.(currentSessionId) || { inputTokens: 0, outputTokens: 0 }
+      const systemPrompt = await api.buildSystemPrompt?.() || ''
+      const estimatedCtx = Math.ceil((JSON.stringify(session?.messages || []).length + systemPrompt.length) / 3.5)
       addSystemMsg([
         '**Session Status**',
         `- Messages: ${msgCount}`,
         `- API usage: ${(usage.inputTokens || 0).toLocaleString()} input + ${(usage.outputTokens || 0).toLocaleString()} output tokens`,
+        `- Estimated context: ~${estimatedCtx.toLocaleString()} tokens`,
         `- Model: ${config?.model || '(default)'}`,
         `- Provider: ${config?.provider || 'anthropic'}`,
       ].join('\n'))
       return true
     }
     if (cmd === '/export' && currentSessionId) {
-      await api.exportSession(currentSessionId)
+      const data = await api.exportSession(currentSessionId)
+      if (data) {
+        const session = await api.loadSession(currentSessionId)
+        const filename = `paw-export-${(session?.title || 'chat').replace(/\s+/g, '-')}.md`
+        await api.writeExport?.(filename, data)
+      }
       addSystemMsg('导出完成')
       return true
     }
@@ -291,17 +407,26 @@ export default function ChatView() {
     }
     if (cmd === '/stop') {
       await api.chatCancel?.()
+      await api.ccStop?.()
       currentRequestId.current = null
       streamingMsg.current = null
       delegateMsg.current = null
+      setCcOutput(null)
       setStreamingStatus('')
       if (currentSessionId) setActivity(currentSessionId, 'idle')
       return true
     }
     if (cmd === '/context' && currentSessionId) {
       const session = await api.loadSession(currentSessionId)
-      const totalChars = JSON.stringify(session?.messages || []).length
-      addSystemMsg(`**Context:** ~${Math.ceil(totalChars / 3.5).toLocaleString()} tokens (${(totalChars / 1000).toFixed(1)}k chars)`)
+      const systemPrompt = await api.buildSystemPrompt?.() || ''
+      const msgChars = JSON.stringify(session?.messages || []).length
+      const totalChars = msgChars + systemPrompt.length
+      addSystemMsg([
+        `**Context:**`,
+        `- Messages: ~${Math.ceil(msgChars / 3.5).toLocaleString()} tokens`,
+        `- System prompt: ~${Math.ceil(systemPrompt.length / 3.5).toLocaleString()} tokens`,
+        `- Total: ~${Math.ceil(totalChars / 3.5).toLocaleString()} tokens (${(totalChars / 1000).toFixed(1)}k chars)`,
+      ].join('\n'))
       return true
     }
     return false
@@ -309,18 +434,27 @@ export default function ChatView() {
 
   const handleSend = async (text: string, files: File[]) => {
     if (!currentSessionId) return
-
-    // Check slash commands first
     if (await handleSlashCommand(text)) return
 
-    setMessages(prev => [...prev, {
+    // F247: User message with image display
+    const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
       content: text,
-      timestamp: Date.now()
-    }])
+      timestamp: Date.now(),
+      sender: userProfile?.userName || 'You',
+    }
+    // Store file info for rendering
+    if (files.length > 0) {
+      ;(userMsg as any).attachments = files.map(f => ({
+        name: f.name,
+        type: f.type,
+        url: f.type.startsWith('image/') ? URL.createObjectURL(f) : undefined,
+      }))
+    }
 
-    // Use chatPrepare for proper requestId if available
+    setMessages(prev => [...prev, userMsg])
+
     const requestId = await api.chatPrepare?.() || Date.now().toString()
     currentRequestId.current = requestId
     setActivity(currentSessionId, 'thinking')
@@ -330,12 +464,10 @@ export default function ChatView() {
   // F228: Retry last message
   const handleRetry = useCallback(async () => {
     if (!currentSessionId) return
-    // Find last user message
     let lastUserIdx = -1
     for (let i = messages.length - 1; i >= 0; i--) { if (messages[i].role === 'user') { lastUserIdx = i; break } }
     if (lastUserIdx < 0) return
     const lastUserMsg = messages[lastUserIdx]
-    // Remove everything after last user message
     setMessages(prev => prev.slice(0, lastUserIdx + 1))
     const requestId = await api.chatPrepare?.() || Date.now().toString()
     currentRequestId.current = requestId
@@ -368,6 +500,37 @@ export default function ChatView() {
           </button>
         </div>
       </div>
+
+      {/* F243: CC Output Panel */}
+      {ccOutput && (
+        <div style={{
+          borderBottom: '1px solid var(--border-muted)',
+          padding: '8px 16px',
+          fontSize: 12,
+          background: 'var(--bg-secondary)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <span>🖥️ Claude Code{ccOutput.task ? `: ${ccOutput.task}` : ''}</span>
+            {ccOutput.running && (
+              <button
+                onClick={() => api.ccStop?.()}
+                style={{ padding: '2px 8px', fontSize: 11, background: 'var(--status-error)', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}
+              >
+                Stop
+              </button>
+            )}
+          </div>
+          <pre style={{
+            margin: 0, padding: 8, background: 'var(--bg-base)',
+            borderRadius: 4, maxHeight: 200, overflow: 'auto',
+            fontSize: 11, lineHeight: 1.4, whiteSpace: 'pre-wrap',
+            color: 'var(--text-secondary)',
+          }}>
+            {ccOutput.lines.join('\n') || '(waiting for output...)'}
+          </pre>
+        </div>
+      )}
+
       <MessageList
         messages={messages}
         sessionId={currentSessionId || ''}

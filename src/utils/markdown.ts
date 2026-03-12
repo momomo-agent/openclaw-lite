@@ -5,13 +5,43 @@ declare global {
   }
 }
 
+let _clawDir: string | null = null
+
+export function setClawDir(dir: string | null) {
+  _clawDir = dir
+}
+
 export function renderMarkdown(text: string): string {
   if (!window.marked) return text
-  return window.marked.parse(text)
+
+  // F244: Custom image renderer for relative paths
+  const renderer = new window.marked.Renderer()
+  const originalImage = renderer.image
+  renderer.image = function (href: string, title: string, text: string) {
+    if (href && !href.startsWith('http') && !href.startsWith('file://') && !href.startsWith('data:') && _clawDir) {
+      href = `file://${_clawDir}/${href}`
+    }
+    if (originalImage) return originalImage.call(this, href, title, text)
+    const titleAttr = title ? ` title="${title}"` : ''
+    return `<img src="${href}" alt="${text || ''}"${titleAttr} style="max-width:100%;border-radius:4px">`
+  }
+
+  return window.marked.parse(text, { renderer })
 }
 
 export function stripMarkdown(text: string): string {
-  return text.replace(/[*_~`#\[\]]/g, '').slice(0, 100)
+  return text
+    .replace(/!\[.*?\]\(.*?\)/g, '[image]')
+    .replace(/\[([^\]]*)\]\(.*?\)/g, '$1')
+    .replace(/```[\s\S]*?```/g, '[code]')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/[*_~]+([^*_~]+)[*_~]+/g, '$1')
+    .replace(/^#+\s+/gm, '')
+    .replace(/^[-*+]\s+/gm, '')
+    .replace(/^>\s+/gm, '')
+    .replace(/\n{2,}/g, ' ')
+    .trim()
+    .slice(0, 100)
 }
 
 export function escapeHtml(text: string): string {

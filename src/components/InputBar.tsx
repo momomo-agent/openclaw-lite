@@ -11,17 +11,19 @@ export default function InputBar({ sessionId, onSend }: InputBarProps) {
   const [text, setText] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  // F241: IME composition tracking
+  const composing = useRef(false)
 
   // F229: Draft per session
   const drafts = useRef<Map<string, { text: string; files: File[] }>>(new Map())
   const prevSessionId = useRef<string | null>(null)
 
   useEffect(() => {
-    // Save draft for previous session
     if (prevSessionId.current && (text || files.length)) {
       drafts.current.set(prevSessionId.current, { text, files })
     }
-    // Restore draft for new session
     if (sessionId) {
       const draft = drafts.current.get(sessionId)
       setText(draft?.text || '')
@@ -33,6 +35,50 @@ export default function InputBar({ sessionId, onSend }: InputBarProps) {
     }
     prevSessionId.current = sessionId
   }, [sessionId])
+
+  // F252: Cmd+K focus input
+  useEffect(() => {
+    const handleGlobalKey = (e: KeyboardEvent) => {
+      if (e.metaKey && e.key === 'k') {
+        e.preventDefault()
+        textareaRef.current?.focus()
+      }
+    }
+    window.addEventListener('keydown', handleGlobalKey)
+    return () => window.removeEventListener('keydown', handleGlobalKey)
+  }, [])
+
+  // F245: Drag & drop
+  const [dragOver, setDragOver] = useState(false)
+
+  useEffect(() => {
+    const handleDragOver = (e: DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setDragOver(true)
+    }
+    const handleDragLeave = (e: DragEvent) => {
+      e.preventDefault()
+      // Only clear if leaving the window
+      if (e.relatedTarget === null) setDragOver(false)
+    }
+    const handleDrop = (e: DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setDragOver(false)
+      if (e.dataTransfer?.files?.length) {
+        setFiles(prev => [...prev, ...Array.from(e.dataTransfer!.files)])
+      }
+    }
+    window.addEventListener('dragover', handleDragOver)
+    window.addEventListener('dragleave', handleDragLeave)
+    window.addEventListener('drop', handleDrop)
+    return () => {
+      window.removeEventListener('dragover', handleDragOver)
+      window.removeEventListener('dragleave', handleDragLeave)
+      window.removeEventListener('drop', handleDrop)
+    }
+  }, [])
 
   // F224: @mention autocomplete
   const [mentionOpen, setMentionOpen] = useState(false)
@@ -81,11 +127,13 @@ export default function InputBar({ sessionId, onSend }: InputBarProps) {
     onSend(text, files)
     setText('')
     setFiles([])
-    // Clear draft
     if (sessionId) drafts.current.delete(sessionId)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // F241: Block send during IME composition
+    if (composing.current) return
+
     if (mentionOpen && filteredMentions.length > 0) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIdx(i => Math.min(i + 1, filteredMentions.length - 1)); return }
       if (e.key === 'ArrowUp') { e.preventDefault(); setMentionIdx(i => Math.max(i - 1, 0)); return }
@@ -98,13 +146,34 @@ export default function InputBar({ sessionId, onSend }: InputBarProps) {
     }
   }
 
+  // F246: Image preview helper
+  const isImage = (f: File) => f.type.startsWith('image/')
+
   return (
-    <div className="input-float-wrap">
+    <div ref={wrapRef} className={`input-float-wrap ${dragOver ? 'drag-over' : ''}`}>
+      {/* F245: Drag overlay */}
+      {dragOver && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 10,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(0,0,0,0.5)', borderRadius: 12, pointerEvents: 'none',
+          color: 'var(--text-primary)', fontSize: 14, fontWeight: 600,
+        }}>
+          Drop files here
+        </div>
+      )}
       <div className="input-float">
+        {/* F246: Attach preview with image thumbnails */}
         {files.length > 0 && (
           <div className="attach-preview-area">
             {files.map((f, i) => (
-              <div key={i} className="attach-chip">
+              <div key={i} className="attach-chip" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {isImage(f) && (
+                  <img
+                    src={URL.createObjectURL(f)}
+                    style={{ width: 24, height: 24, borderRadius: 4, objectFit: 'cover' }}
+                  />
+                )}
                 <span>{f.name}</span>
                 <span className="remove" onClick={() => setFiles(files.filter((_, j) => j !== i))}>×</span>
               </div>
@@ -146,6 +215,8 @@ export default function InputBar({ sessionId, onSend }: InputBarProps) {
             value={text}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
+            onCompositionStart={() => { composing.current = true }}
+            onCompositionEnd={() => { composing.current = false }}
             placeholder="Ask anything... (@name to target)"
             rows={1}
           />

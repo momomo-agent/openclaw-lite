@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Workspace } from '../types'
 import { useIPC } from '../hooks/useIPC'
 import { Avatar } from './Avatar'
@@ -10,6 +10,18 @@ interface NewChatSelectorProps {
   onWorkspacesChanged: () => void
 }
 
+interface CodingAgentDef {
+  id: string
+  name: string
+  engine?: string
+}
+
+const ENGINE_ICONS: Record<string, string> = {
+  claude: '🟠', codex: '🟢', gemini: '🔵', kiro: '🟣',
+}
+
+const PRESET_AVATARS = [0, 1, 2, 3, 4, 5]
+
 export default function NewChatSelector({ workspaces, onSelect, onClose, onWorkspacesChanged }: NewChatSelectorProps) {
   const api = useIPC()
   const [groupSelected, setGroupSelected] = useState<Set<string>>(new Set())
@@ -17,6 +29,17 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
   const [newName, setNewName] = useState('')
   const [editingWs, setEditingWs] = useState<Workspace | null>(null)
   const [editName, setEditName] = useState('')
+  // F253: Coding agents
+  const [codingAgents, setCodingAgents] = useState<CodingAgentDef[]>([])
+  // F254: Avatar editor
+  const [avatarEditWs, setAvatarEditWs] = useState<Workspace | null>(null)
+  const avatarFileRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    api.codingAgentsList?.().then((list: CodingAgentDef[]) => {
+      if (list?.length) setCodingAgents(list)
+    }).catch(() => {})
+  }, [])
 
   const handleGroupToggle = (id: string) => {
     setGroupSelected(prev => {
@@ -57,6 +80,23 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
     await api.updateWorkspaceIdentity({ id: editingWs.id, name: editName.trim() })
     setEditingWs(null)
     onWorkspacesChanged()
+  }
+
+  // F254: Avatar editing
+  const handleAvatarPreset = async (ws: Workspace, presetIndex: number) => {
+    await api.setWorkspaceAvatar?.({ id: ws.id, presetIndex })
+    setAvatarEditWs(null)
+    onWorkspacesChanged()
+  }
+
+  const handleAvatarUpload = async (ws: Workspace, file: File) => {
+    // Read file as array buffer and send path
+    const path = (file as any).path
+    if (path) {
+      await api.setWorkspaceAvatar?.({ id: ws.id, customPath: path })
+      setAvatarEditWs(null)
+      onWorkspacesChanged()
+    }
   }
 
   return (
@@ -105,7 +145,27 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
             </div>
           )}
 
-          <hr style={{ border: 'none', height: 1, background: 'var(--border)', margin: '8px 0' }} />
+          <hr style={{ border: 'none', height: 1, background: 'var(--border-default)', margin: '8px 0' }} />
+
+          {/* F253: Coding Agents section */}
+          {codingAgents.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <div className="settings-section-title" style={{ padding: '4px 8px' }}>Coding Agent</div>
+              {codingAgents.map(agent => (
+                <div key={agent.id} className="new-chat-item" onClick={() => onSelect({ mode: 'coding', workspaceId: agent.id })}>
+                  <span className="new-chat-avatar">
+                    {ENGINE_ICONS[agent.engine || ''] || '⚡'}
+                  </span>
+                  <div className="new-chat-info">
+                    <div className="new-chat-name">{agent.name}</div>
+                    {agent.engine && <div className="new-chat-desc">{agent.engine}</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <hr style={{ border: 'none', height: 1, background: 'var(--border-default)', margin: '8px 0' }} />
 
           {/* Manage Agents section */}
           <div style={{ marginBottom: 8 }}>
@@ -128,6 +188,8 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
                     <div className="people-name" style={{ fontSize: 13 }}>{ws.identity?.name || ws.id}</div>
                   </div>
                   <div className="people-actions" style={{ display: 'flex', gap: 4 }}>
+                    <button className="icon-btn" style={{ fontSize: 12 }} title="头像"
+                      onClick={(e) => { e.stopPropagation(); setAvatarEditWs(avatarEditWs?.id === ws.id ? null : ws) }}>🖼</button>
                     <button className="icon-btn" style={{ fontSize: 12 }} title="编辑"
                       onClick={(e) => { e.stopPropagation(); setEditingWs(ws); setEditName(ws.identity?.name || '') }}>✏️</button>
                     <button className="icon-btn" style={{ fontSize: 12 }} title="移除"
@@ -136,6 +198,30 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
                 </div>
               )
             ))}
+            {/* F254: Avatar editor */}
+            {avatarEditWs && (
+              <div style={{ padding: '8px 4px', background: 'var(--bg-elevated)', borderRadius: 8, margin: '4px 0' }}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+                  选择头像 — {avatarEditWs.identity?.name || avatarEditWs.id}
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+                  {PRESET_AVATARS.map(n => (
+                    <div key={n} onClick={() => handleAvatarPreset(avatarEditWs, n)}
+                      style={{ width: 36, height: 36, borderRadius: '50%', overflow: 'hidden', cursor: 'pointer', border: '2px solid var(--border-muted)', transition: 'border-color 0.15s' }}
+                      onMouseEnter={(e) => e.currentTarget.style.borderColor = 'var(--accent-primary)'}
+                      onMouseLeave={(e) => e.currentTarget.style.borderColor = 'var(--border-muted)'}>
+                      <img src={`avatars/${n}.png`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    </div>
+                  ))}
+                </div>
+                <button className="secondary-btn" style={{ fontSize: 12, margin: 0, width: '100%' }}
+                  onClick={() => avatarFileRef.current?.click()}>
+                  📁 上传自定义
+                </button>
+                <input ref={avatarFileRef} type="file" accept="image/*" style={{ display: 'none' }}
+                  onChange={(e) => { if (e.target.files?.[0] && avatarEditWs) handleAvatarUpload(avatarEditWs, e.target.files[0]) }} />
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 8, padding: '8px 4px' }}>
               {creating ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
