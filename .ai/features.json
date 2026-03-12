@@ -965,5 +965,103 @@
     "description": "Image block 清理 (已回复的 user 消息中清除 image payload)",
     "passes": true,
     "milestone": "M31"
+  },
+  {
+    "id": "F220",
+    "category": "ux",
+    "description": "React: 图片头像系统（MessageItem + Sidebar 对齐 _renderAvatar）",
+    "passes": false,
+    "milestone": "M36"
+  },
+  {
+    "id": "F221",
+    "category": "core",
+    "description": "React: Streaming 完整对齐（独立事件 + inline status + thinking）",
+    "passes": false,
+    "milestone": "M36"
+  },
+  {
+    "id": "F222",
+    "category": "core",
+    "description": "React: Delegate 多 agent 接力（三件套 + 独立气泡）",
+    "passes": false,
+    "milestone": "M36"
+  },
+  {
+    "id": "F223",
+    "category": "core",
+    "description": "React: Session 容器隔离（切换不丢状态）",
+    "passes": false,
+    "milestone": "M36"
+  },
+  {
+    "id": "F224",
+    "category": "ux",
+    "description": "React: @mention 自动补全",
+    "passes": false,
+    "milestone": "M36"
+  },
+  {
+    "id": "F225",
+    "category": "ux",
+    "description": "React: 右键菜单（重命名/删除/导出）",
+    "passes": false,
+    "milestone": "M36"
+  },
+  {
+    "id": "F226",
+    "category": "core",
+    "description": "React: User Profile 系统",
+    "passes": false,
+    "milestone": "M36"
+  },
+  {
+    "id": "F227",
+    "category": "core",
+    "description": "React: Claude Code 集成（onCcStatus/onCcOutput）",
+    "passes": false,
+    "milestone": "M36"
+  },
+  {
+    "id": "F228",
+    "category": "ux",
+    "description": "React: 错误消息持久化 + 重试按钮",
+    "passes": false,
+    "milestone": "M36"
+  },
+  {
+    "id": "F229",
+    "category": "ux",
+    "description": "React: 草稿跟随 session",
+    "passes": false,
+    "milestone": "M36"
+  },
+  {
+    "id": "F230",
+    "category": "ux",
+    "description": "React: linkifyPaths 文件路径可点击",
+    "passes": false,
+    "milestone": "M36"
+  },
+  {
+    "id": "F231",
+    "category": "ux",
+    "description": "React: 导出 + 新建对话选择器",
+    "passes": false,
+    "milestone": "M36"
+  },
+  {
+    "id": "F232",
+    "category": "ux",
+    "description": "React: 侧边栏搜索 + 键盘快捷键",
+    "passes": false,
+    "milestone": "M36"
+  },
+  {
+    "id": "F233",
+    "category": "ux",
+    "description": "React: Inline status + 主题预览",
+    "passes": false,
+    "milestone": "M36"
   }
 ]
