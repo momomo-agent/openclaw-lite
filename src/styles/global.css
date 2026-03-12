@@ -128,7 +128,7 @@ button:hover { background: var(--border-muted); }
 .sidebar {
   width: 240px; background: var(--bg-surface); border-right: 1px solid var(--border-subtle);
   display: flex; flex-direction: column; flex-shrink: 0;
-  -webkit-app-region: drag; padding-top: 4px;
+  -webkit-app-region: drag; padding-top: 8px;
   position: relative;
 }
 .sidebar.hidden { display: none; }

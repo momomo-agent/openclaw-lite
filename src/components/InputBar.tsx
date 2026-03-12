@@ -53,7 +53,7 @@ export default function InputBar({ onSend }: InputBarProps) {
         <div className="input-bar">
           <button className="icon-btn attach-btn" onClick={() => document.getElementById('fileInput')?.click()}>
             <span className="ic">
-              <svg viewBox="0 0 24 24" width="18" height="18">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
               </svg>
             </span>
@@ -69,7 +69,7 @@ export default function InputBar({ onSend }: InputBarProps) {
           />
           <button id="sendBtn" className={text.trim() || files.length ? 'active' : ''} onClick={handleSend}>
             <span className="ic">
-              <svg viewBox="0 0 24 24" width="16" height="16">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 19V5"/>
                 <path d="m5 12 7-7 7 7"/>
               </svg>
