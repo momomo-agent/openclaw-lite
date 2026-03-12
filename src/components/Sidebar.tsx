@@ -3,6 +3,7 @@ import { Session, Workspace } from '../types'
 import { useAppState } from '../store'
 import { useIPC } from '../hooks/useIPC'
 import { Avatar } from './Avatar'
+import NewChatSelector from './NewChatSelector'
 
 interface SessionItemProps {
   session: Session
@@ -89,13 +90,14 @@ interface ContextMenuState {
 }
 
 export default function Sidebar() {
-  const { sessions, workspaces, currentSessionId, setCurrentSessionId, setSessions } = useAppState()
+  const { sessions, workspaces, currentSessionId, setCurrentSessionId, setSessions, setWorkspaces } = useAppState()
   const api = useIPC()
   const [sidebarVisible, setSidebarVisible] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState>({ visible: false, x: 0, y: 0, sessionId: null })
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameText, setRenameText] = useState('')
+  const [showNewChat, setShowNewChat] = useState(false)
 
   // F232: Cmd+Shift+S toggle sidebar
   useEffect(() => {
@@ -118,12 +120,31 @@ export default function Sidebar() {
   }, [ctxMenu.visible])
 
   const handleNewSession = async () => {
+    if (workspaces.length > 1) {
+      setShowNewChat(true)
+      return
+    }
     const result = await api.createSession({})
     if (result?.id) {
       setCurrentSessionId(result.id)
       const sessions = await api.listSessions()
       setSessions(sessions)
     }
+  }
+
+  const handleNewChatSelect = async (opts: { workspaceId?: string; mode?: string; participants?: string[] }) => {
+    setShowNewChat(false)
+    const result = await api.createSession(opts)
+    if (result?.id) {
+      setCurrentSessionId(result.id)
+      const sessions = await api.listSessions()
+      setSessions(sessions)
+    }
+  }
+
+  const refreshWorkspaces = async () => {
+    const ws = await api.listWorkspaces()
+    setWorkspaces(ws)
   }
 
   const handleContextMenu = (e: React.MouseEvent, sessionId: string) => {
@@ -237,6 +258,16 @@ export default function Sidebar() {
             🗑 删除
           </div>
         </div>
+      )}
+
+      {/* New chat selector */}
+      {showNewChat && (
+        <NewChatSelector
+          workspaces={workspaces}
+          onSelect={handleNewChatSelect}
+          onClose={() => setShowNewChat(false)}
+          onWorkspacesChanged={refreshWorkspaces}
+        />
       )}
     </div>
   )
