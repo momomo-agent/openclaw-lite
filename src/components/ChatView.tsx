@@ -7,7 +7,7 @@ import InputBar from './InputBar'
 import SettingsPanel from './SettingsPanel'
 
 export default function ChatView() {
-  const { currentSessionId, setActivity, setStatus, workspaces } = useAppState()
+  const { currentSessionId, setCurrentSessionId, setSessions, setActivity, setStatus, workspaces } = useAppState()
   const api = useIPC()
   const [messages, setMessages] = useState<Message[]>([])
   const [sessionTitle, setSessionTitle] = useState('New Chat')
@@ -226,15 +226,99 @@ export default function ChatView() {
     }
   }
 
+  // Slash commands
+  const handleSlashCommand = async (text: string): Promise<boolean> => {
+    if (!text.startsWith('/')) return false
+    const cmd = text.split(/\s/)[0].toLowerCase()
+    const arg = text.slice(cmd.length).trim()
+
+    const addSystemMsg = (content: string) => {
+      setMessages(prev => [...prev, {
+        id: 'sys-' + Date.now(), role: 'assistant', content, timestamp: Date.now(), sender: 'System'
+      }])
+    }
+
+    if (cmd === '/new') {
+      const result = await api.createSession({})
+      if (result?.id) {
+        setCurrentSessionId(result.id)
+        const sessions = await api.listSessions()
+        setSessions(sessions)
+      }
+      return true
+    }
+    if (cmd === '/status' && currentSessionId) {
+      const session = await api.loadSession(currentSessionId)
+      const msgCount = session?.messages?.length || 0
+      const config = await api.getConfig()
+      const usage = await api.getTokenUsage?.(currentSessionId) || { inputTokens: 0, outputTokens: 0 }
+      addSystemMsg([
+        '**Session Status**',
+        `- Messages: ${msgCount}`,
+        `- API usage: ${(usage.inputTokens || 0).toLocaleString()} input + ${(usage.outputTokens || 0).toLocaleString()} output tokens`,
+        `- Model: ${config?.model || '(default)'}`,
+        `- Provider: ${config?.provider || 'anthropic'}`,
+      ].join('\n'))
+      return true
+    }
+    if (cmd === '/export' && currentSessionId) {
+      await api.exportSession(currentSessionId)
+      addSystemMsg('导出完成')
+      return true
+    }
+    if ((cmd === '/model' || cmd === '/models') && currentSessionId) {
+      const config = await api.getConfig()
+      if (!arg) {
+        addSystemMsg(`**当前模型:** ${config?.model || '(default)'} (${config?.provider || 'anthropic'})`)
+      } else {
+        await api.saveConfig({ ...config, model: arg })
+        addSystemMsg(`模型已切换到: ${arg}`)
+      }
+      return true
+    }
+    if (cmd === '/compact' && currentSessionId) {
+      addSystemMsg('正在压缩对话历史...')
+      await api.chat({ sessionId: currentSessionId, message: '/compact', requestId: Date.now().toString() })
+      return true
+    }
+    if (cmd === '/reset' && currentSessionId) {
+      setMessages([])
+      addSystemMsg('对话已重置')
+      return true
+    }
+    if (cmd === '/stop') {
+      await api.chatCancel?.()
+      currentRequestId.current = null
+      streamingMsg.current = null
+      delegateMsg.current = null
+      setStreamingStatus('')
+      if (currentSessionId) setActivity(currentSessionId, 'idle')
+      return true
+    }
+    if (cmd === '/context' && currentSessionId) {
+      const session = await api.loadSession(currentSessionId)
+      const totalChars = JSON.stringify(session?.messages || []).length
+      addSystemMsg(`**Context:** ~${Math.ceil(totalChars / 3.5).toLocaleString()} tokens (${(totalChars / 1000).toFixed(1)}k chars)`)
+      return true
+    }
+    return false
+  }
+
   const handleSend = async (text: string, files: File[]) => {
     if (!currentSessionId) return
+
+    // Check slash commands first
+    if (await handleSlashCommand(text)) return
+
     setMessages(prev => [...prev, {
       id: Date.now().toString(),
       role: 'user',
       content: text,
       timestamp: Date.now()
     }])
-    const requestId = Date.now().toString()
+
+    // Use chatPrepare for proper requestId if available
+    const requestId = await api.chatPrepare?.() || Date.now().toString()
     currentRequestId.current = requestId
     setActivity(currentSessionId, 'thinking')
     await api.chat({ sessionId: currentSessionId, message: text, requestId, attachments: files })
@@ -250,7 +334,7 @@ export default function ChatView() {
     const lastUserMsg = messages[lastUserIdx]
     // Remove everything after last user message
     setMessages(prev => prev.slice(0, lastUserIdx + 1))
-    const requestId = Date.now().toString()
+    const requestId = await api.chatPrepare?.() || Date.now().toString()
     currentRequestId.current = requestId
     setActivity(currentSessionId, 'thinking')
     await api.chat({ sessionId: currentSessionId, message: lastUserMsg.content, requestId })
