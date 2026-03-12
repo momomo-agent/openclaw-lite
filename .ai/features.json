@@ -984,28 +984,28 @@
     "id": "F222",
     "category": "core",
     "description": "React: Delegate 多 agent 接力（三件套 + 独立气泡）",
-    "passes": false,
+    "passes": true,
     "milestone": "M36"
   },
   {
     "id": "F223",
     "category": "core",
     "description": "React: Session 容器隔离（切换不丢状态）",
-    "passes": false,
+    "passes": true,
     "milestone": "M36"
   },
   {
     "id": "F224",
     "category": "ux",
     "description": "React: @mention 自动补全",
-    "passes": false,
+    "passes": true,
     "milestone": "M36"
   },
   {
     "id": "F225",
     "category": "ux",
     "description": "React: 右键菜单（重命名/删除/导出）",
-    "passes": false,
+    "passes": true,
     "milestone": "M36"
   },
   {
@@ -1019,28 +1019,28 @@
     "id": "F227",
     "category": "core",
     "description": "React: Claude Code 集成（onCcStatus/onCcOutput）",
-    "passes": false,
+    "passes": true,
     "milestone": "M36"
   },
   {
     "id": "F228",
     "category": "ux",
     "description": "React: 错误消息持久化 + 重试按钮",
-    "passes": false,
+    "passes": true,
     "milestone": "M36"
   },
   {
     "id": "F229",
     "category": "ux",
     "description": "React: 草稿跟随 session",
-    "passes": false,
+    "passes": true,
     "milestone": "M36"
   },
   {
     "id": "F230",
     "category": "ux",
     "description": "React: linkifyPaths 文件路径可点击",
-    "passes": false,
+    "passes": true,
     "milestone": "M36"
   },
   {
@@ -1054,14 +1054,14 @@
     "id": "F232",
     "category": "ux",
     "description": "React: 侧边栏搜索 + 键盘快捷键",
-    "passes": false,
+    "passes": true,
     "milestone": "M36"
   },
   {
     "id": "F233",
     "category": "ux",
     "description": "React: Inline status + 主题预览",
-    "passes": false,
+    "passes": true,
     "milestone": "M36"
   }
 ]
