@@ -35,7 +35,9 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu }: 
   const statusText = aiStatus.get(session.id) || ''
 
   const isGroup = (session.participants?.length || 0) > 1
-  const ws = workspaces.find(w => w.id === session.participants?.[0])
+  // Find workspace: try participants first, then workspaceId from listAllSessions
+  const wsId = session.participants?.[0] || session.workspaceId
+  const ws = wsId ? workspaces.find(w => w.id === wsId) : workspaces[0]
 
   // Avatar: group icon, workspace PNG, or bot SVG
   let avatarEl: React.ReactNode = <BotIcon />

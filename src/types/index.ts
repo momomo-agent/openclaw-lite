@@ -9,6 +9,8 @@ export interface Session {
   updatedAt?: number
   statusText?: string
   messages?: Message[]
+  workspaceId?: string
+  workspacePath?: string
 }
 
 export interface Message {
