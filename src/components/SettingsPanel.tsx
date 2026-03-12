@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useIPC } from '../hooks/useIPC'
-import { Config, UserProfile } from '../types'
+import { Config } from '../types'
 
 interface SettingsPanelProps {
   visible: boolean
@@ -49,7 +49,6 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
   const [mcpStatus, setMcpStatus] = useState<Record<string, McpServerStatus> | null>(null)
 
   // Workspace state
-  const [workspacePath, setWorkspacePath] = useState('(not set)')
 
   // Heartbeat derived state
   const [heartbeatEnabled, setHeartbeatEnabled] = useState(true)
@@ -84,7 +83,7 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
 
   const loadAll = async () => {
     try {
-      const [cfg, prefs, agent, profile, avatarPath] = await Promise.all([
+      const [cfg, , agent, profile, avatarPath] = await Promise.all([
         api.getConfig(),
         api.getPrefs(),
         api.getCodingAgent(),
@@ -115,9 +114,6 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
       // MCP
       setMcpText(c.mcpServers ? JSON.stringify(c.mcpServers, null, 2) : '')
 
-      // Workspace
-      setWorkspacePath(prefs?.clawDir || '(not set)')
-
       // MCP status
       if (api.getMcpStatus) {
         try {
@@ -129,6 +125,9 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
       console.error('Failed to load settings:', err)
     }
   }
+
+  // Close animation state
+  const [closing, setClosing] = useState(false)
 
   // Save all settings on close
   const saveAndClose = useCallback(async () => {
@@ -178,8 +177,8 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
       console.error('Failed to save settings:', err)
     }
 
-    onClose()
-  }, [api, onClose])
+    setClosing(true)
+  }, [api])
 
   // Apply theme immediately on selection
   const applyTheme = (theme: string) => {
@@ -190,7 +189,7 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
   // Avatar preset click
   const handlePresetClick = (index: number) => {
     setSelectedPreset(index)
-    setAvatarSrc(`avatars/${index}.png`)
+    setAvatarSrc(`../avatars/${index}.png`)
     setPendingAvatar({ presetIndex: index })
   }
 
@@ -207,24 +206,22 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
   }
 
   // Workspace change
-  const handleChangeWorkspace = async () => {
-    const dir = await api.selectClawDir()
-    if (dir) {
-      onClose()
-      window.location.reload()
-    }
-  }
-
   // External link
   const handleOpenExternal = (url: string) => {
     api.openExternal(url)
   }
 
-  if (!visible) return null
+  if (!visible && !closing) return null
 
   return (
-    <div className="settings-backdrop" onClick={(e) => { if (e.target === e.currentTarget) saveAndClose() }}>
-      <div className="settings-drawer">
+    <div
+      className={`settings-backdrop${closing ? ' closing' : ''}`}
+      onClick={(e) => { if (e.target === e.currentTarget) saveAndClose() }}
+    >
+      <div
+        className={`settings-drawer${closing ? ' closing' : ''}`}
+        onAnimationEnd={() => { if (closing) { setClosing(false); onClose() } }}
+      >
         <div className="settings-header">
           <span>Settings</span>
           <button className="icon-btn" onClick={saveAndClose}>
@@ -268,7 +265,7 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
                   {AVATAR_PRESETS.map((i) => (
                     <img
                       key={i}
-                      src={`avatars/${i}.png`}
+                      src={`../avatars/${i}.png`}
                       style={{
                         width: 28, height: 28, borderRadius: '50%', cursor: 'pointer',
                         border: `2px solid ${selectedPreset === i ? 'var(--accent)' : 'transparent'}`,
@@ -449,34 +446,6 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
             </div>
           </div>
 
-          {/* ── Workspace ── */}
-          <div className="settings-section">
-            <div className="settings-section-title">Workspace</div>
-            <div className="settings-field" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <code style={{
-                flex: 1, color: 'var(--text-faint)', fontSize: 12,
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}>
-                {workspacePath}
-              </code>
-              <button
-                className="secondary-btn"
-                style={{ margin: 0, whiteSpace: 'nowrap' }}
-                onClick={handleChangeWorkspace}
-              >
-                Change
-              </button>
-            </div>
-            <div className="settings-field">
-              <button
-                className="secondary-btn"
-                style={{ margin: 0 }}
-                onClick={() => api.openClawDir()}
-              >
-                Open in Finder
-              </button>
-            </div>
-          </div>
 
           {/* ── About ── */}
           <div className="settings-section" style={{ textAlign: 'center', borderBottom: 'none', paddingBottom: 0 }}>

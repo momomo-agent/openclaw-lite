@@ -408,22 +408,6 @@ async function createWindow() {
 }
 
 app.whenReady().then(() => {
-  // F201: Auto-migration from old path to ~/.paw/
-  const oldUserDataPath = app.getPath('userData')
-  const migratedFlag = path.join(GLOBAL_DIR, '.migrated')
-  if (!fs.existsSync(migratedFlag) && fs.existsSync(oldUserDataPath)) {
-    fs.mkdirSync(GLOBAL_DIR, { recursive: true })
-    const filesToMigrate = ['settings.json', 'workspaces.json', 'prefs.json', 'user-avatar.png']
-    for (const file of filesToMigrate) {
-      const src = path.join(oldUserDataPath, file)
-      const dest = path.join(GLOBAL_DIR, file)
-      if (fs.existsSync(src) && !fs.existsSync(dest)) {
-        try { fs.copyFileSync(src, dest) } catch {}
-      }
-    }
-    fs.writeFileSync(migratedFlag, Date.now().toString())
-  }
-
   // Initialize acpx + coding agents
   acpx.init()
   codingAgents.init()
@@ -432,18 +416,18 @@ app.whenReady().then(() => {
   // Initialize workspace registry
   workspaceRegistry.initRegistry()
 
-  // Support --claw-dir CLI arg
+  // Derive clawDir from CLI arg or first registered workspace
   const clawDirArg = process.argv.find(a => a.startsWith('--claw-dir='))
   if (clawDirArg) {
-    clawDir = clawDirArg.split('=')[1]
+    const argPath = clawDirArg.split('=')[1]
+    workspaceRegistry.addWorkspace(argPath)
+    clawDir = argPath
   } else {
-    const prefs = loadPrefs()
-    clawDir = prefs.clawDir || null
+    const ws = workspaceRegistry.listWorkspaces()
+    clawDir = ws.length > 0 ? ws[0].path : null
   }
   if (clawDir) {
     startMemoryWatch()
-    // Auto-register current workspace if not already
-    workspaceRegistry.addWorkspace(clawDir)
   }
 
   // App menu with New Window
@@ -505,14 +489,6 @@ async function openNewWindow() {
 // ── IPC: Directory selection ──
 
 ipcMain.handle('get-prefs', () => {
-  // Validate clawDir still exists on disk
-  if (clawDir && !fs.existsSync(clawDir)) {
-    console.log(`[Paw] clawDir gone: ${clawDir}, resetting`)
-    stopHeartbeat()
-    clawDir = null
-    syncState()
-    savePrefs({ clawDir: null })
-  }
   const prefs = loadPrefs()
   return { clawDir, userName: prefs.userName || '', userAvatar: prefs.userAvatar || '' }
 })
@@ -529,7 +505,8 @@ ipcMain.handle('get-user-profile', () => {
     prefs.userAvatar = 'user-avatar.png'
     savePrefs(prefs)
   }
-  return { userName: prefs.userName || '', userAvatar: prefs.userAvatar || '' }
+  const absPath = path.join(GLOBAL_DIR, prefs.userAvatar || 'user-avatar.png')
+  return { userName: prefs.userName || '', userAvatar: prefs.userAvatar || '', avatarAbsPath: absPath }
 })
 
 ipcMain.handle('set-user-profile', (_, { userName, presetIndex, customPath }) => {
@@ -548,7 +525,8 @@ ipcMain.handle('set-user-profile', (_, { userName, presetIndex, customPath }) =>
     prefs.userAvatar = 'user-avatar.png'
   }
   savePrefs(prefs)
-  return { userName: prefs.userName || '', userAvatar: prefs.userAvatar || '' }
+  const absPath = path.join(GLOBAL_DIR, prefs.userAvatar || 'user-avatar.png')
+  return { userName: prefs.userName || '', userAvatar: prefs.userAvatar || '', avatarAbsPath: absPath }
 })
 
 ipcMain.handle('get-user-avatar-path', () => {
@@ -560,7 +538,6 @@ ipcMain.handle('reset-claw-dir', () => {
   stopMemoryWatch()
   clawDir = null
   syncState()
-  savePrefs({ clawDir: null })
   return true
 })
 
@@ -589,7 +566,6 @@ ipcMain.handle('create-claw-dir', async () => {
 
   clawDir = dir
   syncState()
-  savePrefs({ clawDir })
 
   startMemoryWatch()
   buildMemoryIndex()
@@ -604,7 +580,6 @@ ipcMain.handle('select-claw-dir', async () => {
   if (!result.canceled && result.filePaths[0]) {
     clawDir = result.filePaths[0]
     syncState()
-    savePrefs({ clawDir })
     for (const sub of ['memory', 'agents', 'skills']) {
       const d = path.join(clawDir, sub)
       if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true })
@@ -1113,6 +1088,16 @@ ${roster}
     modelsToTry.push({ model, provider })
   }
 
+  // Resolve workspace identity for streaming events (dynamic avatar/name)
+  const _wsPath = getSessionWorkspacePath(targetWorkspaceId || null)
+  const _wsObj = _wsPath ? workspaceRegistry.getWorkspaceByPath(_wsPath) : (workspaceRegistry.listWorkspaces()[0] || null)
+  const _wsIdentity = {
+    agentName: _wsObj?.identity?.name || currentAgentName || 'Assistant',
+    avatar: _wsObj?.identity?.avatar || null,
+    wsPath: _wsObj?.path || _wsPath || null,
+    workspaceId: _wsObj?.id || null,
+  }
+
   let lastError = null
   for (const target of modelsToTry) {
     try {
@@ -1120,10 +1105,10 @@ ${roster}
       let result
       const streamConfig = { apiKey, baseUrl, model: target.model, tavilyKey: config.tavilyKey, maxToolRounds: config.maxToolRounds, maxTokens: config.maxTokens }
       if (target.provider === 'anthropic') {
-        result = await streamAnthropic(finalMessages, systemPrompt, streamConfig, mainWindow, requestId, chatTools, sessionId)
+        result = await streamAnthropic(finalMessages, systemPrompt, streamConfig, mainWindow, requestId, chatTools, sessionId, _wsIdentity)
         _lastAnthropicCallTime = Date.now()
       } else {
-        result = await streamOpenAI(finalMessages, systemPrompt, streamConfig, mainWindow, requestId, chatTools, sessionId)
+        result = await streamOpenAI(finalMessages, systemPrompt, streamConfig, mainWindow, requestId, chatTools, sessionId, _wsIdentity)
       }
       // Track token usage
       if (result?.usage && sessionId) {
@@ -1324,8 +1309,12 @@ async function streamCodingAgent(agentId, prompt, { cwd, sessionId, requestId, w
   _activeRequestId = requestId
   _activeCodingProcess = null
 
+  // Resolve workspace identity for streaming events
+  const _ccWs = workspaceRegistry.listWorkspaces()[0] || null
+  const _ccIdent = { agentName: _ccWs?.identity?.name || agentId, avatar: _ccWs?.identity?.avatar || null, wsPath: _ccWs?.path || cwd, workspaceId: _ccWs?.id || null }
+
   pushStatus(win, 'running', `${agentId} working...`)
-  win?.webContents?.send('chat-text-start', { requestId })
+  win?.webContents?.send('chat-text-start', { requestId, ..._ccIdent, sessionId })
 
   try {
     const result = await codingAgents.run(agentId, prompt, {
@@ -1341,6 +1330,7 @@ async function streamCodingAgent(agentId, prompt, { cwd, sessionId, requestId, w
 
     _activeCodingProcess = null
     pushStatus(win, 'idle', '')
+    win?.webContents?.send('chat-done', { requestId, sessionId })
     return { answer: result.stdout, mode: 'coding', agentId }
   } catch (err) {
     _activeCodingProcess = null
@@ -1351,7 +1341,7 @@ async function streamCodingAgent(agentId, prompt, { cwd, sessionId, requestId, w
 
 // ── Anthropic Streaming ──
 
-async function streamAnthropic(messages, systemPrompt, config, win, requestId, tools, sessionId) {
+async function streamAnthropic(messages, systemPrompt, config, win, requestId, tools, sessionId, wsIdentity) {
   _activeRequestId = requestId
   _activeAbortController = new AbortController()
   // Session-scoped IPC helper — injects sessionId into every payload
@@ -1386,7 +1376,8 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
   // OpenClaw-aligned: no hard round limit. Loop detection + timeout guard against stuck loops.
   for (let round = 0; ; round++) {
     roundText = ''
-    if (round > 0) ipc('chat-text-start', { requestId })
+    // Send text-start for every round (including round 0) with workspace identity
+    ipc('chat-text-start', { requestId, ...(wsIdentity || {}) })
     pushStatus(win, 'thinking', 'Thinking...')
 
     // Build system with cache_control for prompt caching
@@ -1506,6 +1497,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
 
     if (!toolCalls.length) {
       pushStatus(win, 'done', 'Done')
+      ipc('chat-done', { requestId })
       console.log('[Paw] streamAnthropic done, fullText length:', fullText.length)
       clearTimeout(timeoutId)
       return { answer: fullText, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput, cacheRead: totalCacheRead, cacheWrite: totalCacheWrite, lastInputTokens: lastUsageInput, lastCacheRead, lastCacheWrite } }
@@ -1574,7 +1566,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
 
 // ── OpenAI Streaming ──
 
-async function streamOpenAI(messages, systemPrompt, config, win, requestId, tools, sessionId) {
+async function streamOpenAI(messages, systemPrompt, config, win, requestId, tools, sessionId, wsIdentity) {
   _activeRequestId = requestId
   _activeAbortController = new AbortController()
   // Session-scoped IPC helper — injects sessionId into every payload
@@ -1615,7 +1607,8 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
   // OpenClaw-aligned: no hard round limit
   for (let round = 0; ; round++) {
     roundText = ''
-    if (round > 0) ipc('chat-text-start', { requestId })
+    // Send text-start for every round (including round 0) with workspace identity
+    ipc('chat-text-start', { requestId, ...(wsIdentity || {}) })
     pushStatus(win, 'thinking', 'Thinking...')
 
     // Context window guard — enforce budget before API call
@@ -1693,6 +1686,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
 
     if (!tcList.length || !tcList[0].name) {
       pushStatus(win, 'done', 'Done')
+      ipc('chat-done', { requestId })
       clearTimeout(timeoutId)
       return { answer: fullText, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput } }
     }
