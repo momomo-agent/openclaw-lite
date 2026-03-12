@@ -353,7 +353,7 @@ function savePrefs(p) {
 
 // app.disableHardwareAcceleration() - removed: conflicts with hiddenInset rendering
 
-function createWindow() {
+async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 960, height: 700,
     minWidth: 640, minHeight: 400,
@@ -371,14 +371,27 @@ function createWindow() {
   // Load from Vite dev server in dev mode, built files in production
   const isDev = process.argv.includes('--dev') || process.env.NODE_ENV === 'development'
   if (isDev) {
-    // Try common Vite ports (sync probe via loadURL chain)
-    mainWindow.loadURL('http://localhost:5173/src/index.html').catch(() =>
-      mainWindow.loadURL('http://localhost:5174/src/index.html').catch(() =>
-        mainWindow.loadURL('http://localhost:5175/src/index.html').catch(() =>
-          mainWindow.loadFile('renderer/index.html')
-        )
-      )
-    )
+    // Wait for Vite to be ready, then load
+    const http = require('http')
+    const waitForVite = (port, retries = 30) => new Promise((resolve) => {
+      const check = (n) => {
+        if (n <= 0) return resolve(null)
+        const req = http.get(`http://localhost:${port}/src/index.html`, (res) => {
+          if (res.statusCode === 200) resolve(port)
+          else setTimeout(() => check(n - 1), 500)
+        })
+        req.on('error', () => setTimeout(() => check(n - 1), 500))
+        req.setTimeout(1000, () => { req.destroy(); setTimeout(() => check(n - 1), 500) })
+      }
+      check(retries)
+    })
+    // Try ports in order
+    const port = await waitForVite(5173) || await waitForVite(5174) || await waitForVite(5175)
+    if (port) {
+      mainWindow.loadURL(`http://localhost:${port}/src/index.html`)
+    } else {
+      mainWindow.loadFile('renderer/index.html')
+    }
     mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadFile('renderer/index.html')
