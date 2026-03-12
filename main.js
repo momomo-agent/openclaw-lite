@@ -351,6 +351,8 @@ function savePrefs(p) {
   fs.writeFileSync(PREFS_PATH, JSON.stringify(merged, null, 2))
 }
 
+const isDev = process.argv.includes('--dev') || process.env.NODE_ENV === 'development'
+
 // app.disableHardwareAcceleration() - removed: conflicts with hiddenInset rendering
 
 async function createWindow() {
@@ -370,7 +372,6 @@ async function createWindow() {
   })
 
   // Load from Vite dev server in dev mode, built files in production
-  const isDev = process.argv.includes('--dev') || process.env.NODE_ENV === 'development'
   if (isDev) {
     // Wait for Vite to be ready, then load
     const http = require('http')
