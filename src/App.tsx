@@ -75,6 +75,9 @@ function AppContent() {
       }
     })
 
+    // Memory file changes (no-op for now, placeholder for future use)
+    api.onMemoryChanged?.(() => {})
+
     // Tray new chat
     api.onTrayNewChat?.(() => {
       api.createSession({}).then(async (result: any) => {

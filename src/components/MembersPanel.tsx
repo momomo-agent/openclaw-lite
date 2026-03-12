@@ -24,6 +24,9 @@ export default function MembersPanel({ visible, sessionId, onClose }: MembersPan
   const [newRoleName, setNewRoleName] = useState('')
   const [newRoleDesc, setNewRoleDesc] = useState('')
   const [selectedTemplate, setSelectedTemplate] = useState('')
+  const [newAgentName, setNewAgentName] = useState('')
+  const [newAgentSoul, setNewAgentSoul] = useState('')
+  const [newAgentModel, setNewAgentModel] = useState('')
 
   useEffect(() => {
     if (visible && sessionId) refresh()
@@ -72,6 +75,21 @@ export default function MembersPanel({ visible, sessionId, onClose }: MembersPan
 
   const removeAgent = async (agentId: string) => {
     await api.deleteSessionAgent(agentId)
+    refresh()
+  }
+
+  // Global agent management
+  const createNewAgent = async () => {
+    if (!newAgentName.trim()) return
+    await api.createAgent({ name: newAgentName.trim(), soul: newAgentSoul, model: newAgentModel.trim() || undefined })
+    setNewAgentName('')
+    setNewAgentSoul('')
+    setNewAgentModel('')
+    refresh()
+  }
+
+  const deleteAgent = async (id: string) => {
+    await api.deleteAgent(id)
     refresh()
   }
 
@@ -156,7 +174,39 @@ export default function MembersPanel({ visible, sessionId, onClose }: MembersPan
             style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontSize: 12 }} />
           <button className="secondary-btn" style={{ margin: 0, fontSize: 12 }}
             disabled={!newRoleName.trim() || !newRoleDesc.trim()} onClick={createLightweight}>
-            + 创建 Agent
+            + 创建 Session Agent
+          </button>
+        </div>
+
+        {/* Global agent templates */}
+        <hr style={{ border: 'none', height: 1, background: 'var(--border)', margin: '12px 0 8px' }} />
+        <span style={{ fontWeight: 600, fontSize: 13 }}>Agent Templates</span>
+        {templateAgents.map(a => (
+          <div key={a.id} className="agent-card" style={{ display: 'flex', alignItems: 'center', padding: '4px 0', gap: 8 }}>
+            <span style={{ width: 24, height: 24, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
+              {(a.name || '?')[0].toUpperCase()}
+            </span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13 }}>{a.name}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{a.model || 'default model'}</div>
+            </div>
+            <button className="icon-btn" style={{ fontSize: 11 }} onClick={() => deleteAgent(a.id)} title="Delete">✕</button>
+          </div>
+        ))}
+        {templateAgents.length === 0 && (
+          <p style={{ color: 'var(--text-secondary)', fontSize: 12, textAlign: 'center', padding: 8 }}>No agents yet.</p>
+        )}
+        <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <input placeholder="Agent 名称" value={newAgentName} onChange={(e) => setNewAgentName(e.target.value)}
+            style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontSize: 12 }} />
+          <textarea placeholder="Soul (性格描述)" value={newAgentSoul} onChange={(e) => setNewAgentSoul(e.target.value)} rows={2}
+            style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontSize: 12, resize: 'vertical' }} />
+          <input placeholder="Model (可选)" value={newAgentModel} onChange={(e) => setNewAgentModel(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') createNewAgent() }}
+            style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontSize: 12 }} />
+          <button className="secondary-btn" style={{ margin: 0, fontSize: 12 }}
+            disabled={!newAgentName.trim()} onClick={createNewAgent}>
+            + 创建 Template
           </button>
         </div>
       </div>
