@@ -367,7 +367,16 @@ function createWindow() {
       nodeIntegration: false,
     },
   })
-  mainWindow.loadFile('renderer/index.html')
+
+  // Load from Vite dev server in dev mode, built files in production
+  const isDev = process.argv.includes('--dev') || process.env.NODE_ENV === 'development'
+  if (isDev) {
+    mainWindow.loadURL('http://localhost:5173')
+    mainWindow.webContents.openDevTools()
+  } else {
+    mainWindow.loadFile('renderer/index.html')
+  }
+
   mainWindow.webContents.on('console-message', (_, level, msg) => {
     console.log(`[renderer ${level}] ${msg}`)
   })
