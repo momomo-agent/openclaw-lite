@@ -27,7 +27,7 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu, on
   // F251: Group sessions use group.png
   let avatarEl: React.ReactNode
   if (isGroup) {
-    avatarEl = <img src="avatars/group.png" className="avatar-img" />
+    avatarEl = <img src="../avatars/group.png" className="avatar-img" />
   } else {
     avatarEl = (
       <Avatar
@@ -158,8 +158,11 @@ export default function Sidebar() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
-  // Restore persisted AI status from session data
+  // Restore persisted AI status from session data (once on mount)
+  const statusRestored = useRef(false)
   useEffect(() => {
+    if (statusRestored.current || sessions.length === 0) return
+    statusRestored.current = true
     for (const s of sessions) {
       if (s.statusText) setStatus(s.id, s.statusText)
     }

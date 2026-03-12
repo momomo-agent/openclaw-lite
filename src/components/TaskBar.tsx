@@ -25,9 +25,11 @@ export default function TaskBar({ sessionId }: TaskBarProps) {
 
   // Auto-refresh on task changes
   useEffect(() => {
-    api.onTasksChanged?.((sid: string) => {
+    const handler = (sid: string) => {
       if (sid === sessionId) refresh()
-    })
+    }
+    const cleanup = api.onTasksChanged?.(handler)
+    return () => { if (typeof cleanup === 'function') cleanup() }
   }, [sessionId])
 
   const refresh = async () => {

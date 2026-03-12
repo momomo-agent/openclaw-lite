@@ -30,17 +30,21 @@ function _writeWsConfig(workspacePath, config) {
 function _ensureAvatar(workspacePath, config) {
   const avatarDest = path.join(workspacePath, CONFIG_DIR, 'avatar.png')
 
-  // If avatar is already an image file AND the file exists, nothing to do
-  if (config.avatar && config.avatar.includes('.') && fs.existsSync(avatarDest)) return config
+  // If avatar is an image file, check that actual file exists
+  if (config.avatar && config.avatar.includes('.')) {
+    const actualPath = path.join(workspacePath, CONFIG_DIR, config.avatar)
+    if (fs.existsSync(actualPath)) return config
+    // Config points to missing file — fall through to auto-generate
+  }
 
-  // If file exists but config doesn't point to it, fix config
+  // If avatar.png file exists but config doesn't point to it, fix config
   if (fs.existsSync(avatarDest)) {
     config.avatar = 'avatar.png'
     _writeWsConfig(workspacePath, config)
     return config
   }
 
-  // Pick a random preset (1-5) and copy it
+  // Auto-generate: pick a random preset (1-5) and copy it
   const presetIndex = Math.floor(Math.random() * 5) + 1
   const presetsDir = path.join(__dirname, '..', 'renderer', 'avatars')
   const src = path.join(presetsDir, `${presetIndex}.png`)

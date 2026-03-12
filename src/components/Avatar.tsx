@@ -1,3 +1,5 @@
+import { useRef } from 'react'
+
 interface AvatarProps {
   raw?: string
   role: 'user' | 'assistant'
@@ -6,13 +8,14 @@ interface AvatarProps {
 }
 
 export function Avatar({ raw, role, wsPath, userAvatarPath }: AvatarProps) {
-  const ts = Date.now()
+  // Stable cache-buster: only changes when the component mounts, not every render
+  const ts = useRef(Date.now())
 
   // User role: show user profile avatar
   if (role === 'user' && userAvatarPath) {
     return (
       <img
-        src={`file://${userAvatarPath}?t=${ts}`}
+        src={`file://${userAvatarPath}?t=${ts.current}`}
         className="avatar-img"
         onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.textContent = '👤' }}
       />
@@ -26,7 +29,7 @@ export function Avatar({ raw, role, wsPath, userAvatarPath }: AvatarProps) {
   if (raw.includes('.') && wsPath) {
     return (
       <img
-        src={`file://${wsPath}/.paw/${raw}?t=${ts}`}
+        src={`file://${wsPath}/.paw/${raw}?t=${ts.current}`}
         className="avatar-img"
         onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement!.textContent = '🤖' }}
       />

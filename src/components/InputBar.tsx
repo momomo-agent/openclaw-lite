@@ -149,6 +149,27 @@ export default function InputBar({ sessionId, onSend }: InputBarProps) {
   // F246: Image preview helper
   const isImage = (f: File) => f.type.startsWith('image/')
 
+  // Stable object URLs for file previews (avoid re-creating on every render)
+  const previewUrls = useRef<Map<File, string>>(new Map())
+  const getPreviewUrl = (f: File) => {
+    let url = previewUrls.current.get(f)
+    if (!url) {
+      url = URL.createObjectURL(f)
+      previewUrls.current.set(f, url)
+    }
+    return url
+  }
+  // Revoke URLs for removed files
+  useEffect(() => {
+    const currentFiles = new Set(files)
+    for (const [file, url] of previewUrls.current) {
+      if (!currentFiles.has(file)) {
+        URL.revokeObjectURL(url)
+        previewUrls.current.delete(file)
+      }
+    }
+  }, [files])
+
   return (
     <div ref={wrapRef} className={`input-float-wrap ${dragOver ? 'drag-over' : ''}`}>
       {/* F245: Drag overlay */}
@@ -170,7 +191,7 @@ export default function InputBar({ sessionId, onSend }: InputBarProps) {
               <div key={i} className="attach-chip" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 {isImage(f) && (
                   <img
-                    src={URL.createObjectURL(f)}
+                    src={getPreviewUrl(f)}
                     style={{ width: 24, height: 24, borderRadius: 4, objectFit: 'cover' }}
                   />
                 )}

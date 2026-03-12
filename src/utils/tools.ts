@@ -8,11 +8,23 @@ interface ToolAction {
   hidden?: boolean
 }
 
+/** Parse tool input: if already an object return it, otherwise try JSON.parse */
+function parseInput(input?: any): Record<string, any> | null {
+  if (!input) return null
+  if (typeof input === 'object') return input
+  try { return JSON.parse(input) } catch { return null }
+}
+
+/** Extract basename from a file path */
+function basename(path: string): string {
+  return path.split('/').pop() || path
+}
+
 const TOOL_ACTIONS: Record<string, ToolAction> = {
   // File operations
-  file_read:    { verb: 'Read', icon: '📄', argKey: 'path', extract: v => v?.split('/').pop() || v },
-  file_write:   { verb: 'Wrote', icon: '✏️', argKey: 'path', extract: v => v?.split('/').pop() || v },
-  file_edit:    { verb: 'Edited', icon: '✏️', argKey: 'path', extract: v => v?.split('/').pop() || v },
+  file_read:    { verb: 'Read', icon: '📄', argKey: 'path', extract: v => basename(v) },
+  file_write:   { verb: 'Wrote', icon: '✏️', argKey: 'path', extract: v => basename(v) },
+  file_edit:    { verb: 'Edited', icon: '✏️', argKey: 'path', extract: v => basename(v) },
 
   // Execution
   shell_exec:   { verb: 'Ran', icon: '⚡', argKey: 'command', extract: v => v?.split('\n')[0]?.slice(0, 40) },
@@ -68,9 +80,7 @@ export function humanizeToolStep(name: string, input?: any): { text: string; ico
 
   let target = ''
   if (action.argKey && input) {
-    const src = typeof input === 'object'
-      ? input
-      : (() => { try { return JSON.parse(input) } catch { return null } })()
+    const src = parseInput(input)
     if (src) {
       const raw = src[action.argKey]
       target = raw ? (action.extract ? action.extract(raw) : String(raw)) : ''
@@ -85,12 +95,9 @@ export function humanizeToolStep(name: string, input?: any): { text: string; ico
 
 /** Extract the most relevant arg value from a tool step's input, truncated */
 export function extractArgPreview(name: string, input?: any, maxLen = 60): string | null {
-  if (!input) return null
-  const action = TOOL_ACTIONS[name]
-  const src = typeof input === 'object'
-    ? input
-    : (() => { try { return JSON.parse(input) } catch { return null } })()
+  const src = parseInput(input)
   if (!src) return null
+  const action = TOOL_ACTIONS[name]
 
   // Use the defined argKey first
   if (action?.argKey && src[action.argKey]) {
@@ -117,21 +124,22 @@ export function summarizeToolSteps(steps: ToolStep[]): string | null {
     const h = humanizeToolStep(s.name, s.input)
     if (h.hidden) continue
     const n = s.name.toLowerCase()
+    const src = parseInput(s.input)
 
     if (n.includes('read') && !n.includes('memory')) {
       cats.read++
-      const path = s.input?.path || s.input?.file_path
-      if (samples.read.length < 1 && path) samples.read.push(path.split('/').pop())
+      const path = src?.path || src?.file_path
+      if (samples.read.length < 1 && path) samples.read.push(basename(path))
     } else if (n.includes('edit') || n.includes('write')) {
       cats.edit++
-      const path = s.input?.path || s.input?.file_path
-      if (samples.edit.length < 1 && path) samples.edit.push(path.split('/').pop())
+      const path = src?.path || src?.file_path
+      if (samples.edit.length < 1 && path) samples.edit.push(basename(path))
     } else if (n.includes('exec') || n.includes('bash') || n === 'process' || n === 'code_exec') {
       cats.exec++
-    } else if (n.includes('grep') || n.includes('search') && !n.includes('memory')) {
+    } else if ((n.includes('grep') || n.includes('search')) && !n.includes('memory')) {
       cats.search++
-      if (samples.search.length < 1 && s.input?.pattern) samples.search.push(s.input.pattern)
-      else if (samples.search.length < 1 && s.input?.query) samples.search.push(s.input.query)
+      if (samples.search.length < 1 && src?.pattern) samples.search.push(src.pattern)
+      else if (samples.search.length < 1 && src?.query) samples.search.push(src.query)
     } else if (n.startsWith('memory_')) {
       cats.memory++
     } else if (n.startsWith('task_')) {
@@ -140,7 +148,7 @@ export function summarizeToolSteps(steps: ToolStep[]): string | null {
       cats.agent++
     } else if (n.includes('skill')) {
       cats.skill++
-      if (samples.skill.length < 1 && s.input?.name) samples.skill.push(s.input.name)
+      if (samples.skill.length < 1 && src?.name) samples.skill.push(src.name)
     } else {
       cats.other++
     }

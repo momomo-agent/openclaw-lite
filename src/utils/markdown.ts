@@ -6,15 +6,17 @@ declare global {
 }
 
 let _clawDir: string | null = null
+let _cachedRenderer: any = null
+let _rendererClawDir: string | null = null
 
 export function setClawDir(dir: string | null) {
   _clawDir = dir
 }
 
-export function renderMarkdown(text: string): string {
-  if (!window.marked) return text
+function getRenderer() {
+  // Reuse renderer if clawDir hasn't changed
+  if (_cachedRenderer && _rendererClawDir === _clawDir) return _cachedRenderer
 
-  // F244: Custom image renderer for relative paths
   const renderer = new window.marked.Renderer()
   const originalImage = renderer.image
   renderer.image = function (href: string, title: string, text: string) {
@@ -26,7 +28,14 @@ export function renderMarkdown(text: string): string {
     return `<img src="${href}" alt="${text || ''}"${titleAttr} style="max-width:100%;border-radius:4px">`
   }
 
-  return window.marked.parse(text, { renderer })
+  _cachedRenderer = renderer
+  _rendererClawDir = _clawDir
+  return renderer
+}
+
+export function renderMarkdown(text: string): string {
+  if (!window.marked) return text
+  return window.marked.parse(text, { renderer: getRenderer() })
 }
 
 export function stripMarkdown(text: string): string {

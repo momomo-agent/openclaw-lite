@@ -26,12 +26,14 @@ export interface Message {
   thinking?: string
   error?: string
   requestId?: string
+  roundPurpose?: string
+  attachments?: { name: string; type: string; url?: string }[]
 }
 
 export interface ToolStep {
   name: string
-  input?: any
-  output?: any
+  input?: Record<string, any> | string
+  output?: string
 }
 
 export interface Workspace {
@@ -53,7 +55,7 @@ export interface Config {
   codingAgent?: string
   tavilyKey?: string
   execApproval?: boolean
-  heartbeat?: boolean
+  heartbeat?: boolean | { enabled: boolean; intervalMinutes?: number }
   heartbeatInterval?: number
   mcpServers?: any
 }

@@ -8,6 +8,8 @@ import MembersPanel from './MembersPanel'
 import TaskBar from './TaskBar'
 import SettingsPanel from './SettingsPanel'
 
+const CHARS_PER_TOKEN = 3.5
+
 export default function ChatView() {
   const { currentSessionId, setCurrentSessionId, setSessions, setActivity, setStatus, workspaces, userProfile } = useAppState()
   const api = useIPC()
@@ -26,7 +28,6 @@ export default function ChatView() {
 
   // F222/F242: Delegate state
   const delegateMsg = useRef<Message | null>(null)
-  const pendingDelegateMsgs = useRef<Message[]>([])
 
   // F243: CC output state
   const [ccOutput, setCcOutput] = useState<{ task: string; lines: string[]; running: boolean } | null>(null)
@@ -80,10 +81,30 @@ export default function ChatView() {
     return () => document.removeEventListener('click', handleClick)
   }, [api])
 
+  // Helper: reset all streaming state
+  const resetStreaming = () => {
+    currentRequestId.current = null
+    streamingMsg.current = null
+    delegateMsg.current = null
+    setCcOutput(null)
+    setStreamingStatus('')
+    statusIsAiAuthored.current = false
+  }
+
+  // Helper: update last message in list with a shallow copy of the ref
+  const updateLastMessage = (msg: Message) => {
+    setMessages(prev => [...prev.slice(0, -1), { ...msg }])
+  }
+
   useEffect(() => {
     // --- Core streaming events ---
     const handleTextStart = (data: any) => {
       if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
+      // For round > 0, update existing streaming message instead of creating a new one
+      if (streamingMsg.current) {
+        // Multi-round: just reset content for new round, keep identity
+        return
+      }
       streamingMsg.current = {
         id: 'streaming-' + Date.now(),
         role: 'assistant',
@@ -93,7 +114,8 @@ export default function ChatView() {
         thinking: '',
         sender: data.agentName,
         avatar: data.avatar,
-        workspacePath: data.wsPath
+        workspacePath: data.wsPath,
+        workspaceId: data.workspaceId,
       }
       setStreamingStatus('Thinking...')
       statusIsAiAuthored.current = false
@@ -110,7 +132,7 @@ export default function ChatView() {
       } else {
         streamingMsg.current.content += text
       }
-      setMessages(prev => [...prev.slice(0, -1), { ...streamingMsg.current! }])
+      updateLastMessage(streamingMsg.current)
     }
 
     const handleToolStep = (data: any) => {
@@ -122,18 +144,16 @@ export default function ChatView() {
       if (!statusIsAiAuthored.current) {
         setStreamingStatus(`${data.name || data.tool}...`)
       }
-      setMessages(prev => [...prev.slice(0, -1), { ...target }])
+      updateLastMessage(target)
       if (currentSessionId) setActivity(currentSessionId, 'running')
     }
 
     const handleRoundInfo = (data: any) => {
       if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
-      // F237: Round info — update tool group purpose if available
       const target = delegateMsg.current || streamingMsg.current
       if (target && data.purpose) {
-        // Store round purpose on the message for ToolGroup to use
-        ;(target as any).roundPurpose = data.purpose
-        setMessages(prev => [...prev.slice(0, -1), { ...target }])
+        target.roundPurpose = data.purpose
+        updateLastMessage(target)
       }
     }
 
@@ -152,7 +172,6 @@ export default function ChatView() {
         setStreamingStatus(data.text)
         if (currentSessionId) {
           setStatus(currentSessionId, data.text)
-          // Persist AI status to SQLite
           api.updateSessionStatus?.(currentSessionId, 'running', data.text)
         }
       }
@@ -189,14 +208,13 @@ export default function ChatView() {
       } else {
         delegateMsg.current.content += text
       }
-      setMessages(prev => [...prev.slice(0, -1), { ...delegateMsg.current! }])
+      updateLastMessage(delegateMsg.current)
     }
 
     const handleDelegateEnd = (data: any) => {
       if (!delegateMsg.current) return
       if (data.fullText !== undefined) delegateMsg.current.content = data.fullText
 
-      // F242: NO_REPLY / stay_silent detection — remove empty cards
       const content = delegateMsg.current.content.trim()
       const isNoReply = !content || content === 'NO_REPLY' || content === '(silent)'
       const hasOnlyHiddenTools = (delegateMsg.current.toolSteps || []).every(s =>
@@ -204,12 +222,9 @@ export default function ChatView() {
       )
 
       if (isNoReply && hasOnlyHiddenTools && !delegateMsg.current.thinking) {
-        // Remove empty delegate card
         setMessages(prev => prev.filter(m => m.id !== delegateMsg.current!.id))
       } else {
-        // F242: Queue for DB save
-        pendingDelegateMsgs.current.push({ ...delegateMsg.current })
-        setMessages(prev => [...prev.slice(0, -1), { ...delegateMsg.current! }])
+        updateLastMessage(delegateMsg.current)
       }
       delegateMsg.current = null
     }
@@ -230,39 +245,46 @@ export default function ChatView() {
       setCcOutput(prev => {
         if (!prev) return null
         const newLines = [...prev.lines, ...chunk.split('\n')]
-        // Keep last 50 lines
         return { ...prev, lines: newLines.slice(-50) }
       })
-      // Also append to streaming message
       if (streamingMsg.current) {
         streamingMsg.current.content += chunk
-        setMessages(prev => [...prev.slice(0, -1), { ...streamingMsg.current! }])
+        updateLastMessage(streamingMsg.current)
       }
     }
 
     // --- F240: Auto-rotate ---
     const handleAutoRotate = (data: any) => {
       if (data.sessionId && data.sessionId !== currentSessionId) return
-      // Auto-rotate triggers next agent — the backend handles the actual chat call,
-      // we just need to update activity state
       if (currentSessionId) setActivity(currentSessionId, 'thinking')
     }
 
     // --- Done / Error ---
     const handleDone = async (data: any) => {
       if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
-      currentRequestId.current = null
-      streamingMsg.current = null
-      delegateMsg.current = null
-      pendingDelegateMsgs.current = []
-      setCcOutput(null)
-      setStreamingStatus('')
-      statusIsAiAuthored.current = false
+      resetStreaming()
       if (currentSessionId) {
         setActivity(currentSessionId, 'idle')
-        await loadSession()
-        // F239: Auto-generate title
-        await maybeGenerateTitle()
+        // Load session once; use the result for both message display and title generation
+        const session = await api.loadSession(currentSessionId)
+        if (session) {
+          setMessages(session.messages || [])
+          setSessionTitle(session.title)
+          setSessionParticipants(session.participants || [])
+          // F239: Auto-generate title from first user message
+          if (session.title === 'New Chat' || session.title === '新对话') {
+            const firstUser = (session.messages || []).find((m: any) => m.role === 'user')
+            if (firstUser) {
+              let title = (firstUser.content || '').split(/[。！？\n.!?]/)[0].trim()
+              if (title.length > 30) title = title.slice(0, 30) + '...'
+              if (!title) title = (firstUser.content || '').slice(0, 30).trim() || 'New Chat'
+              await api.renameSession(currentSessionId, title)
+              setSessionTitle(title)
+              const updated = await api.listSessions()
+              setSessions(updated)
+            }
+          }
+        }
       }
     }
 
@@ -275,45 +297,33 @@ export default function ChatView() {
         timestamp: Date.now(),
         error: data.error
       }])
-      currentRequestId.current = null
-      streamingMsg.current = null
-      delegateMsg.current = null
-      setCcOutput(null)
-      setStreamingStatus('')
-      statusIsAiAuthored.current = false
+      resetStreaming()
       if (currentSessionId) setActivity(currentSessionId, 'idle')
     }
 
-    // Task changes
-    const handleTasksChanged = (sid: string) => {
-      if (sid === currentSessionId) {
-        // TaskBar will auto-refresh via its own effect
+    // Register all listeners and collect cleanup functions
+    const cleanups = [
+      api.onTextStart?.(handleTextStart),
+      api.onToken?.(handleToken),
+      api.onToolStep?.(handleToolStep),
+      api.onRoundInfo?.(handleRoundInfo),
+      api.onStatus?.(handleStatus),
+      api.onWatsonStatus?.(handleWatsonStatus),
+      api.onDelegateStart?.(handleDelegateStart),
+      api.onDelegateToken?.(handleDelegateToken),
+      api.onDelegateEnd?.(handleDelegateEnd),
+      api.onCcStatus?.(handleCcStatus),
+      api.onCcOutput?.(handleCcOutput),
+      api.onChatDone?.(handleDone),
+      api.onChatError?.(handleError),
+      api.onAutoRotate?.(handleAutoRotate),
+    ]
+
+    return () => {
+      for (const fn of cleanups) {
+        if (typeof fn === 'function') fn()
       }
     }
-
-    // Register all listeners
-    api.onTextStart?.(handleTextStart)
-    api.onToken?.(handleToken)
-    api.onToolStep?.(handleToolStep)
-    api.onRoundInfo?.(handleRoundInfo)
-    api.onStatus?.(handleStatus)
-    api.onWatsonStatus?.(handleWatsonStatus)
-    api.onDelegateStart?.(handleDelegateStart)
-    api.onDelegateToken?.(handleDelegateToken)
-    api.onDelegateEnd?.(handleDelegateEnd)
-    api.onCcStatus?.(handleCcStatus)
-    api.onCcOutput?.(handleCcOutput)
-    api.onChatDone?.(handleDone)
-    api.onChatError?.(handleError)
-    api.onAutoRotate?.(handleAutoRotate)
-    api.onTasksChanged?.(handleTasksChanged)
-    // onSessionAgentsChanged: refresh members panel
-    api.onSessionAgentsChanged?.((sid: string) => {
-      if (sid === currentSessionId) {
-        // Trigger MembersPanel refresh by toggling state
-        setShowMembers(prev => { if (prev) return prev; return prev })
-      }
-    })
   }, [currentSessionId])
 
   const loadSession = async () => {
@@ -324,26 +334,6 @@ export default function ChatView() {
       setSessionTitle(session.title)
       setSessionParticipants(session.participants || [])
     }
-  }
-
-  // F239: Auto-generate title from first user message
-  const maybeGenerateTitle = async () => {
-    if (!currentSessionId) return
-    const session = await api.loadSession(currentSessionId)
-    if (!session) return
-    // Only generate if title is default and has messages
-    if (session.title && session.title !== 'New Chat' && session.title !== '新对话') return
-    const firstUser = (session.messages || []).find((m: any) => m.role === 'user')
-    if (!firstUser) return
-    const content = firstUser.content || ''
-    // Smart title extraction: first sentence or first 30 chars
-    let title = content.split(/[。！？\n.!?]/)[0].trim()
-    if (title.length > 30) title = title.slice(0, 30) + '...'
-    if (!title) title = content.slice(0, 30).trim() || 'New Chat'
-    await api.renameSession(currentSessionId, title)
-    setSessionTitle(title)
-    const updated = await api.listSessions()
-    setSessions(updated)
   }
 
   // Slash commands
@@ -378,7 +368,7 @@ export default function ChatView() {
       const config = await api.getConfig()
       const usage = await api.getTokenUsage?.(currentSessionId) || { inputTokens: 0, outputTokens: 0 }
       const systemPrompt = await api.buildSystemPrompt?.() || ''
-      const estimatedCtx = Math.ceil((JSON.stringify(session?.messages || []).length + systemPrompt.length) / 3.5)
+      const estimatedCtx = Math.ceil((JSON.stringify(session?.messages || []).length + systemPrompt.length) / CHARS_PER_TOKEN)
       addSystemMsg([
         '**Session Status**',
         `- Messages: ${msgCount}`,
@@ -423,11 +413,7 @@ export default function ChatView() {
     if (cmd === '/stop') {
       await api.chatCancel?.()
       await api.ccStop?.()
-      currentRequestId.current = null
-      streamingMsg.current = null
-      delegateMsg.current = null
-      setCcOutput(null)
-      setStreamingStatus('')
+      resetStreaming()
       if (currentSessionId) setActivity(currentSessionId, 'idle')
       return true
     }
@@ -438,9 +424,9 @@ export default function ChatView() {
       const totalChars = msgChars + systemPrompt.length
       addSystemMsg([
         `**Context:**`,
-        `- Messages: ~${Math.ceil(msgChars / 3.5).toLocaleString()} tokens`,
-        `- System prompt: ~${Math.ceil(systemPrompt.length / 3.5).toLocaleString()} tokens`,
-        `- Total: ~${Math.ceil(totalChars / 3.5).toLocaleString()} tokens (${(totalChars / 1000).toFixed(1)}k chars)`,
+        `- Messages: ~${Math.ceil(msgChars / CHARS_PER_TOKEN).toLocaleString()} tokens`,
+        `- System prompt: ~${Math.ceil(systemPrompt.length / CHARS_PER_TOKEN).toLocaleString()} tokens`,
+        `- Total: ~${Math.ceil(totalChars / CHARS_PER_TOKEN).toLocaleString()} tokens (${(totalChars / 1000).toFixed(1)}k chars)`,
       ].join('\n'))
       return true
     }
@@ -459,9 +445,8 @@ export default function ChatView() {
       timestamp: Date.now(),
       sender: userProfile?.userName || 'You',
     }
-    // Store file info for rendering
     if (files.length > 0) {
-      ;(userMsg as any).attachments = files.map(f => ({
+      userMsg.attachments = files.map(f => ({
         name: f.name,
         type: f.type,
         url: f.type.startsWith('image/') ? URL.createObjectURL(f) : undefined,

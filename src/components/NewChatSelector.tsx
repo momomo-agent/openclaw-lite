@@ -210,7 +210,7 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
                       style={{ width: 36, height: 36, borderRadius: '50%', overflow: 'hidden', cursor: 'pointer', border: '2px solid var(--border-muted)', transition: 'border-color 0.15s' }}
                       onMouseEnter={(e) => e.currentTarget.style.borderColor = 'var(--accent-primary)'}
                       onMouseLeave={(e) => e.currentTarget.style.borderColor = 'var(--border-muted)'}>
-                      <img src={`avatars/${n}.png`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <img src={`../avatars/${n}.png`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     </div>
                   ))}
                 </div>

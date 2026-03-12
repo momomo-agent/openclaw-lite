@@ -138,7 +138,7 @@ export default function MembersPanel({ visible, sessionId, onClose }: MembersPan
         {/* User */}
         <div className="member-item" style={{ display: 'flex', alignItems: 'center', padding: '4px 0', gap: 8 }}>
           {userProfile?.avatarAbsPath
-            ? <img src={`file://${userProfile.avatarAbsPath}`} style={{ width: 16, height: 16, borderRadius: '50%', objectFit: 'cover' }} />
+            ? <img src={`file://${userProfile.avatarAbsPath}?t=${Date.now()}`} style={{ width: 16, height: 16, borderRadius: '50%', objectFit: 'cover' }} />
             : <span>👤</span>}
           <span style={{ fontSize: 13 }}>{userProfile?.userName || 'You'}</span>
         </div>

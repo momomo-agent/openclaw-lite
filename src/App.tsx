@@ -34,26 +34,25 @@ function AppContent() {
   const enterChat = async () => {
     setNeedsSetup(false)
 
-    const config = await api.getConfig()
+    // Parallelize independent IPC calls
+    const [config, profile, ws, prefs, sessions] = await Promise.all([
+      api.getConfig(),
+      api.getUserProfile(),
+      api.listWorkspaces(),
+      api.getPrefs?.(),
+      api.listSessions(),
+    ])
+
     setTheme(config?.theme || 'light')
-
-    const profile = await api.getUserProfile()
     if (profile) setUserProfile(profile)
-
-    const ws = await api.listWorkspaces()
     setWorkspaces(ws)
 
-    // Set clawDir from first workspace for markdown image resolution
     if (ws.length > 0 && ws[0].path) {
       setClawDir(ws[0].path)
       setMarkdownClawDir(ws[0].path)
     }
 
-    // Load feature flags
-    const prefs = await api.getPrefs?.()
     if (prefs?.featureFlags) setFeatureFlags(prefs.featureFlags)
-
-    const sessions = await api.listSessions()
     setSessions(sessions)
 
     // Auto-select or bootstrap

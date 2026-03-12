@@ -18,12 +18,17 @@ export default function MessageItem({ message, isStreaming, statusText, userAvat
   const isUser = message.role === 'user'
   const isError = message.role === 'error'
   const isA2A = message.role === 'agent-to-agent'
-  const ws = message.workspaceId ? workspaces.find(w => w.id === message.workspaceId) : undefined
+
+  // Dynamic workspace identity resolution — always use live identity, never stale history
+  const ws = message.workspaceId
+    ? workspaces.find(w => w.id === message.workspaceId)
+    : (message.workspacePath ? workspaces.find(w => w.path === message.workspacePath) : undefined)
+  const resolvedAvatar = (!isUser && ws?.identity?.avatar) ? ws.identity.avatar : message.avatar
+  const resolvedName = (!isUser && ws?.identity?.name) ? ws.identity.name : message.sender
 
   const renderContent = (text: string) => linkifyPaths(renderMarkdown(text))
 
-  // F247: Image attachments on user messages
-  const attachments = (message as any).attachments as { name: string; type: string; url?: string }[] | undefined
+  const attachments = message.attachments
 
   return (
     <div className={`msg-card ${message.role}${isError ? ' msg-error' : ''}`}>
@@ -36,7 +41,7 @@ export default function MessageItem({ message, isStreaming, statusText, userAvat
           </span>
         ) : (
           <Avatar
-            raw={message.avatar}
+            raw={resolvedAvatar}
             role={isUser ? 'user' : 'assistant'}
             wsPath={ws?.path || message.workspacePath}
             userAvatarPath={userAvatarPath}
@@ -46,7 +51,7 @@ export default function MessageItem({ message, isStreaming, statusText, userAvat
       <div className="msg-body">
         <div className="msg-header">
           <span className={`msg-name ${isUser ? 'user-name' : ''}${isA2A ? ' a2a-name' : ''}`}>
-            {message.sender || (isUser ? (userProfile?.userName || 'You') : isError ? 'Error' : 'Assistant')}
+            {resolvedName || (isUser ? (userProfile?.userName || 'You') : isError ? 'Error' : 'Assistant')}
           </span>
           <span className="msg-time">
             {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -63,7 +68,7 @@ export default function MessageItem({ message, isStreaming, statusText, userAvat
             <ToolGroup
               steps={message.toolSteps}
               isStreaming={isStreaming}
-              roundPurpose={(message as any).roundPurpose}
+              roundPurpose={message.roundPurpose}
             />
           )}
           {isError ? (
