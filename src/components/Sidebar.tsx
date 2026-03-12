@@ -12,9 +12,10 @@ interface SessionItemProps {
   isActive: boolean
   onClick: () => void
   onContextMenu: (e: React.MouseEvent) => void
+  onDoubleClick: () => void
 }
 
-function SessionItem({ session, workspaces, isActive, onClick, onContextMenu }: SessionItemProps) {
+function SessionItem({ session, workspaces, isActive, onClick, onContextMenu, onDoubleClick }: SessionItemProps) {
   const { activityState, aiStatus } = useAppState()
   const activity = activityState.get(session.id) || 'idle'
   const statusText = aiStatus.get(session.id) || ''
@@ -59,6 +60,7 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu }: 
     <div
       className={`session-item ${isActive ? 'active' : ''}`}
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
     >
       <div className="session-avatar">{avatarEl}</div>
@@ -98,7 +100,7 @@ interface ContextMenuState {
 }
 
 export default function Sidebar() {
-  const { sessions, workspaces, currentSessionId, setCurrentSessionId, setSessions, setWorkspaces } = useAppState()
+  const { sessions, workspaces, currentSessionId, setCurrentSessionId, setSessions, setWorkspaces, setStatus } = useAppState()
   const api = useIPC()
   const [sidebarVisible, setSidebarVisible] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
@@ -155,6 +157,13 @@ export default function Sidebar() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
+
+  // Restore persisted AI status from session data
+  useEffect(() => {
+    for (const s of sessions) {
+      if (s.statusText) setStatus(s.id, s.statusText)
+    }
+  }, [sessions])
 
   // Close context menu on click outside
   useEffect(() => {
@@ -214,6 +223,8 @@ export default function Sidebar() {
 
   const handleDelete = async (id: string) => {
     setCtxMenu(prev => ({ ...prev, visible: false }))
+    const session = sessions.find(s => s.id === id)
+    if (!confirm(`确定要删除 "${session?.title || id}" 吗？`)) return
     await api.deleteSession(id)
     if (currentSessionId === id) setCurrentSessionId(null)
     const updated = await api.listSessions()
@@ -278,6 +289,7 @@ export default function Sidebar() {
               workspaces={workspaces}
               isActive={s.id === currentSessionId}
               onClick={() => setCurrentSessionId(s.id)}
+              onDoubleClick={() => handleRename(s.id)}
               onContextMenu={(e) => handleContextMenu(e, s.id)}
             />
           )

@@ -215,6 +215,11 @@ export default function InputBar({ sessionId, onSend }: InputBarProps) {
             value={text}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
+            onInput={(e) => {
+              const el = e.currentTarget
+              el.style.height = 'auto'
+              el.style.height = Math.min(el.scrollHeight, 120) + 'px'
+            }}
             onCompositionStart={() => { composing.current = true }}
             onCompositionEnd={() => { composing.current = false }}
             placeholder="Ask anything... (@name to target)"

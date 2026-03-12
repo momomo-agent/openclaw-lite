@@ -13,6 +13,7 @@ export default function ChatView() {
   const api = useIPC()
   const [messages, setMessages] = useState<Message[]>([])
   const [sessionTitle, setSessionTitle] = useState('New Chat')
+  const [sessionParticipants, setSessionParticipants] = useState<string[]>([])
   const [showSettings, setShowSettings] = useState(false)
   const [showMembers, setShowMembers] = useState(false)
   const [streamingStatus, setStreamingStatus] = useState('')
@@ -306,6 +307,13 @@ export default function ChatView() {
     api.onChatError?.(handleError)
     api.onAutoRotate?.(handleAutoRotate)
     api.onTasksChanged?.(handleTasksChanged)
+    // onSessionAgentsChanged: refresh members panel
+    api.onSessionAgentsChanged?.((sid: string) => {
+      if (sid === currentSessionId) {
+        // Trigger MembersPanel refresh by toggling state
+        setShowMembers(prev => { if (prev) return prev; return prev })
+      }
+    })
   }, [currentSessionId])
 
   const loadSession = async () => {
@@ -314,6 +322,7 @@ export default function ChatView() {
     if (session) {
       setMessages(session.messages || [])
       setSessionTitle(session.title)
+      setSessionParticipants(session.participants || [])
     }
   }
 
@@ -355,6 +364,11 @@ export default function ChatView() {
         setCurrentSessionId(result.id)
         const sessions = await api.listSessions()
         setSessions(sessions)
+        // Send arg text as first message if provided
+        if (arg) {
+          const reqId = await api.chatPrepare?.() || Date.now().toString()
+          await api.chat({ sessionId: result.id, message: arg, requestId: reqId })
+        }
       }
       return true
     }
@@ -401,6 +415,7 @@ export default function ChatView() {
       return true
     }
     if (cmd === '/reset' && currentSessionId) {
+      await api.clearMessages?.(currentSessionId)
       setMessages([])
       addSystemMsg('对话已重置')
       return true
@@ -479,7 +494,22 @@ export default function ChatView() {
     <div className="chat-main">
       <div className="chat-header">
         <div className="title-area">
-          <span id="sessionTitle">{sessionTitle}</span>
+          <span id="sessionTitle">
+            {(() => {
+              const wsId = sessionParticipants[0]
+              const ws = wsId ? workspaces.find(w => w.id === wsId) : workspaces[0]
+              const wsName = ws?.identity?.name
+              return wsName && sessionTitle !== 'New Chat' ? `${wsName} · ${sessionTitle}` : sessionTitle
+            })()}
+          </span>
+          {sessionParticipants.length > 0 && (
+            <span className="header-members">
+              {sessionParticipants.map(pid => {
+                const w = workspaces.find(ws => ws.id === pid)
+                return w?.identity?.name || pid
+              }).join(', ')}
+            </span>
+          )}
         </div>
         <div className="header-actions">
           <button className="icon-btn" onClick={() => setShowMembers(!showMembers)} title="Members">
