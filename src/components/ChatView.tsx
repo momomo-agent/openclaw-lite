@@ -11,17 +11,20 @@ import SettingsPanel from './SettingsPanel'
 const CHARS_PER_TOKEN = 3.5
 
 export default function ChatView() {
-  const { currentSessionId, setCurrentSessionId, setSessions, setActivity, setStatus, workspaces, userProfile, sidebarVisible, setSidebarVisible } = useAppState()
+  const { currentSessionId, setCurrentSessionId, sessions, setSessions, setActivity, setStatus, workspaces, userProfile, sidebarVisible, setSidebarVisible } = useAppState()
   const api = useIPC()
   const [messages, setMessages] = useState<Message[]>([])
   const [sessionTitle, setSessionTitle] = useState('New Chat')
-  const [sessionParticipants, setSessionParticipants] = useState<string[]>([])
   const [showSettings, setShowSettings] = useState(false)
   const [showMembers, setShowMembers] = useState(false)
   const [streamingStatus, setStreamingStatus] = useState('')
   const currentRequestId = useRef<string | null>(null)
   const streamingMsg = useRef<Message | null>(null)
   const statusIsAiAuthored = useRef(false)
+
+  // Derive participants from sessions store (always live, never stale)
+  const currentSession = sessions.find(s => s.id === currentSessionId)
+  const sessionParticipants = currentSession?.participants || []
 
   // F223: Session message cache
   const sessionCache = useRef<Map<string, { messages: Message[]; title: string }>>(new Map())
@@ -262,28 +265,50 @@ export default function ChatView() {
     // --- Done / Error ---
     const handleDone = async (data: any) => {
       if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
+      const doneSessionId = currentSessionId
       resetStreaming()
-      if (currentSessionId) {
-        setActivity(currentSessionId, 'idle')
-        // Load session once; use the result for both message display and title generation
-        const session = await api.loadSession(currentSessionId)
-        if (session) {
-          setMessages(session.messages || [])
+      if (doneSessionId) {
+        setActivity(doneSessionId, 'idle')
+        try {
+          // Load authoritative messages from DB
+          const session = await api.loadSession(doneSessionId)
+          if (!session) {
+            console.warn('[ChatView] handleDone: loadSession returned null for', doneSessionId)
+            return  // Keep current messages as-is (streaming state is already captured)
+          }
+          const dbMessages = session.messages || []
+          // If chat-done carries an error:
+          // - If DB has no assistant reply after last user msg → "send failed" (mark user msg)
+          // - Otherwise → "reply error" (append as assistant msg with error flag)
+          if (data.error) {
+            const lastUserIdx = dbMessages.map((m: any) => m.role).lastIndexOf('user')
+            const hasAssistantAfter = lastUserIdx >= 0 && dbMessages.slice(lastUserIdx + 1).some((m: any) => m.role === 'assistant')
+            if (!hasAssistantAfter && lastUserIdx >= 0) {
+              // Never started — mark user message as send failure (persist to DB)
+              dbMessages[lastUserIdx] = { ...dbMessages[lastUserIdx], status: 'failed' }
+              api.updateMessageMeta?.(doneSessionId, dbMessages[lastUserIdx].id, { status: 'failed' })
+            } else {
+              // Reply failed mid-stream — show as assistant error
+              dbMessages.push({ id: 'error-' + Date.now(), role: 'assistant', content: data.error, timestamp: Date.now(), isError: true })
+            }
+          }
+          setMessages(dbMessages)
           setSessionTitle(session.title)
-          setSessionParticipants(session.participants || [])
           // F239: Auto-generate title from first user message
           if (session.title === 'New Chat' || session.title === '新对话') {
-            const firstUser = (session.messages || []).find((m: any) => m.role === 'user')
+            const firstUser = dbMessages.find((m: any) => m.role === 'user')
             if (firstUser) {
               let title = (firstUser.content || '').split(/[。！？\n.!?]/)[0].trim()
               if (title.length > 30) title = title.slice(0, 30) + '...'
               if (!title) title = (firstUser.content || '').slice(0, 30).trim() || 'New Chat'
-              await api.renameSession(currentSessionId, title)
+              await api.renameSession(doneSessionId, title)
               setSessionTitle(title)
               const updated = await api.listSessions()
               setSessions(updated)
             }
           }
+        } catch (err) {
+          console.error('[ChatView] handleDone loadSession error:', err)
         }
       }
     }
@@ -332,7 +357,6 @@ export default function ChatView() {
     if (session) {
       setMessages(session.messages || [])
       setSessionTitle(session.title)
-      setSessionParticipants(session.participants || [])
     }
   }
 
@@ -377,16 +401,6 @@ export default function ChatView() {
         `- Model: ${config?.model || '(default)'}`,
         `- Provider: ${config?.provider || 'anthropic'}`,
       ].join('\n'))
-      return true
-    }
-    if (cmd === '/export' && currentSessionId) {
-      const data = await api.exportSession(currentSessionId)
-      if (data) {
-        const session = await api.loadSession(currentSessionId)
-        const filename = `paw-export-${(session?.title || 'chat').replace(/\s+/g, '-')}.md`
-        await api.writeExport?.(filename, data)
-      }
-      addSystemMsg('导出完成')
       return true
     }
     if ((cmd === '/model' || cmd === '/models') && currentSessionId) {
@@ -458,63 +472,93 @@ export default function ChatView() {
     const requestId = await api.chatPrepare?.() || Date.now().toString()
     currentRequestId.current = requestId
     setActivity(currentSessionId, 'thinking')
-    await api.chat({ sessionId: currentSessionId, message: text, requestId, attachments: files })
+    try {
+      await api.chat({ sessionId: currentSessionId, message: text, requestId, attachments: files })
+    } catch (err: any) {
+      console.error('[ChatView] chat error:', err)
+      resetStreaming()
+      setActivity(currentSessionId, 'idle')
+      // Mark the user message as failed (persist to DB)
+      setMessages(prev => prev.map(m =>
+        m.id === userMsg.id ? { ...m, status: 'failed' } : m
+      ))
+      // Find and mark in DB (message was persisted by main process before streaming)
+      const session = await api.loadSession(currentSessionId)
+      const lastUser = session?.messages?.filter((m: any) => m.role === 'user').pop()
+      if (lastUser) api.updateMessageMeta?.(currentSessionId, lastUser.id, { status: 'failed' })
+    }
   }
 
-  // F228: Retry last message
+  // F228: Retry — delete failed message from DB, remove from UI, resend
   const handleRetry = useCallback(async () => {
     if (!currentSessionId) return
     let lastUserIdx = -1
     for (let i = messages.length - 1; i >= 0; i--) { if (messages[i].role === 'user') { lastUserIdx = i; break } }
     if (lastUserIdx < 0) return
     const lastUserMsg = messages[lastUserIdx]
-    setMessages(prev => prev.slice(0, lastUserIdx + 1))
+    const retryContent = lastUserMsg.content
+    // Delete failed message from DB + remove from UI (and any trailing error messages)
+    api.deleteMessage?.(currentSessionId, lastUserMsg.id)
+    setMessages(prev => prev.slice(0, lastUserIdx))
+    // Resend as new message
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: retryContent,
+      timestamp: Date.now(),
+      sender: userProfile?.userName || 'You',
+    }
+    setMessages(prev => [...prev, userMsg])
     const requestId = await api.chatPrepare?.() || Date.now().toString()
     currentRequestId.current = requestId
     setActivity(currentSessionId, 'thinking')
-    await api.chat({ sessionId: currentSessionId, message: lastUserMsg.content, requestId })
+    try {
+      await api.chat({ sessionId: currentSessionId, message: retryContent, requestId })
+    } catch (err: any) {
+      console.error('[ChatView] retry error:', err)
+      resetStreaming()
+      setActivity(currentSessionId, 'idle')
+      setMessages(prev => prev.map(m =>
+        m.id === userMsg.id ? { ...m, status: 'failed' } : m
+      ))
+    }
   }, [currentSessionId, messages])
 
   return (
     <div className="chat-main">
       <div className={`chat-header${!sidebarVisible ? ' sidebar-hidden' : ''}`}>
-        {!sidebarVisible && (
-          <button className="icon-btn sidebar-toggle" onClick={() => setSidebarVisible(true)}>
-            <span className="ic">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/>
-              </svg>
-            </span>
-          </button>
-        )}
-        <div className="title-area">
-          <span id="sessionTitle">
-            {(() => {
-              const wsId = sessionParticipants[0]
-              const ws = wsId ? workspaces.find(w => w.id === wsId) : workspaces[0]
-              const wsName = ws?.identity?.name
-              return wsName && sessionTitle !== 'New Chat' ? `${wsName} · ${sessionTitle}` : sessionTitle
-            })()}
+        <button className={`icon-btn sidebar-toggle${!sidebarVisible ? ' visible' : ''}`} onClick={() => setSidebarVisible(true)}>
+          <span className="ic">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/>
+            </svg>
           </span>
-          {sessionParticipants.length > 0 && (
-            <span className="header-members">
-              {sessionParticipants.map(pid => {
-                const w = workspaces.find(ws => ws.id === pid)
-                return w?.identity?.name || pid
-              }).join(', ')}
-            </span>
-          )}
+        </button>
+        <div className="title-area">
+          <span id="sessionTitle">{sessionTitle}</span>
+          <span className="header-members">
+            {sessionParticipants.length > 0
+              ? sessionParticipants.map((pid, i) => {
+                  const w = workspaces.find(ws => ws.id === pid)
+                  const name = w?.identity?.name || pid
+                  return i === 0 && sessionParticipants.length > 1 ? `${name}(群主)` : name
+                }).join(', ')
+              : (workspaces[0]?.identity?.name || '')
+            }
+          </span>
         </div>
         <div className="header-actions">
-          <button className="icon-btn" onClick={() => setShowMembers(!showMembers)} title="Members">
+          <button className="icon-btn" onClick={() => setShowMembers(!showMembers)} title="成员管理">
             <span className="ic">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
-                <path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                <circle cx="9" cy="7" r="4"/>
+                <line x1="19" y1="8" x2="19" y2="14"/>
+                <line x1="22" y1="11" x2="16" y2="11"/>
               </svg>
             </span>
           </button>
-          <button className="icon-btn" onClick={() => setShowSettings(!showSettings)}>
+          <button className="icon-btn" onClick={() => setShowSettings(!showSettings)} title="设置">
             <span className="ic">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
@@ -564,7 +608,12 @@ export default function ChatView() {
       <InputBar sessionId={currentSessionId} onSend={handleSend} />
       <TaskBar sessionId={currentSessionId} />
       <SettingsPanel visible={showSettings} onClose={() => setShowSettings(false)} />
-      <MembersPanel visible={showMembers} sessionId={currentSessionId} onClose={() => setShowMembers(false)} />
+      <MembersPanel visible={showMembers} sessionId={currentSessionId} onClose={() => setShowMembers(false)}
+        onChanged={async () => {
+          const updated = await api.listSessions()
+          setSessions(updated)
+        }}
+      />
     </div>
   )
 }

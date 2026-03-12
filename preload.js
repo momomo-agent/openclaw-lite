@@ -1,5 +1,13 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
+// ── Helper: create a clean IPC event listener bridge ──
+// Returns cleanup function. No removeAllListeners — lifecycle owned by React useEffect.
+function onIpc(channel, cb) {
+  const handler = (_, d) => cb(d)
+  ipcRenderer.on(channel, handler)
+  return () => ipcRenderer.removeListener(channel, handler)
+}
+
 contextBridge.exposeInMainWorld('api', {
   getFeatureFlags: () => ipcRenderer.invoke('get-feature-flags'),
   getRuntimeState: () => ipcRenderer.invoke('get-runtime-state'),
@@ -25,21 +33,16 @@ contextBridge.exposeInMainWorld('api', {
   buildSystemPrompt: () => ipcRenderer.invoke('build-system-prompt'),
   chat: (msg) => ipcRenderer.invoke('chat', msg),
   chatPrepare: () => ipcRenderer.invoke('chat-prepare'),
+  updateMessageMeta: (sessionId, messageId, fields) => ipcRenderer.invoke('message-update-meta', { sessionId, messageId, fields }),
+  deleteMessage: (sessionId, messageId) => ipcRenderer.invoke('message-delete', { sessionId, messageId }),
   chatRoute: (msg) => ipcRenderer.invoke('chat-route', msg),
-  onToken: (cb) => {
-    ipcRenderer.on('chat-token', (_, d) => cb(d))
-  },
-  onToolStep: (cb) => {
-    ipcRenderer.on('chat-tool-step', (_, d) => cb(d))
-  },
-  onRoundInfo: (cb) => {
-    ipcRenderer.on('chat-round-info', (_, d) => cb(d))
-  },
-  onTextStart: (cb) => {
-    ipcRenderer.on('chat-text-start', (_, d) => cb(d))
-  },
-  onChatDone: (cb) => ipcRenderer.on('chat-done', (_, r) => cb(r)),
-  onChatError: (cb) => ipcRenderer.on('chat-error', (_, e) => cb(e)),
+  // ── Streaming events (single consumer: ChatView) ──
+  onToken: (cb) => onIpc('chat-token', cb),
+  onToolStep: (cb) => onIpc('chat-tool-step', cb),
+  onRoundInfo: (cb) => onIpc('chat-round-info', cb),
+  onTextStart: (cb) => onIpc('chat-text-start', cb),
+  onChatDone: (cb) => onIpc('chat-done', cb),
+  onChatError: (cb) => onIpc('chat-error', cb),
   // Sessions
   listSessions: (opts) => ipcRenderer.invoke('sessions-list', opts),
   loadSession: (id) => ipcRenderer.invoke('session-load', id),
@@ -47,7 +50,6 @@ contextBridge.exposeInMainWorld('api', {
   createSession: (opts) => ipcRenderer.invoke('session-create', opts),
   deleteSession: (id) => ipcRenderer.invoke('session-delete', id),
   renameSession: (id, title) => ipcRenderer.invoke('session-rename', id, title),
-  exportSession: (id) => ipcRenderer.invoke('session-export', id),
   // Agents
   listAgents: () => ipcRenderer.invoke('agents-list'),
   loadAgent: (id) => ipcRenderer.invoke('agent-load', id),
@@ -67,29 +69,30 @@ contextBridge.exposeInMainWorld('api', {
   createSessionAgent: (sessionId, opts) => ipcRenderer.invoke('session-create-agent', { sessionId, ...opts }),
   listSessionAgents: (sessionId) => ipcRenderer.invoke('session-list-agents', sessionId),
   deleteSessionAgent: (agentId) => ipcRenderer.invoke('session-delete-agent', agentId),
-  onSessionAgentsChanged: (cb) => { ipcRenderer.removeAllListeners('session-agents-changed'); ipcRenderer.on('session-agents-changed', (_, sid) => cb(sid)) },
+  onSessionAgentsChanged: (cb) => onIpc('session-agents-changed', cb),
   // Tasks
   listTasks: (sessionId) => ipcRenderer.invoke('session-tasks', sessionId),
-  onTasksChanged: (cb) => { ipcRenderer.removeAllListeners('tasks-changed'); ipcRenderer.on('tasks-changed', (_, sid) => cb(sid)) },
-  onAgentMessage: (cb) => { ipcRenderer.removeAllListeners('agent-message'); ipcRenderer.on('agent-message', (_, d) => cb(d)) },
-  onAutoRotate: (cb) => { ipcRenderer.removeAllListeners('auto-rotate'); ipcRenderer.on('auto-rotate', (_, d) => cb(d)) },
+  onTasksChanged: (cb) => onIpc('tasks-changed', cb),
+  onAgentMessage: (cb) => onIpc('agent-message', cb),
+  onAutoRotate: (cb) => onIpc('auto-rotate', cb),
   // Heartbeat
   heartbeatStart: () => ipcRenderer.invoke('heartbeat-start'),
   heartbeatStop: () => ipcRenderer.invoke('heartbeat-stop'),
   // MCP
   getMcpStatus: () => ipcRenderer.invoke('mcp-status'),
   mcpReconnect: () => ipcRenderer.invoke('mcp-reconnect'),
-  onHeartbeat: (cb) => ipcRenderer.on('heartbeat-result', (_, r) => cb(r)),
-  onStatus: (cb) => { ipcRenderer.removeAllListeners('agent-status'); ipcRenderer.on('agent-status', (_, s) => cb(s)) },
-  onWatsonStatus: (cb) => { ipcRenderer.on('watson-status', (_, s) => cb(s)) },
-  onTrayNewChat: (cb) => { ipcRenderer.on('tray-new-chat', () => cb()) },
+  onHeartbeat: (cb) => onIpc('heartbeat-result', cb),
+  // ── Status events (watson-status has two consumers: App + ChatView) ──
+  onStatus: (cb) => onIpc('agent-status', cb),
+  onWatsonStatus: (cb) => onIpc('watson-status', cb),
+  onTrayNewChat: (cb) => onIpc('tray-new-chat', cb),
   // File operations
   openFile: (p) => ipcRenderer.invoke('open-file', p),
   openFilePreview: (p) => ipcRenderer.invoke('open-file-preview', p),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   readFile: (p) => ipcRenderer.invoke('read-file', p),
   // Memory watch
-  onMemoryChanged: (cb) => { ipcRenderer.removeAllListeners('memory-changed'); ipcRenderer.on('memory-changed', (_, d) => cb(d)) },
+  onMemoryChanged: (cb) => onIpc('memory-changed', cb),
   // Notify
   notify: (title, body) => ipcRenderer.invoke('notify', { title, body }),
   // Status persistence
@@ -102,12 +105,12 @@ contextBridge.exposeInMainWorld('api', {
   codingAgentsList: () => ipcRenderer.invoke('coding-agents-list'),
   codingAgentAdd: (opts) => ipcRenderer.invoke('coding-agent-add', opts),
   codingAgentDelete: (id) => ipcRenderer.invoke('coding-agent-delete', id),
-  // Group chat delegation (streaming)
-  onDelegateStart: (cb) => { ipcRenderer.on('chat-delegate-start', (_, d) => cb(d)) },
-  onDelegateToken: (cb) => { ipcRenderer.on('chat-delegate-token', (_, d) => cb(d)) },
-  onDelegateEnd: (cb) => { ipcRenderer.on('chat-delegate-end', (_, d) => cb(d)) },
+  // ── Delegate events (single consumer: ChatView) ──
+  onDelegateStart: (cb) => onIpc('chat-delegate-start', cb),
+  onDelegateToken: (cb) => onIpc('chat-delegate-token', cb),
+  onDelegateEnd: (cb) => onIpc('chat-delegate-end', cb),
   // Claude Code
-  onCcStatus: (cb) => { ipcRenderer.removeAllListeners('cc-status'); ipcRenderer.on('cc-status', (_, d) => cb(d)) },
-  onCcOutput: (cb) => { ipcRenderer.removeAllListeners('cc-output'); ipcRenderer.on('cc-output', (_, d) => cb(d)) },
+  onCcStatus: (cb) => onIpc('cc-status', cb),
+  onCcOutput: (cb) => onIpc('cc-output', cb),
   ccStop: () => ipcRenderer.invoke('cc-stop'),
 })

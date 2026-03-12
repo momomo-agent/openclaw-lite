@@ -19,8 +19,16 @@ function initRegistry() {
 function _load() {
   try {
     const raw = JSON.parse(fs.readFileSync(_registryPath, 'utf8'))
+    const seen = new Set()
     _workspaces = (raw.workspaces || [])
-      .filter(w => w && w.path && fs.existsSync(w.path))
+      .filter(w => w && w.path)
+      .map(w => ({ ...w, path: path.resolve(w.path) }))
+      .filter(w => {
+        if (!fs.existsSync(w.path)) return false
+        if (seen.has(w.path)) return false
+        seen.add(w.path)
+        return true
+      })
       .map(w => _hydrateWorkspace(w.path))
   } catch {
     _workspaces = []
@@ -85,6 +93,7 @@ function removeWorkspace(id) {
 
 /**
  * Create new workspace folder with scaffolding + register it
+ * OpenClaw-aligned: seeds all template files + conditional BOOTSTRAP.md
  */
 function createWorkspace(parentDir, name, opts = {}) {
   const folderName = name.replace(/[/\\:*?"<>|]/g, '_')
@@ -97,13 +106,22 @@ function createWorkspace(parentDir, name, opts = {}) {
   fs.mkdirSync(path.join(wsPath, 'skills'), { recursive: true })
   fs.mkdirSync(path.join(wsPath, '.paw'), { recursive: true })
 
-  // Scaffold files from templates
+  // Scaffold files from templates (write-if-missing, like OpenClaw's wx flag)
   const templatesDir = path.join(__dirname, '..', 'templates')
-  for (const tpl of ['SOUL.md', 'USER.md', 'IDENTITY.md']) {
+  for (const tpl of ['SOUL.md', 'USER.md', 'IDENTITY.md', 'AGENTS.md', 'HEARTBEAT.md']) {
     const src = path.join(templatesDir, tpl)
-    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(wsPath, tpl))
+    const dst = path.join(wsPath, tpl)
+    if (fs.existsSync(src) && !fs.existsSync(dst)) fs.copyFileSync(src, dst)
   }
-  fs.writeFileSync(path.join(wsPath, 'MEMORY.md'), '# Memory\n\n', 'utf8')
+  const memoryPath = path.join(wsPath, 'MEMORY.md')
+  if (!fs.existsSync(memoryPath)) fs.writeFileSync(memoryPath, '# Memory\n\n', 'utf8')
+
+  // BOOTSTRAP.md — only for brand-new workspaces (OpenClaw-aligned)
+  const bootstrapSrc = path.join(templatesDir, 'BOOTSTRAP.md')
+  const bootstrapDst = path.join(wsPath, 'BOOTSTRAP.md')
+  if (fs.existsSync(bootstrapSrc) && !fs.existsSync(bootstrapDst)) {
+    fs.copyFileSync(bootstrapSrc, bootstrapDst)
+  }
 
   // Save identity into .paw/config.json (with auto-generated UUID)
   saveWorkspaceIdentity(wsPath, {

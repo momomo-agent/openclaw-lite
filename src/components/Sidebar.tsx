@@ -38,12 +38,13 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu, on
     )
   }
 
-  const isRunning = activity === 'thinking' || activity === 'running' || activity === 'tool'
+  // Status line + dot: only when there's active AI status text AND not idle/done
+  const showStatus = !!statusText && activity !== 'idle' && activity !== 'done'
 
   // F251: Sender prefix for group chat + stripMd
   let subtitle = ''
-  if (isRunning) {
-    subtitle = statusText || '思考中...'
+  if (showStatus) {
+    subtitle = statusText
   } else if (session.lastMessage) {
     const stripped = stripMarkdown(session.lastMessage)
     if (isGroup && session.lastSender) {
@@ -70,7 +71,7 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu, on
           <span className="session-time">{formatTime(session.updatedAt)}</span>
         </div>
         <div className="session-row-bottom">
-          <span className={`session-subtitle ${isRunning ? 'active-status' : ''}`}>{subtitle}</span>
+          <span className={`session-subtitle ${showStatus ? 'active-status' : ''}`}>{subtitle}</span>
           {activity !== 'idle' && <span className={`session-dot ${activity}`}></span>}
         </div>
       </div>
@@ -102,7 +103,6 @@ interface ContextMenuState {
 export default function Sidebar() {
   const { sessions, workspaces, currentSessionId, setCurrentSessionId, setSessions, setWorkspaces, setStatus, sidebarVisible, setSidebarVisible } = useAppState()
   const api = useIPC()
-  const [searchQuery, setSearchQuery] = useState('')
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState>({ visible: false, x: 0, y: 0, sessionId: null })
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameText, setRenameText] = useState('')
@@ -148,7 +148,7 @@ export default function Sidebar() {
   // F232: Cmd+Shift+S toggle sidebar
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.metaKey && e.shiftKey && e.key === 's') {
+      if (e.metaKey && e.shiftKey && e.key.toLowerCase() === 's') {
         e.preventDefault()
         setSidebarVisible(!sidebarVisible)
       }
@@ -176,16 +176,7 @@ export default function Sidebar() {
   }, [ctxMenu.visible])
 
   const handleNewSession = async () => {
-    if (workspaces.length > 1) {
-      setShowNewChat(true)
-      return
-    }
-    const result = await api.createSession({})
-    if (result?.id) {
-      setCurrentSessionId(result.id)
-      const sessions = await api.listSessions()
-      setSessions(sessions)
-    }
+    setShowNewChat(true)
   }
 
   const handleNewChatSelect = async (opts: { workspaceId?: string; mode?: string; participants?: string[] }) => {
@@ -233,21 +224,12 @@ export default function Sidebar() {
     setSessions(updated)
   }
 
-  const handleExport = async (id: string) => {
-    setCtxMenu(prev => ({ ...prev, visible: false }))
-    await api.exportSession(id)
-  }
-
-  // F232: Filter sessions
-  const filtered = searchQuery
-    ? sessions.filter(s => s.title?.toLowerCase().includes(searchQuery.toLowerCase()))
-    : sessions
 
   return (
     <div
       ref={sidebarRef}
       className={`sidebar ${!sidebarVisible ? 'hidden' : ''}`}
-      style={sidebarVisible ? { width: sidebarWidth, minWidth: sidebarWidth } : undefined}
+      style={{ width: sidebarVisible ? sidebarWidth : 0, minWidth: sidebarVisible ? sidebarWidth : 0 }}
     >
       <div className="sidebar-header">
         <button className="icon-btn" onClick={handleNewSession}>+</button>
@@ -260,19 +242,8 @@ export default function Sidebar() {
           </span>
         </button>
       </div>
-      {/* F232: Search */}
-      <div style={{ padding: '0 8px 4px' }}>
-        <input
-          type="text"
-          className="session-search"
-          placeholder="搜索对话..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          style={{ width: '100%', padding: '4px 8px', fontSize: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', outline: 'none' }}
-        />
-      </div>
       <div className="session-list">
-        {filtered.map(s => (
+        {sessions.map(s => (
           renaming === s.id ? (
             <div key={s.id} className="session-item active" style={{ padding: '8px 12px' }}>
               <input
@@ -308,18 +279,16 @@ export default function Sidebar() {
             background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6,
             padding: '4px 0', minWidth: 140, boxShadow: '0 4px 12px rgba(0,0,0,.3)' }}
         >
-          <div className="ctx-item" style={{ padding: '6px 16px', cursor: 'pointer', fontSize: 13 }}
+          <div className="ctx-item" style={{ padding: '6px 16px', cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}
             onClick={() => handleRename(ctxMenu.sessionId!)}>
-            ✏️ 重命名
-          </div>
-          <div className="ctx-item" style={{ padding: '6px 16px', cursor: 'pointer', fontSize: 13 }}
-            onClick={() => handleExport(ctxMenu.sessionId!)}>
-            📤 导出
+            <span className="ic"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
+            重命名
           </div>
           <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0' }} />
-          <div className="ctx-item" style={{ padding: '6px 16px', cursor: 'pointer', fontSize: 13, color: 'var(--status-error)' }}
+          <div className="ctx-item" style={{ padding: '6px 16px', cursor: 'pointer', fontSize: 13, color: 'var(--status-error)', display: 'flex', alignItems: 'center', gap: 6 }}
             onClick={() => handleDelete(ctxMenu.sessionId!)}>
-            🗑 删除
+            <span className="ic"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></span>
+            删除
           </div>
         </div>
       )}

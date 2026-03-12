@@ -25,6 +25,8 @@ export interface Message {
   toolSteps?: ToolStep[]
   thinking?: string
   error?: string
+  isError?: boolean
+  status?: 'failed' | string
   requestId?: string
   roundPurpose?: string
   attachments?: { name: string; type: string; url?: string }[]

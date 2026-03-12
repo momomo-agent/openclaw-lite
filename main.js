@@ -22,7 +22,6 @@ const { sanitizeTranscript } = require('./core/transcript-repair')
 const workspaceRegistry = require('./core/workspace-registry')
 
 // ── Feature flags ──
-const LEGACY_AGENT_FEATURES = false  // M19 lightweight agents, task bar, auto-rotate (M32: disabled, not deleted)
 
 // ── Helper functions (must be defined early) ──
 let _activeRequestId = null
@@ -119,7 +118,7 @@ const { McpManager } = require('./core/mcp-client')
 const { CronService } = require('./core/cron')
 const { updateTrayMenu: coreUpdateTrayMenu } = require('./core/tray')
 const { buildMemoryIndex: coreBuildMemoryIndex, startMemoryWatch: coreStartMemoryWatch, stopMemoryWatch: coreStopMemoryWatch } = require('./core/memory-watch')
-const { buildSystemPrompt: coreBuildSystemPrompt, buildAgentPrompt: coreBuildAgentPrompt } = require('./core/prompt-builder')
+const { buildSystemPrompt: coreBuildSystemPrompt } = require('./core/prompt-builder')
 const { routeMessage: coreRouteMessage } = require('./core/router')
 const { streamAnthropicRaw: coreLlmAnthropicRaw, streamOpenAIRaw: coreLlmOpenAIRaw } = require('./core/llm-raw')
 const acpx = require('./core/acpx')
@@ -183,6 +182,11 @@ function getSessionWorkspace(sessionId) {
   return sessionStore.findSessionWorkspace(workspaces, sessionId)
 }
 
+// Resolve the DB path for a session. Always use this instead of clawDir for session ops.
+function resolveSessionDb(sessionId) {
+  return (sessionId && getSessionWorkspace(sessionId)) || clawDir
+}
+
 function listSessions(opts) {
   const workspaces = workspaceRegistry.listWorkspaces()
   return sessionStore.listAllSessions(workspaces, opts)
@@ -199,8 +203,19 @@ function saveSession(session) {
 }
 
 function createSession(title, opts) {
-  const targetWsPath = clawDir || workspaceRegistry.listWorkspaces()[0]?.path
+  // Resolve target workspace: explicit workspaceId > first participant > active clawDir > first registered
+  let targetWsPath = null
+  const wsId = opts?.workspaceId || (opts?.participants && opts.participants[0])
+  if (wsId) {
+    const ws = workspaceRegistry.getWorkspace(wsId)
+    if (ws) targetWsPath = ws.path
+  }
+  if (!targetWsPath) targetWsPath = clawDir || workspaceRegistry.listWorkspaces()[0]?.path
   if (!targetWsPath) return null
+  // Auto-populate participants from workspaceId if not explicitly provided
+  if (opts?.workspaceId && (!opts.participants || opts.participants.length === 0)) {
+    opts = { ...opts, participants: [opts.workspaceId] }
+  }
   return sessionStore.createSession(targetWsPath, title, opts)
 }
 
@@ -217,13 +232,10 @@ function createAgent(name, soul, model) { syncState(); return coreCreateAgent(na
 
 // ── Tool definitions ──
 // All tools come from registry (tools/ directory) + MCP tools
-const LEGACY_TOOL_NAMES = new Set(['task_create', 'task_update', 'task_list', 'send_message', 'create_agent', 'remove_agent'])
+const LEGACY_TOOL_NAMES = new Set(['send_message', 'create_agent', 'remove_agent'])
 
 function getToolsWithMcp() {
-  let tools = getAnthropicTools();
-  if (!LEGACY_AGENT_FEATURES) {
-    tools = tools.filter(t => !LEGACY_TOOL_NAMES.has(t.name));
-  }
+  let tools = getAnthropicTools().filter(t => !LEGACY_TOOL_NAMES.has(t.name));
   // Merge MCP tools
   const mcpTools = mcpManager.listTools();
   if (mcpTools.length > 0) {
@@ -254,15 +266,6 @@ const STAY_SILENT_TOOL = {
   input_schema: { type: 'object', properties: {}, required: [] },
 };
 
-// Agent tool filtering: lightweight agents get a subset of tools (legacy)
-const AGENT_ALLOWED_TOOLS = new Set([
-  'ui_status_set', 'memory_search', 'memory_get',
-  'task_create', 'task_update', 'task_list', 'send_message',
-]);
-function getToolsForAgent() {
-  return getToolsWithMcp().filter(t => AGENT_ALLOWED_TOOLS.has(t.name));
-}
-
 // Auto-assign: find best matching agent for a task title based on role keyword overlap
 async function executeTool(name, input, config, { sessionId: _sid, agentName: _aname } = {}) {
   const sid = _sid || currentSessionId
@@ -287,9 +290,12 @@ async function executeTool(name, input, config, { sessionId: _sid, agentName: _a
   // Try registry first for pluggable tools
   const tool = getTool(name);
   if (tool) {
+    const toolDb = resolveSessionDb(sid)
     const context = {
-      clawDir,
+      clawDir: toolDb || clawDir,
       sessionId: sid,
+      sessionDir: toolDb && sid ? path.join(toolDb, '.paw', 'sessions', sid) : null,
+      storeDir: toolDb ? path.join(toolDb, '.paw', 'store') : null,
       agentName: aname,
       mainWindow,
       sessionStore,
@@ -633,8 +639,9 @@ ipcMain.handle('select-claw-dir', async () => {
 ipcMain.handle('get-config', () => loadGlobalConfig())
 
 ipcMain.handle('get-token-usage', (_, sessionId) => {
-  if (!clawDir) return { inputTokens: 0, outputTokens: 0 }
-  return sessionStore.getTokenUsage(clawDir, sessionId)
+  const db = resolveSessionDb(sessionId)
+  if (!db) return { inputTokens: 0, outputTokens: 0 }
+  return sessionStore.getTokenUsage(db, sessionId)
 })
 
 ipcMain.handle('save-config', (_, config) => saveGlobalConfig(config))
@@ -683,8 +690,8 @@ ipcMain.handle('session-load', (_, id) => loadSession(id))
 ipcMain.handle('session-save', (_, session) => { saveSession(session); return true })
 ipcMain.handle('session-create', (_, opts) => {
   if (typeof opts === 'string') return createSession(opts)
-  const { title, participants, mode } = opts || {}
-  return createSession(title, { participants, mode })
+  const { title, participants, mode, workspaceId } = opts || {}
+  return createSession(title, { participants, mode, workspaceId })
 })
 ipcMain.handle('session-delete', (_, id) => {
   try { deleteSessionById(id); return true } catch { return false }
@@ -695,6 +702,16 @@ ipcMain.handle('session-rename', (_, id, title) => {
     if (wsPath) sessionStore.renameSession(wsPath, id, title)
     return true
   } catch { return false }
+})
+ipcMain.handle('message-delete', (_, { sessionId, messageId }) => {
+  const wsPath = getSessionWorkspace(sessionId)
+  if (wsPath) sessionStore.deleteMessage(wsPath, sessionId, messageId)
+  return true
+})
+ipcMain.handle('message-update-meta', (_, { sessionId, messageId, fields }) => {
+  const wsPath = getSessionWorkspace(sessionId)
+  if (wsPath) sessionStore.updateMessageMeta(wsPath, sessionId, messageId, fields)
+  return true
 })
 ipcMain.handle('session-export', (_, id) => {
   const s = loadSession(id)
@@ -728,7 +745,7 @@ ipcMain.handle('agent-delete', (_, id) => {
 // ── IPC: Session members (legacy, gated by LEGACY_AGENT_FEATURES) ──
 
 ipcMain.handle('session-add-member', (_, { sessionId, agentId }) => {
-  if (!LEGACY_AGENT_FEATURES) return false
+  return false // legacy, disabled
   const s = loadSession(sessionId)
   if (!s) return false
   if (!s.members) s.members = ['user']
@@ -738,7 +755,7 @@ ipcMain.handle('session-add-member', (_, { sessionId, agentId }) => {
 })
 
 ipcMain.handle('session-remove-member', (_, { sessionId, agentId }) => {
-  if (!LEGACY_AGENT_FEATURES) return false
+  return false // legacy, disabled
   const s = loadSession(sessionId)
   if (!s || !s.members) return false
   s.members = s.members.filter(m => m !== agentId)
@@ -769,7 +786,7 @@ ipcMain.handle('session-get-participants', (_, sessionId) => {
 // ── IPC: Session Agents (M19: lightweight agents, gated) ──
 
 ipcMain.handle('session-create-agent', (_, { sessionId, name, role }) => {
-  if (!LEGACY_AGENT_FEATURES) return null
+  return null // legacy, disabled
   if (!sessionId) return null
   const wsPath = getSessionWorkspace(sessionId)
   if (!wsPath) return null
@@ -781,13 +798,13 @@ ipcMain.handle('session-create-agent', (_, { sessionId, name, role }) => {
 })
 
 ipcMain.handle('session-list-agents', (_, sessionId) => {
-  if (!LEGACY_AGENT_FEATURES) return []
+  return [] // legacy, disabled
   const wsPath = getSessionWorkspace(sessionId)
   return wsPath ? sessionStore.listSessionAgents(wsPath, sessionId) : []
 })
 
 ipcMain.handle('session-delete-agent', (_, agentId) => {
-  if (!LEGACY_AGENT_FEATURES) return false
+  return false // legacy, disabled
   const workspaces = workspaceRegistry.listWorkspaces()
   for (const ws of workspaces) {
     const result = sessionStore.deleteSessionAgent(ws.path, agentId)
@@ -799,16 +816,18 @@ ipcMain.handle('session-delete-agent', (_, agentId) => {
   return false
 })
 
-// ── IPC: Tasks (legacy, gated) ──
+// ── IPC: Tasks (file-based) ──
 ipcMain.handle('session-tasks', (_, sessionId) => {
-  if (!LEGACY_AGENT_FEATURES) return []
   const wsPath = getSessionWorkspace(sessionId)
-  return wsPath ? sessionStore.listTasks(wsPath, sessionId) : []
+  if (!wsPath || !sessionId) return []
+  const { loadTasks } = require('./tools/tasks')
+  const sessionDir = path.join(wsPath, '.paw', 'sessions', sessionId)
+  return loadTasks(sessionDir)
 })
 
 // ── IPC: Feature flags ──
 ipcMain.handle('get-feature-flags', () => ({
-  legacyAgentFeatures: LEGACY_AGENT_FEATURES,
+  legacyAgentFeatures: false,
 }))
 
 // ── IPC: Workspace registry (M32/F162) ──
@@ -915,7 +934,33 @@ ipcMain.handle('chat-prepare', () => {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
 })
 
-ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files, sessionId, requestId: paramRequestId, focus, targetWorkspaceId }) => {
+// ── Chat persistence ──
+// User message: saved BEFORE streaming (crash-safe)
+// Assistant message + chat-done: saved/dispatched AFTER streaming (guarantees DB before UI)
+function persistUserMessage(sessionId, content) {
+  const wsPath = sessionId ? (getSessionWorkspace(sessionId) || clawDir) : null
+  console.log(`[Paw] persistUserMessage: sessionId=${sessionId} wsPath=${wsPath} clawDir=${clawDir} contentLen=${(content||'').length}`)
+  if (wsPath) sessionStore.appendMessage(wsPath, sessionId, { role: 'user', content: content || '', timestamp: Date.now() })
+}
+
+function finishChat(sessionId, requestId, assistantText, wsIdentity) {
+  const wsPath = sessionId ? (getSessionWorkspace(sessionId) || clawDir) : null
+  const isError = assistantText && assistantText.startsWith('❌')
+  console.log(`[Paw] finishChat: sessionId=${sessionId} wsPath=${wsPath} isError=${isError} textLen=${(assistantText||'').length}`)
+  // Only persist real responses, not errors (errors are transient UI state)
+  if (wsPath && assistantText && !isError) {
+    const meta = {}
+    if (wsIdentity?.agentName) meta.sender = wsIdentity.agentName
+    if (wsIdentity?.workspaceId) meta.senderWorkspaceId = wsIdentity.workspaceId
+    sessionStore.appendMessage(wsPath, sessionId, { role: 'assistant', content: assistantText, timestamp: Date.now(), ...meta })
+  }
+  eventBus.dispatch('chat-done', { requestId, sessionId, error: isError ? assistantText : undefined })
+}
+
+ipcMain.handle('chat', async (_, { prompt, message, history, rawMessages, agentId, files, attachments, sessionId, requestId: paramRequestId, focus, targetWorkspaceId }) => {
+  // React sends { message, attachments }, vanilla sends { prompt, files } — support both
+  prompt = prompt || message || ''
+  files = files || attachments || []
   const requestId = paramRequestId || Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
   // Sync sessionId from renderer
   if (sessionId) { currentSessionId = sessionId; syncState() }
@@ -946,28 +991,21 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
   if (sessionMode === 'coding') {
     const codingAgentId = config.defaultCodingAgent || 'claude'
     if (codingAgents.isAvailable(codingAgentId)) {
+      persistUserMessage(sessionId, prompt)
       const wsPath = getSessionWorkspacePath()
       const result = await streamCodingAgent(codingAgentId, prompt, {
         cwd: wsPath || clawDir || process.cwd(),
         sessionId,
         requestId,
       })
+      finishChat(sessionId, requestId, result?.answer, null)
       return result
     }
   }
 
-  // Resolve agent: lightweight (session-level, legacy) or template (agents/ directory)
+  // Resolve agent: template (agents/ directory)
   let agent = null
-  let isLightweight = false
-  if (LEGACY_AGENT_FEATURES && agentId && agentId.startsWith('a') && clawDir && sessionId) {
-    // Try lightweight agent first
-    const sessionAgent = sessionStore.getSessionAgent(clawDir, agentId)
-    if (sessionAgent) {
-      agent = { id: sessionAgent.id, name: sessionAgent.name, role: sessionAgent.role }
-      isLightweight = true
-    }
-  }
-  if (!agent && agentId) {
+  if (agentId) {
     agent = loadAgent(agentId)
   }
   currentAgentName = agent?.name || null
@@ -980,61 +1018,52 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
   // Build system prompt + select tools
   let systemPrompt
   let chatTools = getToolsWithMcp()
-  if (isLightweight && agent?.role) {
-    // Lightweight agent: compact prompt, filtered tools
-    const sessionAgents = sessionStore.listSessionAgents(clawDir, sessionId) || []
-    systemPrompt = coreBuildAgentPrompt(agent, focus || '', sessionAgents)
-    chatTools = getToolsForAgent()
-  } else {
-    systemPrompt = await buildSystemPrompt(targetWorkspaceId || null)
-    if (agent?.soul) {
-      // Template agent: soul takes priority
-      systemPrompt = agent.soul + '\n\n---\n\n' + systemPrompt
-    }
+  systemPrompt = await buildSystemPrompt(targetWorkspaceId || null)
+  if (agent?.soul) {
+    // Template agent: soul takes priority
+    systemPrompt = agent.soul + '\n\n---\n\n' + systemPrompt
   }
 
-  // Group chat: inject orchestrator instructions + delegate_to tool
+  // Inject participant context + group chat orchestrator
+  const _sessionDb = resolveSessionDb(sessionId)
   let _isGroupChat = false
-  if (sessionId && clawDir) {
+  if (sessionId && _sessionDb) {
     try {
-      const participants = sessionStore.getSessionParticipants(clawDir, sessionId)
+      const participants = sessionStore.getSessionParticipants(_sessionDb, sessionId)
+      const participantInfos = participants.map(pid => {
+        const w = workspaceRegistry.getWorkspace(pid)
+        return { id: pid, name: w?.identity?.name || pid, description: w?.identity?.description || '' }
+      })
+      const ownerWsId = targetWorkspaceId || participants[0]
+      const ownerWs = workspaceRegistry.getWorkspace(ownerWsId)
+      const myName = ownerWs?.identity?.name || 'Assistant'
+
       if (participants.length > 1) {
         _isGroupChat = true
-        const participantInfos = participants.map(pid => {
-          const w = workspaceRegistry.getWorkspace(pid)
-          return {
-            id: pid,
-            name: w?.identity?.name || pid,
-            description: w?.identity?.description || '',
-          }
-        })
-        const ownerWsId = targetWorkspaceId || participants[0]
-        const ownerWs = workspaceRegistry.getWorkspace(ownerWsId)
-        const myName = ownerWs?.identity?.name || 'Assistant'
         const roster = participantInfos.map(p => `- **${p.name}**${p.description ? ': ' + p.description : ''}`).join('\n')
-
         systemPrompt += `\n\n---\n\n## Group Chat — You Are the Orchestrator
 You are **${myName}**, the owner of this group chat.
 
-### Participants
+### Current Participants (authoritative — ignore historical references to removed members)
 ${roster}
 
 ### Rules
-1. **User mentions another participant** → call \`delegate_to\`. Even casual mentions count ("paul 怎么样" → delegate to Paul).
+1. **User mentions another participant** → call \`delegate_to\`.
 2. **User talks to you or sends a general message** → respond yourself.
-3. **After delegate_to** → you see what the delegate said. You may: call \`delegate_to\` again (chain to another participant), add genuine context (respond as text), or call \`stay_silent\` (default — use this when you have nothing to add).
-4. **Never restate or summarize** what a delegate just said.`
-
-        // Inject group chat tools for the orchestrator
+3. **After delegate_to** → call \`delegate_to\` again, add genuine context, or call \`stay_silent\`.
+4. **Never restate or summarize** what a delegate just said.
+5. **Removed members are gone.** Do NOT delegate to or mention them as active.`
         chatTools = [...chatTools, DELEGATE_TO_TOOL, STAY_SILENT_TOOL]
+      } else if (participants.length === 1) {
+        systemPrompt += `\n\n---\n\nYou are **${myName}**. This is a private conversation between you and the user. No other participants are present.`
       }
     } catch {}
   }
 
   // F046: Inject other agents' recent messages for visibility
-  if (agent && sessionId && clawDir) {
+  if (agent && sessionId && _sessionDb) {
     try {
-      const session = sessionStore.loadSession(clawDir, sessionId)
+      const session = sessionStore.loadSession(_sessionDb, sessionId)
       if (session?.messages?.length) {
         const otherMsgs = session.messages
           .filter(m => m.role === 'assistant' && m.sender && m.sender !== agent.name)
@@ -1053,11 +1082,11 @@ ${roster}
     messages.push(...rawMessages)
   } else if (history?.length) {
     // Group chat: load from DB to get sender metadata
-    const participants = sessionId && clawDir ? sessionStore.getSessionParticipants(clawDir, sessionId) : []
+    const participants = sessionId && _sessionDb ? sessionStore.getSessionParticipants(_sessionDb, sessionId) : []
     const isGroupChat = participants.length > 1
-    if (isGroupChat && sessionId && clawDir) {
+    if (isGroupChat && sessionId && _sessionDb) {
       // Load full session to get sender info per message
-      const fullSession = sessionStore.loadSession(clawDir, sessionId)
+      const fullSession = sessionStore.loadSession(_sessionDb, sessionId)
       if (fullSession?.messages?.length) {
         for (const m of fullSession.messages) {
           if (m.role === 'user') {
@@ -1074,6 +1103,17 @@ ${roster}
         messages.push({ role: 'user', content: h.prompt })
         if (h.answer && h.answer.trim()) {
           messages.push({ role: 'assistant', content: h.answer })
+        }
+      }
+    }
+  } else if (sessionId && _sessionDb) {
+    // React path: no history sent, load conversation from SQLite
+    const wsPath = _sessionDb
+    const savedSession = sessionStore.loadSession(wsPath, sessionId)
+    if (savedSession?.messages?.length) {
+      for (const m of savedSession.messages) {
+        if (m.role === 'user' || m.role === 'assistant') {
+          messages.push({ role: m.role, content: m.content })
         }
       }
     }
@@ -1133,6 +1173,9 @@ ${roster}
     workspaceId: _wsObj?.id || null,
   }
 
+  // Persist user message BEFORE streaming — crash-safe
+  persistUserMessage(sessionId, prompt)
+
   let lastError = null
   for (const target of modelsToTry) {
     try {
@@ -1147,23 +1190,19 @@ ${roster}
       }
       // Track token usage
       if (result?.usage && sessionId) {
-        sessionStore.addTokenUsage(clawDir, sessionId, result.usage.inputTokens, result.usage.outputTokens)
+        sessionStore.addTokenUsage(_sessionDb, sessionId, result.usage.inputTokens, result.usage.outputTokens)
       }
+      finishChat(sessionId, requestId, result?.answer, _wsIdentity)
       return result
     } catch (err) {
       lastError = err
-      // Record failure with cooldown
       const cd = failoverManager.recordFailure(target.model, err.message)
       console.warn(`[Paw] model ${target.model} failed: ${err.message} (cooldown ${Math.round((cd.until - Date.now()) / 1000)}s, errors: ${cd.errorCount})`)
       if (target === modelsToTry[modelsToTry.length - 1]) {
         console.error('[Paw] all models failed:', err.message)
         pushStatus('error', err.message.slice(0, 80))
-        // F209: Save error as message
-        if (clawDir && sessionId) {
-          const errorText = `❌ Error: ${err.message}`
-          sessionStore.saveMessage(clawDir, sessionId, { role: 'assistant', content: errorText, metadata: { isError: true } })
-        }
-        throw err
+        finishChat(sessionId, requestId, `❌ Error: ${err.message}`, null)
+        return { error: err.message }
       }
     }
   }
@@ -1171,7 +1210,7 @@ ${roster}
 
 // ── IPC: Route message to determine respondents (legacy, gated) ──
 ipcMain.handle('chat-route', async (_, { prompt, history, sessionId }) => {
-  if (!LEGACY_AGENT_FEATURES) return { respondents: [{ name: 'Main', focus: '' }] }
+  return { respondents: [{ name: 'Main', focus: '' }] } // legacy routing disabled
   if (!clawDir) return { respondents: [{ name: 'Main', focus: '' }] }
   if (sessionId) { currentSessionId = sessionId; syncState() }
   const config = (() => {
@@ -1180,7 +1219,7 @@ ipcMain.handle('chat-route', async (_, { prompt, history, sessionId }) => {
     try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch { return {} }
   })()
   if (!config.apiKey) return { respondents: [{ name: 'Main', focus: '' }] }
-  const sessionAgents = sessionStore.listSessionAgents(clawDir, sessionId) || []
+  const sessionAgents = sessionStore.listSessionAgents(resolveSessionDb(sessionId), sessionId) || []
   if (!sessionAgents.length) return { respondents: [{ name: 'Main', focus: '' }] }
   const respondents = await coreRouteMessage(prompt, sessionAgents, history, config)
   return { respondents }
@@ -1195,8 +1234,10 @@ async function buildSystemPrompt(overrideWorkspaceId) {
 }
 
 function getSessionMode(sessionId) {
-  if (!clawDir || !sessionId) return 'chat'
-  return sessionStore.getSessionMode(clawDir, sessionId)
+  if (!sessionId) return 'chat'
+  const db = resolveSessionDb(sessionId)
+  if (!db) return 'chat'
+  return sessionStore.getSessionMode(db, sessionId)
 }
 
 function getSessionWorkspacePath(workspaceId, sessionId) {
@@ -1207,9 +1248,11 @@ function getSessionWorkspacePath(workspaceId, sessionId) {
   }
   // Otherwise resolve from session participants (owner = participants[0])
   const sid = sessionId || currentSessionId
-  if (!sid || !clawDir) return null
+  if (!sid) return null
+  const db = resolveSessionDb(sid)
+  if (!db) return null
   try {
-    const participants = sessionStore.getSessionParticipants(clawDir, sid)
+    const participants = sessionStore.getSessionParticipants(db, sid)
     if (participants.length > 0) {
       const wsObj = workspaceRegistry.getWorkspace(participants[0])
       if (wsObj?.path) return wsObj.path
@@ -1224,10 +1267,11 @@ function getSessionWorkspacePath(workspaceId, sessionId) {
 async function handleDelegateTo(input, config, sessionId) {
   const { participant_name, message } = input
   if (!participant_name || !message) return 'Error: participant_name and message are required'
-  if (!sessionId || !clawDir) return 'Error: no active session'
+  const delegateDb = resolveSessionDb(sessionId)
+  if (!sessionId || !delegateDb) return 'Error: no active session'
 
   // Find participant workspace by name
-  const participants = sessionStore.getSessionParticipants(clawDir, sessionId)
+  const participants = sessionStore.getSessionParticipants(delegateDb, sessionId)
   const workspaces = participants.map(pid => workspaceRegistry.getWorkspace(pid)).filter(Boolean)
   const targetWs = workspaces.find(w => {
     const n = (w.identity?.name || '').toLowerCase()
@@ -1250,7 +1294,7 @@ async function handleDelegateTo(input, config, sessionId) {
   // Build conversation context — load recent messages from session
   const delegateMessages = []
   try {
-    const fullSession = sessionStore.loadSession(clawDir, sessionId)
+    const fullSession = sessionStore.loadSession(delegateDb, sessionId)
     if (fullSession?.messages?.length) {
       const recent = fullSession.messages.slice(-20)
       for (const m of recent) {
@@ -1369,7 +1413,7 @@ async function streamCodingAgent(agentId, prompt, { cwd, sessionId, requestId })
 
     _activeCodingProcess = null
     pushStatus('idle', '')
-    eventBus.dispatch('chat-done', { requestId, sessionId })
+    // chat-done dispatched by chat handler after persisting to SQLite
     return { answer: result.stdout, mode: 'coding', agentId }
   } catch (err) {
     _activeCodingProcess = null
@@ -1536,7 +1580,7 @@ async function streamAnthropic(messages, systemPrompt, config, requestId, tools,
 
     if (!toolCalls.length) {
       pushStatus('done', 'Done')
-      ipc('chat-done', { requestId })
+      // chat-done dispatched by chat handler after persisting to SQLite
       console.log('[Paw] streamAnthropic done, fullText length:', fullText.length)
       clearTimeout(timeoutId)
       return { answer: fullText, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput, cacheRead: totalCacheRead, cacheWrite: totalCacheWrite, lastInputTokens: lastUsageInput, lastCacheRead, lastCacheWrite } }
@@ -1725,7 +1769,7 @@ async function streamOpenAI(messages, systemPrompt, config, requestId, tools, se
 
     if (!tcList.length || !tcList[0].name) {
       pushStatus('done', 'Done')
-      ipc('chat-done', { requestId })
+      // chat-done dispatched by chat handler after persisting to SQLite
       clearTimeout(timeoutId)
       return { answer: fullText, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput } }
     }
@@ -1916,8 +1960,9 @@ function pushWatsonStatus(level, text, requestId, sessionId) {
   const payload = { level, text, requestId: rid, sessionId: sid }
   eventBus.dispatch('watson-status', payload)
   // Persist status to SQLite
-  if (sid && clawDir) {
-    try { sessionStore.updateSessionStatus(clawDir, sid, level, text) } catch {}
+  if (sid) {
+    const db = resolveSessionDb(sid)
+    if (db) try { sessionStore.updateSessionStatus(db, sid, level, text) } catch {}
   }
   // Update tray
   _trayStatusText = text || '空闲待命中'
@@ -1943,8 +1988,9 @@ ipcMain.handle('get-runtime-state', () => ({
 }))
 
 ipcMain.handle('update-session-status', (_, { sessionId, level, text }) => {
-  if (clawDir && sessionId) {
-    try { sessionStore.updateSessionStatus(clawDir, sessionId, level, text) } catch {}
+  const db = resolveSessionDb(sessionId)
+  if (db && sessionId) {
+    try { sessionStore.updateSessionStatus(db, sessionId, level, text) } catch {}
   }
   return true
 })

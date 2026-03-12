@@ -89,19 +89,23 @@ function AppContent() {
       }
     } catch {}
 
-    // Listen to sidebar status updates
-    api.onWatsonStatus?.((data: any) => {
+    setReady(true)
+  }
+
+  // Global event listeners — separate useEffect with proper cleanup
+  useEffect(() => {
+    if (!ready) return
+
+    const cleanupWatson = api.onWatsonStatus?.((data: any) => {
       if (data.sessionId) {
         setActivity(data.sessionId, data.level)
         setStatus(data.sessionId, data.text || '')
       }
     })
 
-    // Memory file changes (no-op for now, placeholder for future use)
-    api.onMemoryChanged?.(() => {})
+    const cleanupMemory = api.onMemoryChanged?.(() => {})
 
-    // Tray new chat
-    api.onTrayNewChat?.(() => {
+    const cleanupTray = api.onTrayNewChat?.(() => {
       api.createSession({}).then(async (result: any) => {
         if (result?.id) {
           setCurrentSessionId(result.id)
@@ -111,8 +115,12 @@ function AppContent() {
       })
     })
 
-    setReady(true)
-  }
+    return () => {
+      if (typeof cleanupWatson === 'function') cleanupWatson()
+      if (typeof cleanupMemory === 'function') cleanupMemory()
+      if (typeof cleanupTray === 'function') cleanupTray()
+    }
+  }, [ready])
 
   if (needsSetup) {
     return <SetupScreen onEnterChat={enterChat} />

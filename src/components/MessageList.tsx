@@ -10,13 +10,18 @@ interface MessageListProps {
   onRetry?: () => void
 }
 
-export default function MessageList({ messages, streamingStatus, onRetry }: MessageListProps) {
+const ListPadding = () => <div style={{ height: 16 }} />
+
+export default function MessageList({ messages, sessionId, streamingStatus, onRetry }: MessageListProps) {
   const { userProfile } = useAppState()
 
   return (
     <div className="messages">
       <Virtuoso
+        key={sessionId}
         data={messages}
+        initialTopMostItemIndex={Math.max(0, messages.length - 1)}
+        components={{ Header: ListPadding, Footer: ListPadding }}
         itemContent={(index, message) => (
           <MessageItem
             key={message.id}
@@ -24,7 +29,7 @@ export default function MessageList({ messages, streamingStatus, onRetry }: Mess
             isStreaming={index === messages.length - 1 && !!streamingStatus}
             statusText={index === messages.length - 1 ? streamingStatus : undefined}
             userAvatarPath={userProfile?.avatarAbsPath}
-            onRetry={message.role === 'error' ? onRetry : undefined}
+            onRetry={(message.isError || message.status === 'failed') ? onRetry : undefined}
           />
         )}
         followOutput="smooth"

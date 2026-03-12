@@ -16,15 +16,18 @@ interface MessageItemProps {
 export default function MessageItem({ message, isStreaming, statusText, userAvatarPath, onRetry }: MessageItemProps) {
   const { workspaces, userProfile } = useAppState()
   const isUser = message.role === 'user'
-  const isError = message.role === 'error'
+  const isError = message.isError === true  // assistant message that errored
   const isA2A = message.role === 'agent-to-agent'
 
   // Dynamic workspace identity resolution — always use live identity, never stale history
+  // Priority: workspaceId → workspacePath → first workspace (default for single-workspace)
   const ws = message.workspaceId
     ? workspaces.find(w => w.id === message.workspaceId)
-    : (message.workspacePath ? workspaces.find(w => w.path === message.workspacePath) : undefined)
-  const resolvedAvatar = (!isUser && ws?.identity?.avatar) ? ws.identity.avatar : message.avatar
-  const resolvedName = (!isUser && ws?.identity?.name) ? ws.identity.name : message.sender
+    : (message.workspacePath
+      ? workspaces.find(w => w.path === message.workspacePath)
+      : (!isUser ? workspaces[0] : undefined))
+  const resolvedAvatar = (!isUser && ws?.identity?.avatar) || message.avatar
+  const resolvedName = (!isUser && ws?.identity?.name) || message.sender
 
   const renderContent = (text: string) => linkifyPaths(renderMarkdown(text))
 
@@ -33,7 +36,7 @@ export default function MessageItem({ message, isStreaming, statusText, userAvat
   return (
     <div className={`msg-card ${message.role}${isError ? ' msg-error' : ''}`}>
       <div className="msg-avatar">
-        {isError ? <span>⚠️</span> : isA2A ? (
+        {isA2A ? (
           <span className="ic">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
@@ -51,7 +54,7 @@ export default function MessageItem({ message, isStreaming, statusText, userAvat
       <div className="msg-body">
         <div className="msg-header">
           <span className={`msg-name ${isUser ? 'user-name' : ''}${isA2A ? ' a2a-name' : ''}`}>
-            {resolvedName || (isUser ? (userProfile?.userName || 'You') : isError ? 'Error' : 'Assistant')}
+            {resolvedName || (isUser ? (userProfile?.userName || 'You') : 'Assistant')}
           </span>
           <span className="msg-time">
             {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -71,35 +74,34 @@ export default function MessageItem({ message, isStreaming, statusText, userAvat
               roundPurpose={message.roundPurpose}
             />
           )}
+          {/* F247: Image attachments inline */}
+          {isUser && attachments && attachments.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+              {attachments.filter(a => a.url).map((a, i) => (
+                <img key={i} src={a.url} alt={a.name}
+                  style={{ maxWidth: 300, maxHeight: 200, borderRadius: 8, objectFit: 'contain' }}
+                />
+              ))}
+            </div>
+          )}
           {isError ? (
             <>
-              <div className="msg-content" style={{ color: 'var(--status-error)', borderLeft: '3px solid var(--status-error)', paddingLeft: 8 }}>
+              <div className="msg-content msg-error-content">
                 {message.content}
               </div>
               {onRetry && (
-                <button className="retry-btn" onClick={onRetry}
-                  style={{ marginTop: 8, padding: '4px 12px', background: 'var(--accent)', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>
-                  🔄 重试
-                </button>
+                <button className="retry-btn" onClick={onRetry}>↻ 重试</button>
               )}
             </>
           ) : (
-            <>
-              {/* F247: Image attachments inline */}
-              {isUser && attachments && attachments.length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
-                  {attachments.filter(a => a.url).map((a, i) => (
-                    <img key={i} src={a.url} alt={a.name}
-                      style={{ maxWidth: 300, maxHeight: 200, borderRadius: 8, objectFit: 'contain' }}
-                    />
-                  ))}
-                </div>
-              )}
-              <div
-                className={`msg-content md-content${isA2A ? ' a2a-content' : ''}`}
-                dangerouslySetInnerHTML={{ __html: renderContent(message.content) }}
-              />
-            </>
+            <div
+              className={`msg-content md-content${isA2A ? ' a2a-content' : ''}${isUser && message.status === 'failed' ? ' msg-send-failed' : ''}`}
+              dangerouslySetInnerHTML={{ __html: renderContent(message.content) }}
+            />
+          )}
+          {/* Send failure: small retry icon beside message */}
+          {isUser && message.status === 'failed' && onRetry && (
+            <button className="retry-icon-btn" onClick={onRetry} title="重新发送">↻ 重试</button>
           )}
           {isStreaming && statusText && (
             <div className="inline-status">

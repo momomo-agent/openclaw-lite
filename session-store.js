@@ -7,7 +7,7 @@ const dbCache = new Map()
 
 function getDb(clawDir) {
   if (!clawDir) return null
-  const target = path.join(clawDir, '.paw', 'sessions.db')
+  const target = path.resolve(clawDir, '.paw', 'sessions.db')
   if (dbCache.has(target)) return dbCache.get(target)
   fs.mkdirSync(path.dirname(target), { recursive: true })
   const db = new Database(target)
@@ -46,21 +46,6 @@ function ensureSchema(db) {
   `)
   db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, id)`)
   db.exec(`
-    CREATE TABLE IF NOT EXISTS tasks (
-      id TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      assignee TEXT,
-      depends_on TEXT,
-      created_by TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-    )
-  `)
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id)`)
-  db.exec(`
     CREATE TABLE IF NOT EXISTS session_agents (
       id TEXT PRIMARY KEY,
       session_id TEXT NOT NULL,
@@ -71,10 +56,21 @@ function ensureSchema(db) {
     )
   `)
   db.exec(`CREATE INDEX IF NOT EXISTS idx_session_agents_session ON session_agents(session_id)`)
-  // Migration: add mode column if missing
-  try { db.exec(`ALTER TABLE sessions ADD COLUMN mode TEXT DEFAULT 'chat'`) } catch {}
-  // Migration: add participants column if missing
-  try { db.exec(`ALTER TABLE sessions ADD COLUMN participants TEXT DEFAULT '[]'`) } catch {}
+  // Migrations: add columns if missing (idempotent — ALTER fails if column exists)
+  const migrations = [
+    `ALTER TABLE sessions ADD COLUMN mode TEXT DEFAULT 'chat'`,
+    `ALTER TABLE sessions ADD COLUMN participants TEXT DEFAULT '[]'`,
+    `ALTER TABLE sessions ADD COLUMN input_tokens INTEGER DEFAULT 0`,
+    `ALTER TABLE sessions ADD COLUMN output_tokens INTEGER DEFAULT 0`,
+  ]
+  for (const sql of migrations) {
+    try { db.exec(sql) } catch (e) {
+      // "duplicate column name" is expected if migration already ran — only log unexpected errors
+      if (e.message && !e.message.includes('duplicate column')) {
+        console.warn('[session-store] migration warning:', e.message)
+      }
+    }
+  }
 }
 
 function _parseParticipants(raw) {
@@ -108,9 +104,9 @@ function loadSession(clawDir, id) {
   const session = d.prepare('SELECT id, title, mode, created_at as createdAt, updated_at as updatedAt, participants FROM sessions WHERE id = ?').get(id)
   if (!session) return null
   session.participants = _parseParticipants(session.participants)
-  const rows = d.prepare('SELECT role, content, timestamp, metadata FROM messages WHERE session_id = ? ORDER BY id').all(id)
+  const rows = d.prepare('SELECT id, role, content, timestamp, metadata FROM messages WHERE session_id = ? ORDER BY id').all(id)
   session.messages = rows.map(r => {
-    const msg = { role: r.role, content: r.content, timestamp: r.timestamp }
+    const msg = { id: String(r.id), role: r.role, content: r.content, timestamp: r.timestamp }
     if (r.metadata) try { Object.assign(msg, JSON.parse(r.metadata)) } catch {}
     return msg
   })
@@ -139,10 +135,61 @@ function saveSession(clawDir, session) {
   tx(session.messages || [])
 }
 
+function appendMessage(clawDir, sessionId, msg) {
+  const d = getDb(clawDir)
+  if (!d) { console.error('[session-store] appendMessage: no db for', clawDir); return }
+  const now = Date.now()
+  const { role, content, timestamp, ...rest } = msg
+  const meta = Object.keys(rest).length ? JSON.stringify(rest) : null
+  try {
+    d.prepare('INSERT INTO messages (session_id, role, content, timestamp, metadata) VALUES (?, ?, ?, ?, ?)')
+      .run(sessionId, role || 'user', typeof content === 'string' ? content : JSON.stringify(content), timestamp || now, meta)
+    d.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(now, sessionId)
+    console.log(`[session-store] appendMessage OK: session=${sessionId} role=${role} len=${(content||'').length}`)
+  } catch (err) {
+    console.error('[session-store] appendMessage FAILED:', err.message, { clawDir, sessionId, role })
+  }
+}
+
+// Update message metadata (merge fields into existing metadata)
+// Usage: updateMessageMeta(clawDir, sessionId, msgId, { status: 'failed' })
+//        updateMessageMeta(clawDir, sessionId, msgId, { status: null }) // clear
+function updateMessageMeta(clawDir, sessionId, msgId, fields) {
+  const d = getDb(clawDir)
+  if (!d) return
+  const row = d.prepare('SELECT metadata FROM messages WHERE id = ? AND session_id = ?').get(msgId, sessionId)
+  if (!row) return
+  let meta = {}
+  if (row.metadata) try { meta = JSON.parse(row.metadata) } catch {}
+  for (const [k, v] of Object.entries(fields)) {
+    if (v === null || v === undefined) delete meta[k]
+    else meta[k] = v
+  }
+  const metaStr = Object.keys(meta).length ? JSON.stringify(meta) : null
+  d.prepare('UPDATE messages SET metadata = ? WHERE id = ?').run(metaStr, msgId)
+}
+
+// Delete a specific message by id
+function deleteMessage(clawDir, sessionId, messageId) {
+  const d = getDb(clawDir)
+  if (!d) return
+  d.prepare('DELETE FROM messages WHERE id = ? AND session_id = ?').run(messageId, sessionId)
+}
+
+// Find last message of a role in a session
+function findLastMessage(clawDir, sessionId, role) {
+  const d = getDb(clawDir)
+  if (!d) return null
+  return d.prepare('SELECT id, role, content, timestamp, metadata FROM messages WHERE session_id = ? AND role = ? ORDER BY id DESC LIMIT 1').get(sessionId, role) || null
+}
+
 function deleteSession(clawDir, id) {
   const d = getDb(clawDir)
   if (!d) return
   d.prepare('DELETE FROM sessions WHERE id = ?').run(id)
+  // Clean up session directory
+  const sessionDir = path.join(clawDir, '.paw', 'sessions', id)
+  try { fs.rmSync(sessionDir, { recursive: true, force: true }) } catch {}
 }
 
 function renameSession(clawDir, id, title) {
@@ -157,58 +204,10 @@ function createSession(clawDir, title, { participants, mode } = {}) {
   const wsIds = participants || []
   const session = { id, title: title || 'New Chat', messages: [], createdAt: now, updatedAt: now, participants: wsIds, mode: mode || 'chat' }
   saveSession(clawDir, session)
+  // Create session directory for tool file storage
+  const sessionDir = path.join(clawDir, '.paw', 'sessions', id)
+  fs.mkdirSync(sessionDir, { recursive: true })
   return session
-}
-
-// ── Tasks CRUD ──
-
-function createTask(clawDir, sessionId, { title, dependsOn, createdBy, assignee }) {
-  const d = getDb(clawDir)
-  if (!d) return null
-  const id = 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5)
-  const now = Date.now()
-  const deps = Array.isArray(dependsOn) && dependsOn.length ? JSON.stringify(dependsOn) : null
-  d.prepare('INSERT INTO tasks (id, session_id, title, status, assignee, depends_on, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
-    .run(id, sessionId, title, 'pending', assignee || null, deps, createdBy || null, now, now)
-  return { id, sessionId, title, status: 'pending', assignee: assignee || null, dependsOn: dependsOn || [], createdBy, createdAt: now }
-}
-
-function updateTask(clawDir, taskId, { status, assignee }) {
-  const d = getDb(clawDir)
-  if (!d) return null
-  const task = d.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId)
-  if (!task) return { error: 'Task not found' }
-
-  const deps = task.depends_on ? JSON.parse(task.depends_on) : []
-
-  if (status === 'in-progress' && deps.length) {
-    const placeholders = deps.map(() => '?').join(',')
-    const blocked = d.prepare(`SELECT id FROM tasks WHERE id IN (${placeholders}) AND status != 'done'`).all(...deps)
-    if (blocked.length) return { error: `Blocked by: ${blocked.map(b => b.id).join(', ')}` }
-  }
-
-  const order = { pending: 0, 'in-progress': 1, done: 2 }
-  if (order[status] <= order[task.status]) return { error: `Cannot move from ${task.status} to ${status}` }
-
-  const now = Date.now()
-  const sets = ['status = ?', 'updated_at = ?']
-  const vals = [status, now]
-  if (assignee !== undefined) { sets.push('assignee = ?'); vals.push(assignee) }
-  vals.push(taskId)
-  d.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`).run(...vals)
-
-  return { id: taskId, status, assignee: assignee || task.assignee }
-}
-
-function listTasks(clawDir, sessionId) {
-  const d = getDb(clawDir)
-  if (!d) return []
-  const rows = d.prepare('SELECT * FROM tasks WHERE session_id = ? ORDER BY created_at').all(sessionId)
-  return rows.map(r => ({
-    id: r.id, title: r.title, status: r.status,
-    assignee: r.assignee, dependsOn: r.depends_on ? JSON.parse(r.depends_on) : [],
-    createdBy: r.created_by, createdAt: r.created_at
-  }))
 }
 
 function closeDb() {
@@ -231,14 +230,21 @@ function findSessionWorkspace(workspaces, sessionId) {
 }
 
 function listAllSessions(workspaces, opts = {}) {
+  const queriedDbs = new Set()
+  const seenIds = new Set()
   const allSessions = []
   for (const ws of workspaces) {
+    const dbPath = path.resolve(ws.path, '.paw', 'sessions.db')
+    if (queriedDbs.has(dbPath)) continue
+    queriedDbs.add(dbPath)
     const sessions = listSessions(ws.path, opts)
     for (const s of sessions) {
+      if (seenIds.has(s.id)) continue
+      seenIds.add(s.id)
       s.workspacePath = ws.path
       s.workspaceId = ws.id
+      allSessions.push(s)
     }
-    allSessions.push(...sessions)
   }
   allSessions.sort((a, b) => b.updatedAt - a.updatedAt)
   return allSessions
@@ -374,4 +380,4 @@ function removeSessionParticipant(clawDir, sessionId, workspaceId) {
   return true
 }
 
-module.exports = { getDb, listSessions, loadSession, saveSession, deleteSession, renameSession, createSession, closeDb, createTask, updateTask, listTasks, updateSessionStatus, getSessionStatus, getSessionMode, setSessionMode, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, addSessionParticipant, removeSessionParticipant, getSessionParticipants, findSessionWorkspace, listAllSessions }
+module.exports = { getDb, listSessions, loadSession, saveSession, appendMessage, deleteMessage, deleteSession, renameSession, createSession, closeDb, updateSessionStatus, getSessionStatus, getSessionMode, setSessionMode, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, addSessionParticipant, removeSessionParticipant, getSessionParticipants, findSessionWorkspace, listAllSessions, updateMessageMeta, findLastMessage }

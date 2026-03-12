@@ -133,7 +133,7 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
   const saveAndClose = useCallback(async () => {
     try {
       const cfg = { ...configRef.current }
-      cfg.theme = currentThemeRef.current === 'default' ? undefined : currentThemeRef.current
+      cfg.theme = currentThemeRef.current || 'light'
       cfg.heartbeat = {
         enabled: heartbeatEnabledRef.current,
         intervalMinutes: heartbeatIntervalRef.current || 30,
@@ -378,73 +378,38 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
                 onChange={(e) => setConfig({ ...config, tavilyKey: e.target.value })}
               />
             </div>
+          </div>
+
+          {/* ── Permission ── */}
+          <div className="settings-section">
+            <div className="settings-section-title">Permission</div>
             <div className="settings-field">
-              <label className="toggle-label">
+              <label className="toggle-label" style={{ justifyContent: 'space-between' }}>
+                <span style={{ flex: 1 }}>Require approval for dangerous commands</span>
                 <input
                   type="checkbox"
                   checked={config.execApproval !== false}
                   onChange={(e) => setConfig({ ...config, execApproval: e.target.checked })}
                 />
-                {' '}Require approval for dangerous commands
               </label>
             </div>
           </div>
 
-          {/* ── Heartbeat ── */}
-          <div className="settings-section">
-            <div className="settings-section-title">Heartbeat</div>
-            <div className="settings-field">
-              <label className="toggle-label">
-                <input
-                  type="checkbox"
-                  checked={heartbeatEnabled}
-                  onChange={(e) => setHeartbeatEnabled(e.target.checked)}
-                />
-                {' '}Enable Heartbeat
-              </label>
-              <p className="hint" style={{ marginTop: 4 }}>Agent checks in periodically to do background work.</p>
-            </div>
-            <div className="settings-field">
-              <label>Interval (minutes)</label>
-              <input
-                type="number"
-                min={1}
-                max={1440}
-                style={{ width: 100 }}
-                value={heartbeatInterval}
-                onChange={(e) => setHeartbeatInterval(parseInt(e.target.value) || 30)}
-              />
-            </div>
-          </div>
-
-          {/* ── MCP Servers ── */}
-          <div className="settings-section">
-            <div className="settings-section-title">MCP Servers</div>
-            <div className="settings-field">
-              <textarea
-                rows={5}
-                placeholder='{"filesystem":{"command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","/tmp"]}}'
-                value={mcpText}
-                onChange={(e) => setMcpText(e.target.value)}
-              />
-              <div style={{ marginTop: 6 }}>
-                {mcpStatus && Object.keys(mcpStatus).length > 0 ? (
-                  <>
-                    <label>Server Status</label>
-                    {Object.entries(mcpStatus).map(([name, info]) => (
-                      <div key={name} style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0' }}>
-                        <span style={{ color: info.status === 'connected' ? '#22c55e' : '#ef4444' }}>&#9679;</span>
-                        {' '}<strong>{name}</strong> &mdash;{' '}
-                        {info.status === 'connected' ? `${info.toolCount} tools` : (info.error || 'disconnected')}
-                      </div>
-                    ))}
-                  </>
-                ) : mcpStatus ? (
-                  <p className="hint">No MCP servers configured.</p>
-                ) : null}
+          {/* ── MCP Servers (status only) ── */}
+          {mcpStatus && Object.keys(mcpStatus).length > 0 && (
+            <div className="settings-section">
+              <div className="settings-section-title">MCP Servers</div>
+              <div className="settings-field">
+                {Object.entries(mcpStatus).map(([name, info]) => (
+                  <div key={name} style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0' }}>
+                    <span style={{ color: info.status === 'connected' ? '#22c55e' : '#ef4444' }}>&#9679;</span>
+                    {' '}<strong>{name}</strong> &mdash;{' '}
+                    {info.status === 'connected' ? `${info.toolCount} tools` : (info.error || 'disconnected')}
+                  </div>
+                ))}
               </div>
             </div>
-          </div>
+          )}
 
 
           {/* ── About ── */}

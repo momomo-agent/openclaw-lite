@@ -54,9 +54,7 @@ async function buildSystemPrompt(workspacePath) {
 - **ui_status_set**: Update the sidebar status line (4-20 Chinese chars). **Always call this** at start, before/after tool use, and when done. Write like first-person inner monologue. Examples: '让我想想…', '找到线索了', '写完了，挺满意的'. This is the primary way the user sees your personality.
 - **memory_search**: Search MEMORY.md + memory/*.md by keywords. Use BEFORE answering questions about prior work, decisions, dates, people, preferences, or todos.
 - **memory_get**: Read a snippet from MEMORY.md or memory/*.md with optional line range. Use AFTER memory_search to pull only the needed lines.
-- **task_create / task_update / task_list**: Manage shared tasks
-- **send_message**: Send a message to another agent
-- **create_agent / remove_agent**: Manage lightweight agents in session
+- **task**: Manage shared tasks (action: create/update/list)
 - **skill_create**: Create a new skill with scaffolding (SKILL.md + scripts/ + references/)
 - **cron**: Manage scheduled jobs (status, list, add, update, remove, run, runs, wake)
 - **mcp_config**: Manage MCP servers (list, add, remove, update, status). Add external tool servers that the AI can then use.
@@ -134,7 +132,7 @@ The following project context files have been loaded:`);
   }
 
   // Core identity files
-  for (const f of ['SOUL.md', 'USER.md', 'NOW.md', 'AGENTS.md', 'IDENTITY.md']) {
+  for (const f of ['SOUL.md', 'USER.md', 'NOW.md', 'AGENTS.md', 'IDENTITY.md', 'BOOTSTRAP.md']) {
     const p = path.join(wsDir, f);
     if (fs.existsSync(p)) injectFile(f, fs.readFileSync(p, 'utf8'));
   }
@@ -182,7 +180,9 @@ host=${os.hostname()} | os=${os.type()} ${os.release()} (${os.arch()}) | node=${
   // ── Shared Task List ──
   if (state.currentSessionId && state.clawDir) {
     try {
-      const tasks = sessionStore.listTasks(state.clawDir, state.currentSessionId);
+      const { loadTasks } = require('../tools/tasks');
+      const sessionDir = path.join(state.clawDir, '.paw', 'sessions', state.currentSessionId);
+      const tasks = loadTasks(sessionDir);
       if (tasks.length) {
         const icons = { pending: '⏳', 'in-progress': '🔄', done: '✅' };
         const lines = tasks.map(t => {
@@ -191,7 +191,7 @@ host=${os.hostname()} | os=${os.type()} ${os.release()} (${os.arch()}) | node=${
           if (t.dependsOn?.length) s += ` [depends: ${t.dependsOn.join(',')}]`;
           return s;
         });
-        parts.push(`## Shared Task List\n${lines.join('\n')}\n\nUse task_create/task_update/task_list to manage tasks. Claim a task before working on it. Complete when done.`);
+        parts.push(`## Shared Task List\n${lines.join('\n')}\n\nUse the task tool (action: create/update/list) to manage tasks. Claim a task before working on it. Complete when done.`);
       }
     } catch {}
   }
@@ -231,7 +231,9 @@ function buildAgentPrompt(agent, focus, sessionAgents) {
   }
   if (state.currentSessionId && state.clawDir) {
     try {
-      const tasks = sessionStore.listTasks(state.clawDir, state.currentSessionId);
+      const { loadTasks } = require('../tools/tasks');
+      const sessionDir = path.join(state.clawDir, '.paw', 'sessions', state.currentSessionId);
+      const tasks = loadTasks(sessionDir);
       if (tasks.length) {
         const icons = { pending: '⏳', 'in-progress': '🔄', done: '✅' };
         parts.push(`## Tasks\n${tasks.map(t => `[${t.id}] ${icons[t.status] || '?'} ${t.status}: ${t.title}${t.assignee ? ` (${t.assignee})` : ''}`).join('\n')}`);
@@ -241,8 +243,7 @@ function buildAgentPrompt(agent, focus, sessionAgents) {
   parts.push(`## Tools
 - **ui_status_set**: Update sidebar status (4-20 Chinese chars). Write like inner monologue. Always set at start and when done.
 - **memory_search / memory_get**: Search and read shared memory files.
-- **task_create / task_update / task_list**: Manage shared tasks.
-- **send_message**: Send a message to another agent.
+- **task**: Manage shared tasks (action: create/update/list).
 
 ### Rules
 - You are a specialist. Focus on your role.
