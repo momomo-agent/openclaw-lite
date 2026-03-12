@@ -77,6 +77,18 @@ function AppContent() {
       }
     }
 
+    // Catch up runtime state (window may have been closed and reopened)
+    try {
+      const runtimeState = await api.getRuntimeState?.()
+      if (runtimeState?.latestStatuses) {
+        for (const [sid, st] of Object.entries(runtimeState.latestStatuses)) {
+          const s = st as any
+          setActivity(sid, s.level)
+          setStatus(sid, s.text || '')
+        }
+      }
+    } catch {}
+
     // Listen to sidebar status updates
     api.onWatsonStatus?.((data: any) => {
       if (data.sessionId) {

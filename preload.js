@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('api', {
   getFeatureFlags: () => ipcRenderer.invoke('get-feature-flags'),
+  getRuntimeState: () => ipcRenderer.invoke('get-runtime-state'),
   // Agent registry (M32 — agents = workspace folders with SOUL.md + identity)
   listWorkspaces: () => ipcRenderer.invoke('workspaces-list'),
   addWorkspace: (wsPath) => ipcRenderer.invoke('workspace-add', wsPath),

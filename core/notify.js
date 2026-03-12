@@ -1,11 +1,10 @@
 // core/notify.js — 通知 + Watson Status
 const { Notification } = require('electron');
 const state = require('./state');
+const eventBus = require('./event-bus');
 
-function pushStatus(win, statusState, detail) {
-  if (win && !win.isDestroyed()) {
-    win.webContents.send('status', { state: statusState, detail });
-  }
+function pushStatus(statusState, detail) {
+  eventBus.dispatch('agent-status', { state: statusState, detail });
 }
 
 function sendNotification(title, body) {
@@ -17,7 +16,7 @@ function sendNotification(title, body) {
 function pushWatsonStatus(level, text, requestId) {
   const rid = requestId || state._activeRequestId;
   const payload = { level, text, requestId: rid };
-  state.mainWindow?.webContents?.send('watson-status', payload);
+  eventBus.dispatch('watson-status', payload);
   state._trayStatusText = text || '空闲待命中';
 }
 

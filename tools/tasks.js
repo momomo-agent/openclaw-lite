@@ -1,5 +1,6 @@
 // tools/tasks.js — task_create + task_update + task_list
 const { registerTool } = require('./registry');
+const eventBus = require('../core/event-bus');
 
 function findBestAgent(taskTitle, sessionAgents) {
   if (!sessionAgents?.length) return null;
@@ -34,7 +35,7 @@ registerTool({
     required: ['title']
   },
   handler: async (args, context) => {
-    const { clawDir, sessionId, agentName, mainWindow, sessionStore } = context;
+    const { clawDir, sessionId, agentName, sessionStore } = context;
     if (!clawDir || !sessionId) return 'Error: No active session';
     const title = (args.title || '').trim();
     if (!title) return 'Error: title required';
@@ -51,7 +52,7 @@ registerTool({
     const task = sessionStore.createTask(clawDir, sessionId, {
       title, dependsOn: args.dependsOn, createdBy: agentName || 'user', assignee
     });
-    if (mainWindow) mainWindow.webContents.send('tasks-changed', sessionId);
+    eventBus.dispatch('tasks-changed', sessionId);
     return JSON.stringify(task);
   }
 });
@@ -69,15 +70,15 @@ registerTool({
     required: ['taskId', 'status']
   },
   handler: async (args, context) => {
-    const { clawDir, sessionId, agentName, mainWindow, sessionStore } = context;
+    const { clawDir, sessionId, agentName, sessionStore } = context;
     if (!clawDir || !sessionId) return 'Error: No active session';
     const result = sessionStore.updateTask(clawDir, args.taskId, {
       status: args.status, assignee: args.assignee || agentName
     });
     if (result?.error) return `Error: ${result.error}`;
-    if (mainWindow) mainWindow.webContents.send('tasks-changed', sessionId);
+    eventBus.dispatch('tasks-changed', sessionId);
     // Auto-rotation: when a task is done, check for unblocked tasks
-    if (args.status === 'done' && mainWindow) {
+    if (args.status === 'done') {
       const allTasks = sessionStore.listTasks(clawDir, sessionId);
       const unblocked = allTasks.find(t =>
         t.status === 'pending' && t.dependsOn?.includes(args.taskId) &&
@@ -92,7 +93,7 @@ registerTool({
             unblocked.assignee = best;
           }
         }
-        mainWindow.webContents.send('auto-rotate', {
+        eventBus.dispatch('auto-rotate', {
           sessionId, completedTask: args.taskId, completedBy: agentName, nextTask: unblocked
         });
       }

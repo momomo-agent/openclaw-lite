@@ -2,6 +2,7 @@
 const path = require('path');
 const fs = require('fs');
 const state = require('./state');
+const eventBus = require('./event-bus');
 const memoryIndex = require('../memory-index');
 const { loadConfig } = require('./config');
 
@@ -12,8 +13,8 @@ async function buildMemoryIndex() {
   try {
     const config = loadConfig();
     await memoryIndex.buildIndex(state.clawDir, config, (file, done, total) => {
-      if (state.mainWindow && done && total) {
-        state.mainWindow.webContents.send('memory-index-progress', { file, done, total });
+      if (done && total) {
+        eventBus.dispatch('memory-index-progress', { file, done, total });
       }
     });
     console.log('[main] Memory index built');

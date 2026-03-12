@@ -100,9 +100,8 @@ interface ContextMenuState {
 }
 
 export default function Sidebar() {
-  const { sessions, workspaces, currentSessionId, setCurrentSessionId, setSessions, setWorkspaces, setStatus } = useAppState()
+  const { sessions, workspaces, currentSessionId, setCurrentSessionId, setSessions, setWorkspaces, setStatus, sidebarVisible, setSidebarVisible } = useAppState()
   const api = useIPC()
-  const [sidebarVisible, setSidebarVisible] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState>({ visible: false, x: 0, y: 0, sessionId: null })
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -151,12 +150,12 @@ export default function Sidebar() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.metaKey && e.shiftKey && e.key === 's') {
         e.preventDefault()
-        setSidebarVisible(v => !v)
+        setSidebarVisible(!sidebarVisible)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+  }, [sidebarVisible])
 
   // Restore persisted AI status from session data (once on mount)
   const statusRestored = useRef(false)

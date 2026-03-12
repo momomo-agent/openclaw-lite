@@ -9,6 +9,7 @@ const { loadAllSkills } = require('./skills/frontmatter')
 
 // ── Core modules (M18 refactor) ──
 const state = require('./core/state')
+const eventBus = require('./core/event-bus')
 const { globalConfigPath, loadGlobalConfig, saveGlobalConfig } = require('./core/config')
 const { getApiKey, rotateApiKey, recordKeyUsage } = require('./core/api-keys')
 const { estimateTokens: coreEstimateTokens, estimateMessagesTokens: coreEstimateMessagesTokens } = require('./core/compaction')
@@ -28,9 +29,9 @@ let _activeRequestId = null
 let _activeAbortController = null
 let _activeCodingProcess = null
 
-function pushStatus(win, state, detail) {
-  win?.webContents?.send('agent-status', { state, detail })
-  if (tray) tray.setToolTip(`Paw - ${detail || state}`)
+function pushStatus(st, detail) {
+  eventBus.dispatch('agent-status', { state: st, detail })
+  if (tray) tray.setToolTip(`Paw - ${detail || st}`)
 }
 
 function sendNotification(title, body) {
@@ -147,10 +148,7 @@ const mcpManager = new McpManager()
 let cronService = null
 
 // ── Notification helpers (must be before first usage in chat/stream) ──
-function pushStatus(win, st, detail) {
-  win?.webContents?.send('agent-status', { state: st, detail })
-  if (tray) tray.setToolTip(`Paw - ${detail || st}`)
-}
+// pushStatus already defined above (uses eventBus)
 function sendNotification(title, body) {
   if (Notification.isSupported()) new Notification({ title, body }).show()
 }
@@ -405,6 +403,39 @@ async function createWindow() {
   mainWindow.webContents.on('did-finish-load', () => {
     mainWindow.focus()
   })
+
+  // Bridge eventBus → BrowserWindow IPC
+  bridgeEventBus(mainWindow)
+
+  // Null out mainWindow reference on close so runtime knows there's no window
+  mainWindow.on('closed', () => {
+    mainWindow = null
+    syncState()
+  })
+}
+
+// ── EventBus → BrowserWindow bridge ──
+const EVENT_CHANNELS = [
+  'chat-token', 'chat-tool-step', 'chat-round-info', 'chat-text-start',
+  'chat-done', 'chat-error', 'chat-status',
+  'chat-delegate-start', 'chat-delegate-token', 'chat-delegate-end',
+  'agent-status', 'watson-status',
+  'session-agents-changed', 'session-expired', 'tasks-changed',
+  'heartbeat-result', 'tray-new-chat', 'memory-changed',
+  'cc-status', 'cc-output', 'auto-rotate',
+]
+
+function bridgeEventBus(win) {
+  const handlers = EVENT_CHANNELS.map(ch => {
+    const handler = (data) => {
+      if (!win.isDestroyed()) win.webContents.send(ch, data)
+    }
+    eventBus.on(ch, handler)
+    return { ch, handler }
+  })
+  win.on('closed', () => {
+    for (const { ch, handler } of handlers) eventBus.off(ch, handler)
+  })
 }
 
 app.whenReady().then(() => {
@@ -476,7 +507,12 @@ app.on('will-quit', () => {
   mcpManager.disconnectAll().catch(() => {});
   if (cronService) cronService.stop();
 })
-app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow()
+    // createWindow already calls bridgeEventBus + sets up closed handler
+  }
+})
 
 async function openNewWindow() {
   const result = await dialog.showOpenDialog({ properties: ['openDirectory'], title: 'Choose claw directory' })
@@ -740,7 +776,7 @@ ipcMain.handle('session-create-agent', (_, { sessionId, name, role }) => {
   const existing = sessionStore.findSessionAgentByName(wsPath, sessionId, name)
   if (existing) return { error: `Agent "${name}" already exists in this session` }
   const agent = sessionStore.createSessionAgent(wsPath, sessionId, { name, role })
-  mainWindow?.webContents.send('session-agents-changed', sessionId)
+  eventBus.dispatch('session-agents-changed', sessionId)
   return agent
 })
 
@@ -756,7 +792,7 @@ ipcMain.handle('session-delete-agent', (_, agentId) => {
   for (const ws of workspaces) {
     const result = sessionStore.deleteSessionAgent(ws.path, agentId)
     if (result && currentSessionId) {
-      mainWindow?.webContents.send('session-agents-changed', currentSessionId)
+      eventBus.dispatch('session-agents-changed', currentSessionId)
       return true
     }
   }
@@ -897,10 +933,10 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
     })
   }
   const expiryReason = _sessionExpiry.shouldReset()
-  if (expiryReason && mainWindow) {
+  if (expiryReason) {
     console.log(`[Paw] Session expired: ${expiryReason}`)
     _sessionExpiry.reset()
-    mainWindow.webContents.send('session-expired', { reason: expiryReason })
+    eventBus.dispatch('session-expired', { reason: expiryReason })
   }
   _sessionExpiry.touch()
 
@@ -915,7 +951,6 @@ ipcMain.handle('chat', async (_, { prompt, history, rawMessages, agentId, files,
         cwd: wsPath || clawDir || process.cwd(),
         sessionId,
         requestId,
-        win: mainWindow,
       })
       return result
     }
@@ -1070,7 +1105,7 @@ ${roster}
   let compacted = false
   if (totalTokens > compactThreshold && prunedMessages.length > COMPACT_KEEP_RECENT * 2 + 2) {
     console.log(`[compaction] ${totalTokens} tokens exceeds threshold ${compactThreshold} (model: ${model}), compacting...`)
-    mainWindow?.webContents.send('chat-status', { text: '压缩历史对话...', requestId })
+    eventBus.dispatch('chat-status', { text: '压缩历史对话...', requestId })
     finalMessages = await compactHistory(prunedMessages, { apiKey, baseUrl, model, provider })
     compacted = true
   }
@@ -1105,10 +1140,10 @@ ${roster}
       let result
       const streamConfig = { apiKey, baseUrl, model: target.model, tavilyKey: config.tavilyKey, maxToolRounds: config.maxToolRounds, maxTokens: config.maxTokens }
       if (target.provider === 'anthropic') {
-        result = await streamAnthropic(finalMessages, systemPrompt, streamConfig, mainWindow, requestId, chatTools, sessionId, _wsIdentity)
+        result = await streamAnthropic(finalMessages, systemPrompt, streamConfig, requestId, chatTools, sessionId, _wsIdentity)
         _lastAnthropicCallTime = Date.now()
       } else {
-        result = await streamOpenAI(finalMessages, systemPrompt, streamConfig, mainWindow, requestId, chatTools, sessionId, _wsIdentity)
+        result = await streamOpenAI(finalMessages, systemPrompt, streamConfig, requestId, chatTools, sessionId, _wsIdentity)
       }
       // Track token usage
       if (result?.usage && sessionId) {
@@ -1122,7 +1157,7 @@ ${roster}
       console.warn(`[Paw] model ${target.model} failed: ${err.message} (cooldown ${Math.round((cd.until - Date.now()) / 1000)}s, errors: ${cd.errorCount})`)
       if (target === modelsToTry[modelsToTry.length - 1]) {
         console.error('[Paw] all models failed:', err.message)
-        pushStatus(mainWindow, 'error', err.message.slice(0, 80))
+        pushStatus('error', err.message.slice(0, 80))
         // F209: Save error as message
         if (clawDir && sessionId) {
           const errorText = `❌ Error: ${err.message}`
@@ -1245,29 +1280,30 @@ async function handleDelegateTo(input, config, sessionId) {
     const avatar = targetWs.identity?.avatar || '🤖'
     console.log(`[delegate_to] sending delegate-start: sender=${myName}, avatar=${avatar}, wsId=${targetWs.id}`)
     const parentRequestId = _activeRequestId
-    if (mainWindow && parentRequestId) {
-      mainWindow.webContents.send('chat-delegate-start', { requestId: parentRequestId, sender: myName, workspaceId: targetWs.id, avatar, sessionId })
+    if (parentRequestId) {
+      eventBus.dispatch('chat-delegate-start', { requestId: parentRequestId, sender: myName, workspaceId: targetWs.id, avatar, sessionId })
     }
 
-    // Create proxy win that remaps chat-* events to chat-delegate-* events
-    const proxyWin = {
-      webContents: {
-        send(channel, data) {
-          if (!mainWindow || !parentRequestId) return
-          if (channel === 'chat-token') {
-            mainWindow.webContents.send('chat-delegate-token', { requestId: parentRequestId, sender: myName, token: data.text, thinking: data.thinking || false, sessionId })
-          } else if (channel === 'chat-tool-step') {
-            mainWindow.webContents.send('chat-delegate-token', { requestId: parentRequestId, sender: myName, toolStep: data, sessionId })
-          } else if (channel === 'chat-text-start') {
-            // New round text start — no-op for delegate (text appends to same bubble)
-          } else if (channel === 'chat-round-info') {
-            mainWindow.webContents.send('chat-delegate-token', { requestId: parentRequestId, sender: myName, roundInfo: data, sessionId })
-          } else if (channel === 'chat-status') {
-            // Delegate status — forward with sessionId
-            mainWindow.webContents.send('chat-status', { ...data, sessionId })
-          }
+    // Intercept delegate stream events and remap to delegate channels via eventBus
+    const delegateRid = parentRequestId + '-delegate'
+    const remapHandlers = []
+    const remapChannels = { 'chat-token': true, 'chat-tool-step': true, 'chat-round-info': true, 'chat-status': true, 'chat-text-start': true }
+    for (const ch of Object.keys(remapChannels)) {
+      const handler = (data) => {
+        if (data?.requestId !== delegateRid) return
+        if (ch === 'chat-token') {
+          eventBus.dispatch('chat-delegate-token', { requestId: parentRequestId, sender: myName, token: data.text, thinking: data.thinking || false, sessionId })
+        } else if (ch === 'chat-tool-step') {
+          eventBus.dispatch('chat-delegate-token', { requestId: parentRequestId, sender: myName, toolStep: data, sessionId })
+        } else if (ch === 'chat-round-info') {
+          eventBus.dispatch('chat-delegate-token', { requestId: parentRequestId, sender: myName, roundInfo: data, sessionId })
+        } else if (ch === 'chat-status') {
+          eventBus.dispatch('chat-status', { ...data, sessionId })
         }
+        // chat-text-start: no-op for delegate (text appends to same bubble)
       }
+      eventBus.on(ch, handler)
+      remapHandlers.push({ ch, handler })
     }
 
     // Save and restore active request state (delegate runs inside orchestrator's tool loop)
@@ -1276,10 +1312,13 @@ async function handleDelegateTo(input, config, sessionId) {
 
     let result
     if (provider === 'anthropic') {
-      result = await streamAnthropic(delegateMessages, fullPrompt, fullConfig, proxyWin, parentRequestId + '-delegate', delegateTools, sessionId)
+      result = await streamAnthropic(delegateMessages, fullPrompt, fullConfig, delegateRid, delegateTools, sessionId)
     } else {
-      result = await streamOpenAI(delegateMessages, fullPrompt, fullConfig, proxyWin, parentRequestId + '-delegate', delegateTools, sessionId)
+      result = await streamOpenAI(delegateMessages, fullPrompt, fullConfig, delegateRid, delegateTools, sessionId)
     }
+
+    // Cleanup delegate event remapping
+    for (const { ch, handler } of remapHandlers) eventBus.off(ch, handler)
 
     // Restore parent state
     _activeRequestId = savedRequestId
@@ -1288,8 +1327,8 @@ async function handleDelegateTo(input, config, sessionId) {
     const responseText = result?.answer || ''
 
     // Signal delegate end — frontend finalizes bubble + saves message
-    if (mainWindow && parentRequestId) {
-      mainWindow.webContents.send('chat-delegate-end', { requestId: parentRequestId, sender: myName, workspaceId: targetWs.id, fullText: responseText, sessionId })
+    if (parentRequestId) {
+      eventBus.dispatch('chat-delegate-end', { requestId: parentRequestId, sender: myName, workspaceId: targetWs.id, fullText: responseText, sessionId })
     }
 
     console.log(`[delegate_to] ${myName} responded (${responseText.length} chars), sent delegate-end`)
@@ -1305,7 +1344,7 @@ async function handleDelegateTo(input, config, sessionId) {
 
 // ── Coding Agent Streaming ──
 
-async function streamCodingAgent(agentId, prompt, { cwd, sessionId, requestId, win }) {
+async function streamCodingAgent(agentId, prompt, { cwd, sessionId, requestId }) {
   _activeRequestId = requestId
   _activeCodingProcess = null
 
@@ -1313,15 +1352,15 @@ async function streamCodingAgent(agentId, prompt, { cwd, sessionId, requestId, w
   const _ccWs = workspaceRegistry.listWorkspaces()[0] || null
   const _ccIdent = { agentName: _ccWs?.identity?.name || agentId, avatar: _ccWs?.identity?.avatar || null, wsPath: _ccWs?.path || cwd, workspaceId: _ccWs?.id || null }
 
-  pushStatus(win, 'running', `${agentId} working...`)
-  win?.webContents?.send('chat-text-start', { requestId, ..._ccIdent, sessionId })
+  pushStatus('running', `${agentId} working...`)
+  eventBus.dispatch('chat-text-start', { requestId, ..._ccIdent, sessionId })
 
   try {
     const result = await codingAgents.run(agentId, prompt, {
       cwd,
       session: sessionId ? `paw-${sessionId}` : undefined,
       onOutput(chunk) {
-        win?.webContents?.send('chat-token', { token: chunk, requestId })
+        eventBus.dispatch('chat-token', { token: chunk, requestId })
       },
       onProcess(proc) {
         _activeCodingProcess = proc
@@ -1329,23 +1368,23 @@ async function streamCodingAgent(agentId, prompt, { cwd, sessionId, requestId, w
     })
 
     _activeCodingProcess = null
-    pushStatus(win, 'idle', '')
-    win?.webContents?.send('chat-done', { requestId, sessionId })
+    pushStatus('idle', '')
+    eventBus.dispatch('chat-done', { requestId, sessionId })
     return { answer: result.stdout, mode: 'coding', agentId }
   } catch (err) {
     _activeCodingProcess = null
-    pushStatus(win, 'error', err.message?.slice(0, 80))
+    pushStatus('error', err.message?.slice(0, 80))
     throw err
   }
 }
 
 // ── Anthropic Streaming ──
 
-async function streamAnthropic(messages, systemPrompt, config, win, requestId, tools, sessionId, wsIdentity) {
+async function streamAnthropic(messages, systemPrompt, config, requestId, tools, sessionId, wsIdentity) {
   _activeRequestId = requestId
   _activeAbortController = new AbortController()
-  // Session-scoped IPC helper — injects sessionId into every payload
-  const ipc = (channel, data) => win?.webContents?.send(channel, { ...data, sessionId })
+  // Session-scoped dispatch helper — injects sessionId into every payload
+  const ipc = (channel, data) => eventBus.dispatch(channel, { ...data, sessionId })
   // Agent timeout — prevent infinite waits (OpenClaw default: 600s)
   const timeoutMs = (config.timeoutSeconds || 600) * 1000
   const timeoutId = setTimeout(() => {
@@ -1378,7 +1417,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
     roundText = ''
     // Send text-start for every round (including round 0) with workspace identity
     ipc('chat-text-start', { requestId, ...(wsIdentity || {}) })
-    pushStatus(win, 'thinking', 'Thinking...')
+    pushStatus('thinking', 'Thinking...')
 
     // Build system with cache_control for prompt caching
     const scrubbedSystemPrompt = scrubMagicStrings(systemPrompt)
@@ -1496,7 +1535,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
     lastUsageInput = roundUsageInput
 
     if (!toolCalls.length) {
-      pushStatus(win, 'done', 'Done')
+      pushStatus('done', 'Done')
       ipc('chat-done', { requestId })
       console.log('[Paw] streamAnthropic done, fullText length:', fullText.length)
       clearTimeout(timeoutId)
@@ -1540,7 +1579,7 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
         console.warn(`[Paw] ${loopCheck.reason}`)
       }
       const silent = SILENT_TOOLS.includes(tc.name)
-      if (!silent) pushStatus(win, 'tool', `Running ${tc.name}...`)
+      if (!silent) pushStatus('tool', `Running ${tc.name}...`)
       let result, execError
       try {
         result = await executeTool(tc.name, input, config, { sessionId })
@@ -1566,11 +1605,11 @@ async function streamAnthropic(messages, systemPrompt, config, win, requestId, t
 
 // ── OpenAI Streaming ──
 
-async function streamOpenAI(messages, systemPrompt, config, win, requestId, tools, sessionId, wsIdentity) {
+async function streamOpenAI(messages, systemPrompt, config, requestId, tools, sessionId, wsIdentity) {
   _activeRequestId = requestId
   _activeAbortController = new AbortController()
-  // Session-scoped IPC helper — injects sessionId into every payload
-  const ipc = (channel, data) => win?.webContents?.send(channel, { ...data, sessionId })
+  // Session-scoped dispatch helper — injects sessionId into every payload
+  const ipc = (channel, data) => eventBus.dispatch(channel, { ...data, sessionId })
   // Agent timeout
   const timeoutMs = (config.timeoutSeconds || 600) * 1000
   const timeoutId = setTimeout(() => {
@@ -1609,7 +1648,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
     roundText = ''
     // Send text-start for every round (including round 0) with workspace identity
     ipc('chat-text-start', { requestId, ...(wsIdentity || {}) })
-    pushStatus(win, 'thinking', 'Thinking...')
+    pushStatus('thinking', 'Thinking...')
 
     // Context window guard — enforce budget before API call
     const contextWindowTokens = resolveContextWindow(config)
@@ -1685,7 +1724,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
     totalUsageOutput += roundUsageOutput
 
     if (!tcList.length || !tcList[0].name) {
-      pushStatus(win, 'done', 'Done')
+      pushStatus('done', 'Done')
       ipc('chat-done', { requestId })
       clearTimeout(timeoutId)
       return { answer: fullText, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput } }
@@ -1715,7 +1754,7 @@ async function streamOpenAI(messages, systemPrompt, config, win, requestId, tool
         console.warn(`[Paw] ${loopCheck.reason}`)
       }
       const silent = SILENT_TOOLS_OAI.includes(tc.name)
-      if (!silent) pushStatus(win, 'tool', `Running ${tc.name}...`)
+      if (!silent) pushStatus('tool', `Running ${tc.name}...`)
       let result, execError
       try {
         result = await executeTool(tc.name, input, config, { sessionId })
@@ -1765,10 +1804,10 @@ function startHeartbeat() {
       const fn = (c.provider || 'anthropic') === 'anthropic' ? streamAnthropic : streamOpenAI
       // Use a dedicated heartbeat requestId to avoid hijacking active user chats
       const hbRequestId = 'hb-' + Date.now().toString(36)
-      const r = await fn(msgs, sp, c, mainWindow, hbRequestId)
+      const r = await fn(msgs, sp, c, hbRequestId)
       if (r?.answer && !r.answer.includes('HEARTBEAT_OK')) {
         sendNotification('Paw', r.answer.slice(0, 200))
-        mainWindow?.webContents.send('heartbeat-result', r.answer)
+        eventBus.dispatch('heartbeat-result', r.answer)
       }
     } catch (e) { console.error('Heartbeat error:', e.message) }
   }, ms)
@@ -1797,8 +1836,7 @@ async function initMcpAndCron() {
       pawDir,
       onSystemEvent: async (text) => {
         // Inject system event into main session
-        if (!mainWindow) return;
-        mainWindow.webContents.send('heartbeat-result', text);
+        eventBus.dispatch('heartbeat-result', text);
       },
       onAgentTurn: async (payload) => {
         // Simplified: run as a heartbeat-like invocation
@@ -1809,7 +1847,7 @@ async function initMcpAndCron() {
           const msgs = [{ role: 'user', content: payload.message || payload.text || 'Cron task' }];
           const fn = (c.provider || 'anthropic') === 'anthropic' ? streamAnthropic : streamOpenAI;
           const rid = 'cron-' + Date.now().toString(36);
-          await fn(msgs, sp, c, mainWindow, rid);
+          await fn(msgs, sp, c, rid);
           return { status: 'ok' };
         } catch (e) {
           return { error: e.message };
@@ -1847,7 +1885,7 @@ function updateTrayMenu() {
     { label: `${emoji}  ${_trayStatusText}`, enabled: false },
     { type: 'separator' },
     { label: '打开 Paw', click: () => { mainWindow?.show(); mainWindow?.focus() } },
-    { label: '新建对话', click: () => { mainWindow?.show(); mainWindow?.webContents?.send('tray-new-chat') } },
+    { label: '新建对话', click: () => { mainWindow?.show(); eventBus.dispatch('tray-new-chat', {}) } },
     { type: 'separator' },
     { label: '退出', click: () => app.quit() },
   ])
@@ -1876,7 +1914,7 @@ function pushWatsonStatus(level, text, requestId, sessionId) {
   const rid = requestId || _activeRequestId
   const sid = sessionId || currentSessionId
   const payload = { level, text, requestId: rid, sessionId: sid }
-  mainWindow?.webContents?.send('watson-status', payload)
+  eventBus.dispatch('watson-status', payload)
   // Persist status to SQLite
   if (sid && clawDir) {
     try { sessionStore.updateSessionStatus(clawDir, sid, level, text) } catch {}
@@ -1896,6 +1934,13 @@ function pushWatsonStatus(level, text, requestId, sessionId) {
 }
 
 ipcMain.handle('notify', (_, { title, body }) => { sendNotification(title, body); return true })
+
+// ── Runtime state catch-up (window reconnection) ──
+ipcMain.handle('get-runtime-state', () => ({
+  activeRequestId: _activeRequestId,
+  latestStatuses: eventBus.getLatestStatuses(),
+  trayStatus: { text: _trayStatusText, level: _trayStatusLevel },
+}))
 
 ipcMain.handle('update-session-status', (_, { sessionId, level, text }) => {
   if (clawDir && sessionId) {

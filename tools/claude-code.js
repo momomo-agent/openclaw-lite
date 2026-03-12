@@ -1,6 +1,7 @@
 // tools/claude-code.js — Claude Code via acpx
 const { registerTool } = require('./registry');
 const acpx = require('../core/acpx');
+const eventBus = require('../core/event-bus');
 const path = require('path');
 
 const sessionCCSessions = new Map(); // pawSessionId -> acpxSessionName
@@ -40,7 +41,7 @@ registerTool({
     required: ['task']
   },
   handler: async (args, context) => {
-    const { clawDir, mainWindow, sessionId, config } = context;
+    const { clawDir, sessionId, config } = context;
     const workdir = args.workdir ? path.resolve(clawDir, args.workdir) : clawDir;
     const task = (args.task || '').trim();
     if (!task) return 'Error: task required';
@@ -48,9 +49,7 @@ registerTool({
 
     const agent = args.agent || config?.defaultCodingAgent || 'claude';
 
-    if (mainWindow) {
-      mainWindow.webContents.send('cc-status', { status: 'running', task: task.slice(0, 80) });
-    }
+    eventBus.dispatch('cc-status', { status: 'running', task: task.slice(0, 80) });
 
     try {
       const acpxOpts = {
@@ -58,9 +57,7 @@ registerTool({
         timeout: 300000,
         approveAll: true,
         onOutput: (chunk) => {
-          if (mainWindow) {
-            mainWindow.webContents.send('cc-output', { chunk, total: chunk.length });
-          }
+          eventBus.dispatch('cc-output', { chunk, total: chunk.length });
         }
       };
 
@@ -86,23 +83,19 @@ registerTool({
         ? `...(truncated ${text.length - MAX_OUTPUT} chars)...\n${text.slice(-MAX_OUTPUT)}`
         : text;
 
-      if (mainWindow) {
-        mainWindow.webContents.send('cc-status', {
-          status: result.isError ? 'error' : 'done',
-          length: text.length,
-          cost: result.cost,
-          error: result.isError ? (text.slice(0, 200) || 'CC execution failed') : undefined
-        });
-      }
+      eventBus.dispatch('cc-status', {
+        status: result.isError ? 'error' : 'done',
+        length: text.length,
+        cost: result.cost,
+        error: result.isError ? (text.slice(0, 200) || 'CC execution failed') : undefined
+      });
 
       const meta = result.sessionName ? `\n[CC session: ${result.sessionName}]` : '';
       const costInfo = result.cost ? ` [cost: $${result.cost.toFixed(4)}]` : '';
       return truncated + meta + costInfo;
 
     } catch (err) {
-      if (mainWindow) {
-        mainWindow.webContents.send('cc-status', { status: 'error', error: err.message });
-      }
+      eventBus.dispatch('cc-status', { status: 'error', error: err.message });
       return `Error running Claude Code: ${err.message}`;
     }
   }

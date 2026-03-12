@@ -11,7 +11,7 @@ import SettingsPanel from './SettingsPanel'
 const CHARS_PER_TOKEN = 3.5
 
 export default function ChatView() {
-  const { currentSessionId, setCurrentSessionId, setSessions, setActivity, setStatus, workspaces, userProfile } = useAppState()
+  const { currentSessionId, setCurrentSessionId, setSessions, setActivity, setStatus, workspaces, userProfile, sidebarVisible, setSidebarVisible } = useAppState()
   const api = useIPC()
   const [messages, setMessages] = useState<Message[]>([])
   const [sessionTitle, setSessionTitle] = useState('New Chat')
@@ -477,7 +477,16 @@ export default function ChatView() {
 
   return (
     <div className="chat-main">
-      <div className="chat-header">
+      <div className={`chat-header${!sidebarVisible ? ' sidebar-hidden' : ''}`}>
+        {!sidebarVisible && (
+          <button className="icon-btn sidebar-toggle" onClick={() => setSidebarVisible(true)}>
+            <span className="ic">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/>
+              </svg>
+            </span>
+          </button>
+        )}
         <div className="title-area">
           <span id="sessionTitle">
             {(() => {

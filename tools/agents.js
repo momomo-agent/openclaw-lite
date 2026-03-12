@@ -1,5 +1,6 @@
 // tools/agents.js — create_agent + remove_agent + send_message
 const { registerTool } = require('./registry');
+const eventBus = require('../core/event-bus');
 
 registerTool({
   name: 'send_message',
@@ -13,7 +14,7 @@ registerTool({
     required: ['targetAgent', 'message']
   },
   handler: async (args, context) => {
-    const { clawDir, sessionId, agentName, mainWindow, sessionStore, listAgentsFn } = context;
+    const { clawDir, sessionId, agentName, sessionStore, listAgentsFn } = context;
     if (!clawDir || !sessionId) return 'Error: No active session';
     const targetName = (args.targetAgent || '').trim();
     const msg = (args.message || '').trim();
@@ -33,11 +34,9 @@ registerTool({
       }
       if (pairCount >= 6) return `Error: Conversation chain between ${agentName} and ${targetName} is too long. Waiting for user input.`;
     }
-    if (mainWindow) {
-      mainWindow.webContents.send('agent-message', {
-        from: agentName || 'Assistant', to: targetName, message: msg, sessionId
-      });
-    }
+    eventBus.dispatch('agent-message', {
+      from: agentName || 'Assistant', to: targetName, message: msg, sessionId
+    });
     return `Message sent to ${targetName}`;
   }
 });
@@ -54,7 +53,7 @@ registerTool({
     required: ['name', 'role']
   },
   handler: async (args, context) => {
-    const { clawDir, sessionId, mainWindow, sessionStore } = context;
+    const { clawDir, sessionId, sessionStore } = context;
     if (!clawDir || !sessionId) return 'Error: No active session';
     const name = (args.name || '').trim();
     const role = (args.role || '').trim();
@@ -63,7 +62,7 @@ registerTool({
     const existing = sessionStore.findSessionAgentByName(clawDir, sessionId, name);
     if (existing) return `Error: Agent "${name}" already exists in this session`;
     const agent = sessionStore.createSessionAgent(clawDir, sessionId, { name, role });
-    if (mainWindow) mainWindow.webContents.send('session-agents-changed', sessionId);
+    eventBus.dispatch('session-agents-changed', sessionId);
     return JSON.stringify(agent);
   }
 });
@@ -79,14 +78,14 @@ registerTool({
     required: ['name']
   },
   handler: async (args, context) => {
-    const { clawDir, sessionId, mainWindow, sessionStore } = context;
+    const { clawDir, sessionId, sessionStore } = context;
     if (!clawDir || !sessionId) return 'Error: No active session';
     const name = (args.name || '').trim();
     if (!name) return 'Error: name required';
     const found = sessionStore.findSessionAgentByName(clawDir, sessionId, name);
     if (!found) return `Error: Agent "${name}" not found in this session`;
     sessionStore.deleteSessionAgent(clawDir, found.id);
-    if (mainWindow) mainWindow.webContents.send('session-agents-changed', sessionId);
+    eventBus.dispatch('session-agents-changed', sessionId);
     return `Agent "${name}" removed`;
   }
 });

@@ -10,6 +10,7 @@ interface AppState {
   userProfile: UserProfile | null
   clawDir: string | null
   featureFlags: Record<string, boolean>
+  sidebarVisible: boolean
 }
 
 interface AppContextType extends AppState {
@@ -21,6 +22,7 @@ interface AppContextType extends AppState {
   setUserProfile: (profile: UserProfile) => void
   setClawDir: (dir: string | null) => void
   setFeatureFlags: (flags: Record<string, boolean>) => void
+  setSidebarVisible: (v: boolean) => void
 }
 
 const AppContext = createContext<AppContextType | null>(null)
@@ -34,6 +36,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [clawDir, setClawDir] = useState<string | null>(null)
   const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({})
+  const [sidebarVisible, setSidebarVisible] = useState(true)
 
   const setActivity = (sessionId: string, level: ActivityLevel) => {
     setActivityState(prev => new Map(prev).set(sessionId, level))
@@ -52,6 +55,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       userProfile, setUserProfile,
       clawDir, setClawDir,
       featureFlags, setFeatureFlags,
+      sidebarVisible, setSidebarVisible,
       setActivity, setStatus
     }}>
       {children}
