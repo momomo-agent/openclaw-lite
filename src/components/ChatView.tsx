@@ -31,6 +31,8 @@ export default function ChatView() {
 
   // F222/F242: Delegate state
   const delegateMsg = useRef<Message | null>(null)
+  // Post-delegate split: orchestrator identity to create new card after delegate ends
+  const pendingSplit = useRef<{ sender?: string; avatar?: string; workspacePath?: string; workspaceId?: string } | null>(null)
 
   // F243: CC output state
   const [ccOutput, setCcOutput] = useState<{ task: string; lines: string[]; running: boolean } | null>(null)
@@ -89,20 +91,53 @@ export default function ChatView() {
     currentRequestId.current = null
     streamingMsg.current = null
     delegateMsg.current = null
+    pendingSplit.current = null
     setCcOutput(null)
     setStreamingStatus('')
     statusIsAiAuthored.current = false
   }
 
-  // Helper: update last message in list with a shallow copy of the ref
-  const updateLastMessage = (msg: Message) => {
-    setMessages(prev => [...prev.slice(0, -1), { ...msg }])
+  // Helper: update a message in list by ID (or replace last if ID not found)
+  const updateMessage = (msg: Message) => {
+    setMessages(prev => {
+      const idx = prev.findIndex(m => m.id === msg.id)
+      if (idx >= 0) {
+        const next = [...prev]
+        next[idx] = { ...msg }
+        return next
+      }
+      // Fallback: replace last
+      return [...prev.slice(0, -1), { ...msg }]
+    })
   }
 
   useEffect(() => {
     // --- Core streaming events ---
     const handleTextStart = (data: any) => {
       if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
+
+      // Post-delegate split: create NEW orchestrator card below the delegate bubble
+      if (pendingSplit.current) {
+        const split = pendingSplit.current
+        pendingSplit.current = null
+        streamingMsg.current = {
+          id: 'streaming-' + Date.now(),
+          role: 'assistant',
+          content: '',
+          timestamp: Date.now(),
+          toolSteps: [],
+          thinking: '',
+          sender: split.sender,
+          avatar: split.avatar,
+          workspacePath: split.workspacePath,
+          workspaceId: split.workspaceId,
+        }
+        setStreamingStatus('Thinking...')
+        statusIsAiAuthored.current = false
+        setMessages(prev => [...prev, streamingMsg.current!])
+        return
+      }
+
       // For round > 0, update existing streaming message instead of creating a new one
       if (streamingMsg.current) {
         // Multi-round: just reset content for new round, keep identity
@@ -135,7 +170,7 @@ export default function ChatView() {
       } else {
         streamingMsg.current.content += text
       }
-      updateLastMessage(streamingMsg.current)
+      updateMessage(streamingMsg.current)
     }
 
     const handleToolStep = (data: any) => {
@@ -147,7 +182,7 @@ export default function ChatView() {
       if (!statusIsAiAuthored.current) {
         setStreamingStatus(`${data.name || data.tool}...`)
       }
-      updateLastMessage(target)
+      updateMessage(target)
       if (currentSessionId) setActivity(currentSessionId, 'running')
     }
 
@@ -156,7 +191,7 @@ export default function ChatView() {
       const target = delegateMsg.current || streamingMsg.current
       if (target && data.purpose) {
         target.roundPurpose = data.purpose
-        updateLastMessage(target)
+        updateMessage(target)
       }
     }
 
@@ -183,6 +218,17 @@ export default function ChatView() {
     // --- F222/F242: Delegate events ---
     const handleDelegateStart = (data: any) => {
       if (data.sessionId && data.sessionId !== currentSessionId) return
+      // Capture orchestrator identity BEFORE creating delegate card
+      // (needed for post-delegate split — main parity: captures at delegate start time)
+      if (streamingMsg.current) {
+        pendingSplit.current = {
+          sender: streamingMsg.current.sender,
+          avatar: streamingMsg.current.avatar,
+          workspacePath: streamingMsg.current.workspacePath,
+          workspaceId: streamingMsg.current.workspaceId,
+        }
+        streamingMsg.current = null
+      }
       const wsPath = data.workspaceId
         ? workspaces.find(w => w.id === data.workspaceId)?.path
         : undefined
@@ -211,7 +257,7 @@ export default function ChatView() {
       } else {
         delegateMsg.current.content += text
       }
-      updateLastMessage(delegateMsg.current)
+      updateMessage(delegateMsg.current)
     }
 
     const handleDelegateEnd = (data: any) => {
@@ -227,9 +273,11 @@ export default function ChatView() {
       if (isNoReply && hasOnlyHiddenTools && !delegateMsg.current.thinking) {
         setMessages(prev => prev.filter(m => m.id !== delegateMsg.current!.id))
       } else {
-        updateLastMessage(delegateMsg.current)
+        updateMessage(delegateMsg.current)
       }
       delegateMsg.current = null
+      // pendingSplit was already set at delegate START time (handleDelegateStart)
+      // so orchestrator identity is preserved even for sequential delegates
     }
 
     // --- F243: Claude Code events ---
@@ -252,7 +300,7 @@ export default function ChatView() {
       })
       if (streamingMsg.current) {
         streamingMsg.current.content += chunk
-        updateLastMessage(streamingMsg.current)
+        updateMessage(streamingMsg.current)
       }
     }
 
@@ -293,7 +341,7 @@ export default function ChatView() {
             }
           }
           setMessages(dbMessages)
-          setSessionTitle(session.title)
+          setSessionTitle(formatSessionTitle(session))
           // F239: Auto-generate title from first user message
           if (session.title === 'New Chat' || session.title === '新对话') {
             const firstUser = dbMessages.find((m: any) => m.role === 'user')
@@ -302,7 +350,7 @@ export default function ChatView() {
               if (title.length > 30) title = title.slice(0, 30) + '...'
               if (!title) title = (firstUser.content || '').slice(0, 30).trim() || 'New Chat'
               await api.renameSession(doneSessionId, title)
-              setSessionTitle(title)
+              setSessionTitle(formatSessionTitle({ ...session, title }))
               const updated = await api.listSessions()
               setSessions(updated)
             }
@@ -351,12 +399,23 @@ export default function ChatView() {
     }
   }, [currentSessionId])
 
+  // Format header title: main shows "wsName · sessionTitle" for sessions with participants
+  const formatSessionTitle = (session: any): string => {
+    let title = session.title
+    if (session.mode === 'coding') title = `⌨ ${title}`
+    if (session.participants?.length > 0) {
+      const ws = workspaces.find(w => w.id === session.participants[0])
+      if (ws?.identity?.name) title = `${ws.identity.name} · ${title}`
+    }
+    return title
+  }
+
   const loadSession = async () => {
     if (!currentSessionId) return
     const session = await api.loadSession(currentSessionId)
     if (session) {
       setMessages(session.messages || [])
-      setSessionTitle(session.title)
+      setSessionTitle(formatSessionTitle(session))
     }
   }
 
@@ -603,6 +662,7 @@ export default function ChatView() {
         messages={messages}
         sessionId={currentSessionId || ''}
         streamingStatus={streamingStatus}
+        ownerWorkspaceId={sessionParticipants[0]}
         onRetry={handleRetry}
       />
       <InputBar sessionId={currentSessionId} onSend={handleSend} />

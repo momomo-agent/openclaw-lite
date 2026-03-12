@@ -7,12 +7,13 @@ interface MessageListProps {
   messages: Message[]
   sessionId: string
   streamingStatus?: string
+  ownerWorkspaceId?: string
   onRetry?: () => void
 }
 
 const ListPadding = () => <div style={{ height: 16 }} />
 
-export default function MessageList({ messages, sessionId, streamingStatus, onRetry }: MessageListProps) {
+export default function MessageList({ messages, sessionId, streamingStatus, ownerWorkspaceId, onRetry }: MessageListProps) {
   const { userProfile } = useAppState()
 
   return (
@@ -29,6 +30,7 @@ export default function MessageList({ messages, sessionId, streamingStatus, onRe
             isStreaming={index === messages.length - 1 && !!streamingStatus}
             statusText={index === messages.length - 1 ? streamingStatus : undefined}
             userAvatarPath={userProfile?.avatarAbsPath}
+            ownerWorkspaceId={ownerWorkspaceId}
             onRetry={(message.isError || message.status === 'failed') ? onRetry : undefined}
           />
         )}

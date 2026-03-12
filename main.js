@@ -418,6 +418,10 @@ async function createWindow() {
     mainWindow = null
     syncState()
   })
+  mainWindow.on('focus', () => {
+    _unreadCount = 0
+    updateTrayTitle()
+  })
 }
 
 // ── EventBus → BrowserWindow bridge ──
@@ -955,6 +959,11 @@ function finishChat(sessionId, requestId, assistantText, wsIdentity) {
     sessionStore.appendMessage(wsPath, sessionId, { role: 'assistant', content: assistantText, timestamp: Date.now(), ...meta })
   }
   eventBus.dispatch('chat-done', { requestId, sessionId, error: isError ? assistantText : undefined })
+  // Unread count: increment when window not focused
+  if (!isError && mainWindow && !mainWindow.isFocused()) {
+    _unreadCount++
+    updateTrayTitle()
+  }
 }
 
 ipcMain.handle('chat', async (_, { prompt, message, history, rawMessages, agentId, files, attachments, sessionId, requestId: paramRequestId, focus, targetWorkspaceId }) => {
@@ -1920,14 +1929,17 @@ ipcMain.handle('mcp-reconnect', async () => {
 // ── Tray Menu (AI Native) ──
 let _trayStatusText = '空闲待命中'
 let _trayStatusLevel = 'idle'
+let _unreadCount = 0
+
+function updateTrayTitle() {
+  if (!tray) return
+  tray.setTitle(_unreadCount > 0 ? `${_unreadCount}` : '')
+  if (app.dock) app.dock.setBadge(_unreadCount > 0 ? `${_unreadCount}` : '')
+}
 
 function updateTrayMenu() {
   if (!tray) return
-  const statusEmoji = { idle: '⚪', thinking: '🟡', running: '🔵', need_you: '🔴', done: '🟢' }
-  const emoji = statusEmoji[_trayStatusLevel] || '⚪'
   const menu = Menu.buildFromTemplate([
-    { label: `${emoji}  ${_trayStatusText}`, enabled: false },
-    { type: 'separator' },
     { label: '打开 Paw', click: () => { mainWindow?.show(); mainWindow?.focus() } },
     { label: '新建对话', click: () => { mainWindow?.show(); eventBus.dispatch('tray-new-chat', {}) } },
     { type: 'separator' },
@@ -1969,8 +1981,7 @@ function pushWatsonStatus(level, text, requestId, sessionId) {
   _trayStatusLevel = level || 'idle'
   if (tray) {
     tray.setToolTip(`Paw - ${_trayStatusText}`)
-    // macOS: set tray title to show status text next to icon
-    tray.setTitle(level === 'idle' ? '' : text)
+    updateTrayTitle()
     updateTrayMenu()
   }
   if (level === 'done') setTimeout(() => {

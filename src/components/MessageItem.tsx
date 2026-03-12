@@ -10,22 +10,27 @@ interface MessageItemProps {
   isStreaming?: boolean
   statusText?: string
   userAvatarPath?: string
+  ownerWorkspaceId?: string  // session's first participant (owner)
   onRetry?: () => void
 }
 
-export default function MessageItem({ message, isStreaming, statusText, userAvatarPath, onRetry }: MessageItemProps) {
+export default function MessageItem({ message, isStreaming, statusText, userAvatarPath, ownerWorkspaceId, onRetry }: MessageItemProps) {
   const { workspaces, userProfile } = useAppState()
   const isUser = message.role === 'user'
   const isError = message.isError === true  // assistant message that errored
   const isA2A = message.role === 'agent-to-agent'
 
   // Dynamic workspace identity resolution — always use live identity, never stale history
-  // Priority: workspaceId → workspacePath → first workspace (default for single-workspace)
-  const ws = message.workspaceId
-    ? workspaces.find(w => w.id === message.workspaceId)
+  // Priority: workspaceId/senderWorkspaceId → workspacePath → ownerWorkspaceId → first workspace
+  // Note: DB stores delegate sender as `senderWorkspaceId` in metadata
+  const msgWsId = message.workspaceId || (message as any).senderWorkspaceId
+  const ws = msgWsId
+    ? workspaces.find(w => w.id === msgWsId)
     : (message.workspacePath
       ? workspaces.find(w => w.path === message.workspacePath)
-      : (!isUser ? workspaces[0] : undefined))
+      : (!isUser
+        ? (ownerWorkspaceId ? workspaces.find(w => w.id === ownerWorkspaceId) : workspaces[0])
+        : undefined))
   const resolvedAvatar = (!isUser && ws?.identity?.avatar) || message.avatar
   const resolvedName = (!isUser && ws?.identity?.name) || message.sender
 

@@ -66,16 +66,6 @@ function IconPlus() {
   )
 }
 
-function IconFolder() {
-  return (
-    <span className="ic">
-      <svg viewBox="0 0 24 24">
-        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-      </svg>
-    </span>
-  )
-}
-
 function IconUsers() {
   return (
     <span className="ic">
@@ -84,6 +74,16 @@ function IconUsers() {
         <circle cx="9" cy="7" r="4"/>
         <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
         <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+      </svg>
+    </span>
+  )
+}
+
+function IconFolder() {
+  return (
+    <span className="ic">
+      <svg viewBox="0 0 24 24">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
       </svg>
     </span>
   )
@@ -329,32 +329,29 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
               </>
             )}
 
-            {/* Group chat confirm */}
+            {/* Group chat confirm button */}
             {groupMode && groupSelected.size >= 2 && (
               <button className="primary-btn ncs-group-btn"
                 onClick={() => { onSelect({ participants: [...groupSelected] }); setGroupMode(false) }}>
                 创建群聊 ({groupSelected.size})
               </button>
             )}
-          </div>
 
-          {/* Footer — manage mode */}
-          {managing && (
-            <div className="ncs-footer">
-              <button className="secondary-btn ncs-footer-btn" onClick={openCreate}>
-                <IconPlus /> 新建
-              </button>
-              <button className="secondary-btn ncs-footer-btn" onClick={handleAddExisting}>
-                <IconFolder /> 添加已有
-              </button>
-              {workspaces.length > 1 && (
-                <button className={`secondary-btn ncs-footer-btn${groupMode ? ' active' : ''}`}
-                  onClick={() => { setGroupMode(!groupMode); setGroupSelected(new Set()) }}>
-                  <IconUsers /> 群聊
-                </button>
-              )}
-            </div>
-          )}
+            {/* Add workspace — styled like a list row */}
+            {managing && !groupMode && (
+                <div className="ncs-agent-row" onClick={openCreate}>
+                  <span className="ncs-avatar" style={{
+                    width: 28, height: 28, borderRadius: '50%', background: 'var(--hover-bg)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-faint)',
+                  }}>
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                  </span>
+                  <div className="ncs-info">
+                    <div className="ncs-name">添加助手</div>
+                  </div>
+                </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -399,9 +396,19 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
               {saving ? '保存中...' : editorMode === 'create' ? '创建' : '保存'}
             </button>
 
-            <button onClick={() => setEditorMode(null)} style={editorLinkStyle}>
-              取消
-            </button>
+            <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+              <button onClick={() => setEditorMode(null)} style={editorLinkStyle}>
+                取消
+              </button>
+              {editorMode === 'create' && (
+                <>
+                  <span style={{ color: 'var(--border-muted)', fontSize: 12 }}>|</span>
+                  <button onClick={() => { setEditorMode(null); handleAddExisting() }} style={editorLinkStyle}>
+                    我已有 workspace
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}

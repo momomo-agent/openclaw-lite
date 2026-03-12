@@ -41,17 +41,24 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu, on
   // Status line + dot: only when there's active AI status text AND not idle/done
   const showStatus = !!statusText && activity !== 'idle' && activity !== 'done'
 
-  // F251: Sender prefix for group chat + stripMd
+  // F251: Sender prefix for group chat + stripMd (main parity: deep reverse lookup)
   let subtitle = ''
   if (showStatus) {
     subtitle = statusText
   } else if (session.lastMessage) {
     const stripped = stripMarkdown(session.lastMessage)
-    if (isGroup && session.lastSender) {
-      subtitle = `${session.lastSender}: ${stripped}`
-    } else if (isGroup && session.lastSenderWsId) {
-      const senderWs = workspaces.find(w => w.id === session.lastSenderWsId)
-      subtitle = senderWs?.identity?.name ? `${senderWs.identity.name}: ${stripped}` : stripped
+    if (isGroup && (session.lastSender || session.lastSenderWsId) && stripped) {
+      let senderName = session.lastSender || ''
+      // Resolve from lastSenderWsId → current workspace identity name
+      if (session.lastSenderWsId) {
+        const senderWs = workspaces.find(w => w.id === session.lastSenderWsId)
+        if (senderWs?.identity?.name) senderName = senderWs.identity.name
+      } else if (senderName) {
+        // Reverse lookup: find ws whose current name matches lastSender
+        const match = workspaces.find(w => w.identity?.name === senderName)
+        if (match?.identity?.name) senderName = match.identity.name
+      }
+      subtitle = senderName ? `${senderName}: ${stripped}` : stripped
     } else {
       subtitle = stripped
     }

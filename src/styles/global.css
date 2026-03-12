@@ -486,6 +486,7 @@ button:hover { background: var(--border-muted); }
 .new-chat-panel {
   background: var(--bg-surface); border: 1px solid var(--border-muted); border-radius: 12px;
   width: 360px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.15);
 }
 .ncs-body { flex: 1; overflow-y: auto; padding: 8px; }
 .ncs-agent-row {
