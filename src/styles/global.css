@@ -365,6 +365,18 @@ button:hover { background: var(--border-muted); }
 /* (global watson status removed — now per-session) */
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
+/* Inline path chip — lightweight clickable path inside text flow */
+.path-chip {
+  display: inline; padding: 1px 6px; border-radius: 4px;
+  background: var(--bg-elevated); color: var(--text-secondary);
+  font-family: 'SF Mono', 'Menlo', monospace; font-size: 0.88em;
+  text-decoration: none; cursor: pointer;
+  border: 1px solid var(--border-default);
+  transition: background 0.15s, border-color 0.15s;
+  word-break: break-all;
+}
+.path-chip:hover { background: var(--bg-surface); border-color: var(--border-focus); color: var(--text-primary); }
+
 .input-bar {
   display: flex; gap: 3px; padding: 10px 10px; align-items: center;
 }
