@@ -19,10 +19,33 @@ const agents = {
       return false
     },
     run(prompt, { cwd, session, onOutput, onProcess }) {
-      const args = ['--print', '--permission-mode', 'bypassPermissions']
+      const args = ['--print', '--output-format', 'stream-json', '--permission-mode', 'bypassPermissions']
       if (session) args.push('--resume', session)
       args.push(prompt)
-      return _spawnAgent(this._path, args, { cwd, onOutput, onProcess })
+      // Wrap onOutput to parse NDJSON and extract text tokens
+      let lineBuf = ''
+      const streamOnOutput = onOutput ? (chunk) => {
+        lineBuf += chunk
+        const lines = lineBuf.split('\n')
+        lineBuf = lines.pop() // keep incomplete last line
+        for (const line of lines) {
+          if (!line.trim()) continue
+          try {
+            const obj = JSON.parse(line)
+            // assistant message with text content
+            if (obj.type === 'assistant' && obj.message?.content) {
+              for (const block of obj.message.content) {
+                if (block.type === 'text' && block.text) onOutput(block.text)
+              }
+            }
+            // result message — final text
+            if (obj.type === 'result' && obj.result && typeof obj.result === 'string') {
+              // result text is the full final output; skip if we already streamed it
+            }
+          } catch {}
+        }
+      } : undefined
+      return _spawnAgent(this._path, args, { cwd, onOutput: streamOnOutput, onProcess })
     },
   },
   codex: {

@@ -1090,6 +1090,20 @@ ipcMain.handle('chat', async (_, { prompt, message, history, rawMessages, agentI
       sessionStore.appendMessage(caDb, sessionId, {
         role: 'assistant', content: result, timestamp: Date.now()
       })
+      // Auto-title: if session has no title, set from user's first message
+      try {
+        const title = sessionStore.getSessionTitle(caDb, sessionId)
+        if (!title) {
+          const autoTitle = prompt.replace(/\n+/g, ' ').trim()
+          const trimmed = autoTitle.length > 20 ? autoTitle.slice(0, 20) + '…' : autoTitle
+          if (trimmed) {
+            sessionStore.renameSession(caDb, sessionId, trimmed)
+            if (mainWindow?.webContents) {
+              mainWindow.webContents.send('session-title-updated', { sessionId, title: trimmed })
+            }
+          }
+        }
+      } catch {}
       eventBus.dispatch('chat-done', { requestId, sessionId })
       return { answer: result }
     }
@@ -1376,6 +1390,12 @@ function getSessionWorkspacePath(workspaceId, sessionId) {
 const sessionCCSessions = new Map() // pawSessionId -> acpx session name
 
 async function routeToCodingAgent(engine, workdir, message, { sessionId, requestId, senderName, senderAvatar }) {
+  // Claude engine → use SDK for real-time streaming
+  if (engine === 'claude') {
+    return routeToCodingAgentSDK(engine, workdir, message, { sessionId, requestId, senderName, senderAvatar })
+  }
+
+  // Other engines (codex, gemini, kiro) → fallback to CLI
   if (!codingAgents.isAvailable(engine)) {
     return `Error: coding agent '${engine}' not available`
   }
@@ -1383,6 +1403,8 @@ async function routeToCodingAgent(engine, workdir, message, { sessionId, request
   const parentRequestId = requestId || _activeRequestId
   if (parentRequestId && senderName) {
     eventBus.dispatch('chat-delegate-start', { requestId: parentRequestId, sender: senderName, workspaceId: `ca:${engine}:${workdir}`, avatar: senderAvatar, sessionId })
+  } else if (parentRequestId) {
+    eventBus.dispatch('chat-text-start', { requestId: parentRequestId, sessionId })
   }
 
   let output = ''
@@ -1398,7 +1420,7 @@ async function routeToCodingAgent(engine, workdir, message, { sessionId, request
         if (parentRequestId && senderName) {
           eventBus.dispatch('chat-delegate-token', { requestId: parentRequestId, sender: senderName, token: chunk, sessionId })
         } else if (parentRequestId) {
-          eventBus.dispatch('chat-token', { requestId: parentRequestId, text: chunk })
+          eventBus.dispatch('chat-token', { requestId: parentRequestId, text: chunk, sessionId })
         }
       }
     })
@@ -1413,6 +1435,61 @@ async function routeToCodingAgent(engine, workdir, message, { sessionId, request
       eventBus.dispatch('chat-delegate-end', { requestId: parentRequestId, sender: senderName, sessionId })
     }
     return `Error: ${err.message}`
+  }
+}
+
+// ── Claude Code SDK integration (real-time streaming) ──
+async function routeToCodingAgentSDK(engine, workdir, message, { sessionId, requestId, senderName, senderAvatar }) {
+  const { ClaudeCodeSession } = require('./core/claude-code-sdk')
+
+  const parentRequestId = requestId || _activeRequestId
+  if (parentRequestId && senderName) {
+    eventBus.dispatch('chat-delegate-start', { requestId: parentRequestId, sender: senderName, workspaceId: `ca:${engine}:${workdir}`, avatar: senderAvatar, sessionId })
+  } else if (parentRequestId) {
+    eventBus.dispatch('chat-text-start', { requestId: parentRequestId, sessionId })
+  }
+
+  let output = ''
+  const ccSessionKey = `${sessionId}-${engine}-${workdir}`
+  const existingSessionId = sessionCCSessions.get(ccSessionKey)
+
+  const session = new ClaudeCodeSession({
+    cwd: workdir,
+    sessionId: existingSessionId,
+    onToken: (delta) => {
+      output += delta
+      if (parentRequestId && senderName) {
+        eventBus.dispatch('chat-delegate-token', { requestId: parentRequestId, sender: senderName, token: delta, sessionId })
+      } else if (parentRequestId) {
+        eventBus.dispatch('chat-token', { requestId: parentRequestId, text: delta, sessionId })
+      }
+    },
+    onDone: (fullText, metadata) => {
+      // Save session ID for resumption
+      if (!existingSessionId && session.sessionId) {
+        sessionCCSessions.set(ccSessionKey, session.sessionId)
+      }
+    },
+    onError: (err) => {
+      console.error(`[claude-code-sdk] error:`, err)
+    }
+  })
+
+  try {
+    await session.send(message)
+
+    if (parentRequestId && senderName) {
+      eventBus.dispatch('chat-delegate-end', { requestId: parentRequestId, sender: senderName, sessionId })
+    }
+
+    return output || 'Coding agent completed'
+  } catch (err) {
+    if (parentRequestId && senderName) {
+      eventBus.dispatch('chat-delegate-end', { requestId: parentRequestId, sender: senderName, sessionId })
+    }
+    return `Error: ${err.message}`
+  } finally {
+    session.close()
   }
 }
 
