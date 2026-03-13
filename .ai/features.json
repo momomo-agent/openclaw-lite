@@ -1063,5 +1063,40 @@
     "description": "React: Inline status + 主题预览",
     "passes": true,
     "milestone": "M36"
+  },
+  {
+    "id": "F255",
+    "title": "Coding Agent Participant 数据模型",
+    "milestone": "M38",
+    "priority": "P0",
+    "passes": false
+  },
+  {
+    "id": "F256",
+    "title": "消息路由支持 Coding Agent",
+    "milestone": "M38",
+    "priority": "P0",
+    "passes": false
+  },
+  {
+    "id": "F257",
+    "title": "新建对话 — Coding Agent 入口",
+    "milestone": "M38",
+    "priority": "P0",
+    "passes": false
+  },
+  {
+    "id": "F258",
+    "title": "成员管理 — 添加 Coding Agent",
+    "milestone": "M38",
+    "priority": "P0",
+    "passes": false
+  },
+  {
+    "id": "F259",
+    "title": "清理旧 CC 面板",
+    "milestone": "M38",
+    "priority": "P0",
+    "passes": false
   }
 ]
