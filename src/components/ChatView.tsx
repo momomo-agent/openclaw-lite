@@ -36,10 +36,7 @@ export default function ChatView() {
   const [showMembers, setShowMembers] = useState(false)
   const [streamingStatus, setStreamingStatus] = useState('')
 
-  // F243: CC output state
-  const [ccOutput, setCcOutput] = useState<{ task: string; lines: string[]; running: boolean } | null>(null)
-
-  // Derive from sessions store (always live, never stale)
+    // Derive from sessions store (always live, never stale)
   const currentSession = sessions.find(s => s.id === currentSessionId)
   const sessionParticipants = currentSession?.participants || []
   const isGroup = sessionParticipants.length > 1
@@ -74,7 +71,6 @@ export default function ChatView() {
     streamStates.current.delete(sid)
     if (sid === currentSidRef.current) {
       setStreamingStatus('')
-      setCcOutput(null)
     }
   }
 
@@ -498,37 +494,7 @@ export default function ChatView() {
       ss.delegateMsg = null
     }
 
-    // --- F243: Claude Code events ---
-    const handleCcStatus = (data: any) => {
-      if (data.status === 'running') {
-        setCcOutput({ task: data.task || '', lines: [], running: true })
-        const sid = currentSidRef.current
-        if (sid) routeStatus(sid, `Claude Code: ${data.task || 'working'}...`)
-      } else if (data.status === 'done' || data.status === 'error') {
-        setCcOutput(prev => prev ? { ...prev, running: false } : null)
-        const sid = currentSidRef.current
-        if (sid) routeStatus(sid, '')
-      }
-    }
-
-    const handleCcOutput = (data: any) => {
-      const chunk = data.chunk || ''
-      setCcOutput(prev => {
-        if (!prev) return null
-        const newLines = [...prev.lines, ...chunk.split('\n')]
-        return { ...prev, lines: newLines.slice(-50) }
-      })
-      const sid = currentSidRef.current
-      if (sid) {
-        const ss = streamStates.current.get(sid)
-        if (ss?.streamingMsg) {
-          ss.streamingMsg.content += chunk
-          routeUpdate(sid, ss.streamingMsg)
-        }
-      }
-    }
-
-    // --- F240: Auto-rotate ---
+        // --- F240: Auto-rotate ---
     const handleAutoRotate = (data: any) => {
       const sid = data.sessionId
       if (sid) storeRef.current.setActivity(sid, 'thinking')
@@ -607,8 +573,6 @@ export default function ChatView() {
       api.onDelegateStart?.(handleDelegateStart),
       api.onDelegateToken?.(handleDelegateToken),
       api.onDelegateEnd?.(handleDelegateEnd),
-      api.onCcStatus?.(handleCcStatus),
-      api.onCcOutput?.(handleCcOutput),
       api.onChatDone?.(handleDone),
       api.onChatError?.(handleError),
       api.onAutoRotate?.(handleAutoRotate),
@@ -693,7 +657,6 @@ export default function ChatView() {
     }
     if (cmd === '/stop') {
       await api.chatCancel?.()
-      await api.ccStop?.()
       if (currentSessionId) {
         clearStreamState(currentSessionId)
         setActivity(currentSessionId, 'idle')
@@ -868,35 +831,6 @@ export default function ChatView() {
           </button>
         </div>
       </div>
-
-      {/* F243: CC Output Panel */}      {ccOutput && (
-        <div style={{
-          borderBottom: '1px solid var(--border-muted)',
-          padding: '8px 16px',
-          fontSize: 12,
-          background: 'var(--bg-secondary)',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            <span>🖥️ Claude Code{ccOutput.task ? `: ${ccOutput.task}` : ''}</span>
-            {ccOutput.running && (
-              <button
-                onClick={() => api.ccStop?.()}
-                style={{ padding: '2px 8px', fontSize: 11, background: 'var(--status-error)', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}
-              >
-                Stop
-              </button>
-            )}
-          </div>
-          <pre style={{
-            margin: 0, padding: 8, background: 'var(--bg-base)',
-            borderRadius: 4, maxHeight: 200, overflow: 'auto',
-            fontSize: 11, lineHeight: 1.4, whiteSpace: 'pre-wrap',
-            color: 'var(--text-secondary)',
-          }}>
-            {ccOutput.lines.join('\n') || '(waiting for output...)'}
-          </pre>
-        </div>
-      )}
 
       <MessageList
         messages={messages}

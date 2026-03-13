@@ -78,6 +78,22 @@ function _parseParticipants(raw) {
   try { return JSON.parse(raw) } catch { return [] }
 }
 
+// Parse participant ID into structured object
+// Old format: "ws-abc" → {type: 'workspace', id: 'ws-abc'}
+// New format: "ca:claude:/path" → {type: 'coding-agent', engine: 'claude', workdir: '/path', id: 'ca:claude:/path'}
+function parseParticipantId(pid) {
+  if (!pid) return null
+  if (pid.startsWith('ca:')) {
+    const parts = pid.split(':')
+    if (parts.length >= 3) {
+      const engine = parts[1]
+      const workdir = parts.slice(2).join(':')
+      return { type: 'coding-agent', engine, workdir, id: pid }
+    }
+  }
+  return { type: 'workspace', id: pid }
+}
+
 function listSessions(clawDir, { workspaceId } = {}) {
   const d = getDb(clawDir)
   if (!d) return []
@@ -369,6 +385,11 @@ function getSessionParticipants(clawDir, sessionId) {
   return _parseParticipants(row?.participants)
 }
 
+function getSessionParticipantsParsed(clawDir, sessionId) {
+  const pids = getSessionParticipants(clawDir, sessionId)
+  return pids.map(parseParticipantId).filter(Boolean)
+}
+
 function addSessionParticipant(clawDir, sessionId, workspaceId) {
   const participants = getSessionParticipants(clawDir, sessionId)
   if (participants.includes(workspaceId)) return true
@@ -387,4 +408,4 @@ function removeSessionParticipant(clawDir, sessionId, workspaceId) {
   return true
 }
 
-module.exports = { getDb, listSessions, loadSession, saveSession, appendMessage, deleteMessage, deleteSession, renameSession, getSessionTitle, createSession, closeDb, updateSessionStatus, getSessionStatus, getSessionMode, setSessionMode, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, addSessionParticipant, removeSessionParticipant, getSessionParticipants, findSessionWorkspace, listAllSessions, updateMessageMeta, findLastMessage }
+module.exports = { getDb, listSessions, loadSession, saveSession, appendMessage, deleteMessage, deleteSession, renameSession, getSessionTitle, createSession, closeDb, updateSessionStatus, getSessionStatus, getSessionMode, setSessionMode, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, addSessionParticipant, removeSessionParticipant, getSessionParticipants, getSessionParticipantsParsed, parseParticipantId, findSessionWorkspace, listAllSessions, updateMessageMeta, findLastMessage }

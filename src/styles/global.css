@@ -892,9 +892,7 @@ button:hover { background: var(--border-muted); }
 .ctx-danger:hover { background: rgba(239, 68, 68, 0.1); }
 
 /* Claude Code output */
-.cc-output { border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; margin: 8px 0; overflow: hidden; }
-.cc-output .tool-step-header { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: rgba(255,255,255,0.03); font-size: 12px; }
-.cc-output .cc-task { color: var(--text-muted); font-size: 11px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .cc-stop-btn { background: #c0392b; color: #fff; border: none; border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer; }
 .cc-stop-btn:hover { background: #e74c3c; }
 .cc-pre { background: var(--bg-surface); color: var(--text-secondary); padding: 8px 10px; font-family: 'JetBrains Mono', 'SF Mono', monospace; font-size: 11px; line-height: 1.5; max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin: 0; }

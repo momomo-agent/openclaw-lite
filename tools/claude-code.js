@@ -1,18 +1,12 @@
-// tools/claude-code.js — Claude Code via acpx
+// tools/claude-code.js — Claude Code tool (legacy bridge)
+// Now routes through coding-agents + delegate events.
+// Kept for backward compatibility when orchestrator calls claude_code as a tool.
 const { registerTool } = require('./registry');
-const acpx = require('../core/acpx');
+const codingAgents = require('../core/coding-agents');
 const eventBus = require('../core/event-bus');
 const path = require('path');
 
-const sessionCCSessions = new Map(); // pawSessionId -> acpxSessionName
-
-function isRunning() {
-  return false; // acpx handles process lifecycle
-}
-
-function stop() {
-  // No-op: acpx manages session lifecycle with TTL
-}
+const sessionCCSessions = new Map(); // pawSessionId -> session name
 
 registerTool({
   name: 'claude_code',
@@ -41,66 +35,38 @@ registerTool({
     required: ['task']
   },
   handler: async (args, context) => {
-    const { clawDir, sessionId, config } = context;
+    const { clawDir, sessionId } = context;
     const workdir = args.workdir ? path.resolve(clawDir, args.workdir) : clawDir;
     const task = (args.task || '').trim();
     if (!task) return 'Error: task required';
-    if (!acpx.isAvailable()) return 'Error: acpx not available. Install with: npm install acpx';
 
-    const agent = args.agent || config?.defaultCodingAgent || 'claude';
+    const agent = args.agent || 'claude';
+    if (!codingAgents.isAvailable(agent)) return `Error: coding agent '${agent}' not available`;
 
-    eventBus.dispatch('cc-status', { status: 'running', task: task.slice(0, 80) });
+    const agentName = agent === 'claude' ? 'Claude Code' : agent === 'codex' ? 'Codex' : 'Gemini CLI';
+
+    let output = '';
+    const sessionKey = `${sessionId}-${agent}-${workdir}`;
+    const existingSession = args.continue_session ? sessionCCSessions.get(sessionKey) : undefined;
 
     try {
-      const acpxOpts = {
+      const result = await codingAgents.run(agent, task, {
         cwd: workdir,
-        timeout: 300000,
-        approveAll: true,
+        session: existingSession,
         onOutput: (chunk) => {
-          eventBus.dispatch('cc-output', { chunk, total: chunk.length });
+          output += chunk;
         }
-      };
-
-      let result;
-      const existingCCSession = sessionCCSessions.get(sessionId);
-
-      if (args.continue_session && existingCCSession) {
-        acpxOpts.session = existingCCSession;
-        result = await acpx.prompt(agent, task, acpxOpts);
-      } else {
-        const sessionName = sessionId ? `paw-${sessionId}` : undefined;
-        acpxOpts.session = sessionName;
-        result = await acpx.exec(agent, task, acpxOpts);
-      }
-
-      if (result.sessionName && sessionId) {
-        sessionCCSessions.set(sessionId, result.sessionName);
-      }
+      });
 
       const MAX_OUTPUT = 3000;
-      const text = result.text || '';
+      const text = output || result.stdout || '';
       const truncated = text.length > MAX_OUTPUT
         ? `...(truncated ${text.length - MAX_OUTPUT} chars)...\n${text.slice(-MAX_OUTPUT)}`
         : text;
 
-      eventBus.dispatch('cc-status', {
-        status: result.isError ? 'error' : 'done',
-        length: text.length,
-        cost: result.cost,
-        error: result.isError ? (text.slice(0, 200) || 'CC execution failed') : undefined
-      });
-
-      const meta = result.sessionName ? `\n[CC session: ${result.sessionName}]` : '';
-      const costInfo = result.cost ? ` [cost: $${result.cost.toFixed(4)}]` : '';
-      return truncated + meta + costInfo;
-
+      return `[${agentName} completed]\n${truncated}`;
     } catch (err) {
-      eventBus.dispatch('cc-status', { status: 'error', error: err.message });
-      return `Error running Claude Code: ${err.message}`;
+      return `Error running ${agentName}: ${err.message}`;
     }
   }
 });
-
-// Export lifecycle methods for app quit
-module.exports.ccStop = stop;
-module.exports.ccIsRunning = isRunning;

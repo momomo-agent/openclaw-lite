@@ -167,6 +167,8 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
   const [groupMode, setGroupMode] = useState(false)
   const [groupSelected, setGroupSelected] = useState<Set<string>>(new Set())
   const [codingAgents, setCodingAgents] = useState<CodingAgentDef[]>([])
+  const [addingCA, setAddingCA] = useState(false)
+  const [selectedEngine, setSelectedEngine] = useState<string | null>(null)
 
   // Editor overlay state
   const [editorMode, setEditorMode] = useState<'create' | 'edit' | null>(null)
@@ -289,6 +291,21 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
     setGroupSelected(new Set())
   }
 
+  const handleAddCA = async (engine: string) => {
+    const projectPath = await api.selectDirectory?.()
+    if (!projectPath) return
+    const name = projectPath.split('/').pop() || 'Project'
+    const agent = await api.codingAgentAdd?.({ engine, projectPath, name })
+    if (agent) {
+      const list = await api.codingAgentsList?.()
+      if (list) setCodingAgents(list)
+      const participantId = `ca:${engine}:${projectPath}`
+      onSelect({ participants: [participantId] })
+    }
+    setAddingCA(false)
+    setSelectedEngine(null)
+  }
+
   const [closing, setClosing] = useState(false)
   const animatedClose = () => { setClosing(true) }
   const [editorClosing, setEditorClosing] = useState(false)
@@ -354,12 +371,15 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
             ))}
 
             {/* Coding agents */}
-            {codingAgents.length > 0 && !managing && (
+            {!managing && (
               <>
                 <div className="ncs-divider" />
                 <div className="ncs-section-title">编码助手</div>
                 {codingAgents.map(agent => (
-                  <div key={agent.id} className="ncs-agent-row" onClick={() => onSelect({ mode: 'coding', workspaceId: agent.id })}>
+                  <div key={agent.id} className="ncs-agent-row" onClick={() => {
+                    const participantId = `ca:${agent.engine}:${(agent as any).projectPath}`
+                    onSelect({ participants: [participantId] })
+                  }}>
                     <span className="ncs-avatar">
                       <span className="ncs-engine-dot" style={{ background: ENGINE_COLORS[agent.engine || ''] || 'var(--text-faint)' }} />
                     </span>
@@ -369,6 +389,50 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
                     </div>
                   </div>
                 ))}
+                {!addingCA && (
+                  <div className="ncs-agent-row" onClick={() => setAddingCA(true)}>
+                    <span className="ncs-avatar" style={{
+                      width: 28, height: 28, borderRadius: '50%', background: 'var(--hover-bg)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-faint)',
+                    }}>
+                      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                    </span>
+                    <div className="ncs-info">
+                      <div className="ncs-name">添加编码助手</div>
+                    </div>
+                  </div>
+                )}
+                {addingCA && (
+                  <div style={{ padding: '12px 16px', background: 'var(--bg-elevated)', borderRadius: 8, margin: '8px 0' }}>
+                    <div style={{ fontSize: 12, color: 'var(--text-faint)', marginBottom: 8 }}>选择引擎</div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {Object.entries(ENGINE_COLORS).map(([engine, color]) => (
+                        <button
+                          key={engine}
+                          onClick={() => handleAddCA(engine)}
+                          style={{
+                            padding: '6px 12px', borderRadius: 6, border: 'none',
+                            background: 'var(--hover-bg)', cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: 6,
+                            fontSize: 13, color: 'var(--text-primary)',
+                            transition: 'background 0.15s',
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.background = 'var(--border-muted)'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'var(--hover-bg)'}
+                        >
+                          <span style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />
+                          {engine}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => { setAddingCA(false); setSelectedEngine(null) }}
+                      style={{ marginTop: 8, fontSize: 12, color: 'var(--text-faint)', background: 'none', border: 'none', cursor: 'pointer' }}
+                    >
+                      取消
+                    </button>
+                  </div>
+                )}
               </>
             )}
 

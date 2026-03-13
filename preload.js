@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('api', {
   pickImage: () => ipcRenderer.invoke('pick-image'),
   createClawDir: () => ipcRenderer.invoke('create-claw-dir'),
   selectClawDir: () => ipcRenderer.invoke('select-claw-dir'),
+  selectDirectory: () => ipcRenderer.invoke('select-directory'),
   getConfig: () => ipcRenderer.invoke('get-config'),
   getTokenUsage: (sessionId) => ipcRenderer.invoke('get-token-usage', sessionId),
   chatCancel: () => ipcRenderer.invoke('chat-cancel'),
@@ -66,6 +67,7 @@ contextBridge.exposeInMainWorld('api', {
   addParticipant: (sessionId, workspaceId) => ipcRenderer.invoke('session-add-participant', { sessionId, workspaceId }),
   removeParticipant: (sessionId, workspaceId) => ipcRenderer.invoke('session-remove-participant', { sessionId, workspaceId }),
   getParticipants: (sessionId) => ipcRenderer.invoke('session-get-participants', sessionId),
+  getSessionParticipantsParsed: (sessionId) => ipcRenderer.invoke('session-get-participants-parsed', sessionId),
   // Session agents (M19: lightweight agents)
   createSessionAgent: (sessionId, opts) => ipcRenderer.invoke('session-create-agent', { sessionId, ...opts }),
   listSessionAgents: (sessionId) => ipcRenderer.invoke('session-list-agents', sessionId),
@@ -112,7 +114,4 @@ contextBridge.exposeInMainWorld('api', {
   onDelegateToken: (cb) => onIpc('chat-delegate-token', cb),
   onDelegateEnd: (cb) => onIpc('chat-delegate-end', cb),
   // Claude Code
-  onCcStatus: (cb) => onIpc('cc-status', cb),
-  onCcOutput: (cb) => onIpc('cc-output', cb),
-  ccStop: () => ipcRenderer.invoke('cc-stop'),
 })

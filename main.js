@@ -444,7 +444,7 @@ const EVENT_CHANNELS = [
   'agent-status', 'watson-status',
   'session-agents-changed', 'session-expired', 'tasks-changed',
   'heartbeat-result', 'tray-new-chat', 'memory-changed',
-  'cc-status', 'cc-output', 'auto-rotate',
+  'auto-rotate',
 ]
 
 function bridgeEventBus(win) {
@@ -525,7 +525,6 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
 app.on('will-quit', () => {
   sessionStore.closeDb(); memoryIndex.closeDb();
-  try { require('./tools/claude-code').ccStop() } catch {}
   mcpManager.disconnectAll().catch(() => {});
   if (cronService) cronService.stop();
 })
@@ -645,11 +644,19 @@ ipcMain.handle('select-claw-dir', async () => {
       if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true })
     }
     startMemoryWatch()
-  
+
     buildMemoryIndex()
     return clawDir
   }
   return null
+})
+
+ipcMain.handle('select-directory', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+    title: 'Select Project Directory',
+  })
+  return result.canceled ? null : result.filePaths[0]
 })
 
 // ── IPC: Read config.json from data dir ──
@@ -799,6 +806,12 @@ ipcMain.handle('session-get-participants', (_, sessionId) => {
   if (!sessionId) return []
   const wsPath = getSessionWorkspace(sessionId)
   return wsPath ? sessionStore.getSessionParticipants(wsPath, sessionId) : []
+})
+
+ipcMain.handle('session-get-participants-parsed', (_, sessionId) => {
+  if (!sessionId) return []
+  const wsPath = getSessionWorkspace(sessionId)
+  return wsPath ? sessionStore.getSessionParticipantsParsed(wsPath, sessionId) : []
 })
 
 // ── IPC: Session Agents (M19: lightweight agents, gated) ──
@@ -1055,6 +1068,32 @@ ipcMain.handle('chat', async (_, { prompt, message, history, rawMessages, agentI
     eventBus.dispatch('session-expired', { reason: expiryReason })
   }
   _sessionExpiry.touch()
+
+  // ── Check for 1v1 coding-agent session ──
+  const caDb = resolveSessionDb(sessionId)
+  if (sessionId && caDb) {
+    const parsed = sessionStore.getSessionParticipantsParsed(caDb, sessionId)
+    if (parsed.length === 1 && parsed[0].type === 'coding-agent') {
+      const ca = parsed[0]
+      console.log(`[chat] 1v1 coding-agent session: ${ca.engine} at ${ca.workdir}`)
+      const result = await routeToCodingAgent(ca.engine, ca.workdir, prompt, {
+        sessionId,
+        requestId,
+        senderName: null,
+        senderAvatar: null
+      })
+      // Save user message
+      sessionStore.appendMessage(caDb, sessionId, {
+        role: 'user', content: prompt, timestamp: Date.now()
+      })
+      // Save assistant response
+      sessionStore.appendMessage(caDb, sessionId, {
+        role: 'assistant', content: result, timestamp: Date.now()
+      })
+      eventBus.dispatch('chat-done', { requestId, sessionId })
+      return { answer: result }
+    }
+  }
 
   // ── Coding agent routing ──
   // Check session mode or workspace codingAgent config
@@ -1333,6 +1372,50 @@ function getSessionWorkspacePath(workspaceId, sessionId) {
   return null  // fallback to default clawDir in prompt-builder
 }
 
+// ── Coding Agent routing helper ──
+const sessionCCSessions = new Map() // pawSessionId -> acpx session name
+
+async function routeToCodingAgent(engine, workdir, message, { sessionId, requestId, senderName, senderAvatar }) {
+  if (!codingAgents.isAvailable(engine)) {
+    return `Error: coding agent '${engine}' not available`
+  }
+
+  const parentRequestId = requestId || _activeRequestId
+  if (parentRequestId && senderName) {
+    eventBus.dispatch('chat-delegate-start', { requestId: parentRequestId, sender: senderName, workspaceId: `ca:${engine}:${workdir}`, avatar: senderAvatar, sessionId })
+  }
+
+  let output = ''
+  const ccSessionKey = `${sessionId}-${engine}-${workdir}`
+  const existingSession = sessionCCSessions.get(ccSessionKey)
+
+  try {
+    const result = await codingAgents.run(engine, message, {
+      cwd: workdir,
+      session: existingSession,
+      onOutput: (chunk) => {
+        output += chunk
+        if (parentRequestId && senderName) {
+          eventBus.dispatch('chat-delegate-token', { requestId: parentRequestId, sender: senderName, token: chunk, sessionId })
+        } else if (parentRequestId) {
+          eventBus.dispatch('chat-token', { requestId: parentRequestId, text: chunk })
+        }
+      }
+    })
+
+    if (parentRequestId && senderName) {
+      eventBus.dispatch('chat-delegate-end', { requestId: parentRequestId, sender: senderName, sessionId })
+    }
+
+    return output || result.stdout || 'Coding agent completed'
+  } catch (err) {
+    if (parentRequestId && senderName) {
+      eventBus.dispatch('chat-delegate-end', { requestId: parentRequestId, sender: senderName, sessionId })
+    }
+    return `Error: ${err.message}`
+  }
+}
+
 // ── Group Chat: delegate_to handler ──
 // Owner calls this tool to route a message to another participant.
 // We build the participant's system prompt, call LLM, and return their response.
@@ -1342,9 +1425,31 @@ async function handleDelegateTo(input, config, sessionId) {
   const delegateDb = resolveSessionDb(sessionId)
   if (!sessionId || !delegateDb) return 'Error: no active session'
 
-  // Find participant workspace by name
-  const participants = sessionStore.getSessionParticipants(delegateDb, sessionId)
-  const workspaces = participants.map(pid => workspaceRegistry.getWorkspace(pid)).filter(Boolean)
+  // Find participant (workspace or coding-agent)
+  const participantIds = sessionStore.getSessionParticipants(delegateDb, sessionId)
+  const parsed = sessionStore.getSessionParticipantsParsed(delegateDb, sessionId)
+
+  // Check coding-agents first
+  const caMatch = parsed.find(p => {
+    if (p.type !== 'coding-agent') return false
+    const name = `${p.engine} (${path.basename(p.workdir)})`
+    const q = participant_name.toLowerCase()
+    return name.toLowerCase().includes(q) || p.engine.toLowerCase() === q
+  })
+
+  if (caMatch) {
+    console.log(`[delegate_to] routing to coding-agent ${caMatch.engine} at ${caMatch.workdir}`)
+    const senderName = `${caMatch.engine} (${path.basename(caMatch.workdir)})`
+    return await routeToCodingAgent(caMatch.engine, caMatch.workdir, message, {
+      sessionId,
+      requestId: _activeRequestId,
+      senderName,
+      senderAvatar: '🤖'
+    })
+  }
+
+  // Fallback to workspace participants
+  const workspaces = participantIds.map(pid => workspaceRegistry.getWorkspace(pid)).filter(Boolean)
   const targetWs = workspaces.find(w => {
     const n = (w.identity?.name || '').toLowerCase()
     const q = participant_name.toLowerCase()
@@ -2088,7 +2193,4 @@ ipcMain.handle('update-session-status', (_, { sessionId, level, text }) => {
   return true
 })
 
-ipcMain.handle('cc-stop', () => {
-  try { require('./tools/claude-code').ccStop() } catch {}
-  return true
-})
+

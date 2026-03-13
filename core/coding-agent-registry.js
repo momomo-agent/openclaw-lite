@@ -46,4 +46,8 @@ function remove(id) {
   return true
 }
 
-module.exports = { init, list, add, remove }
+function get(id) {
+  return _agents.find(a => a.id === id)
+}
+
+module.exports = { init, list, add, remove, get }
