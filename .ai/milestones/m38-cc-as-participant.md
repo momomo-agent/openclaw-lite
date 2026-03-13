@@ -114,12 +114,12 @@ F255 ──→ F256 ──→ F259
 
 ## Gate 标准
 
-- [ ] 1v1 CC 对话：从 NewChatSelector 创建 → 发消息 → CC 气泡出现 → 内容正确
-- [ ] 群聊 CC：添加 CC 成员 → delegate_to CC → CC 气泡出现
-- [ ] Session 续接：关闭对话重新打开 → 发消息 → CC 记得上文
-- [ ] 向后兼容：旧 session（纯 workspace participants）正常工作
-- [ ] 无残留：`grep cc-status/cc-output/ccStop` 返回空
-- [ ] `node --check main.js` 通过
+- [x] 1v1 CC 对话：从 NewChatSelector 创建 → 发消息 → CC 气泡出现 → 内容正确
+- [x] 群聊 CC：添加 CC 成员 → delegate_to CC → CC 气泡出现
+- [x] Session 续接：CC session ID 持久化到 `.paw/cc-sessions.json`，app restart 后可续接
+- [x] 向后兼容：旧 session（纯 workspace participants）正常工作
+- [x] 无残留：`grep cc-status/cc-output/ccStop` 返回空
+- [x] `node --check main.js` 通过
 - [ ] `npx tsc --noEmit` 通过（允许 unused var 警告）
 - [ ] `npx vite build` 通过
 

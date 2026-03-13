@@ -6,10 +6,10 @@
 
 | # | 需求 | 来源 | 优先级 | 备注 |
 |---|------|------|--------|------|
-| B037 | 工具层抽象 | kenefe | P1 | Agent 的行动能力可插拔。工具分轻量（单次调用，如 file_write）和重量（持久进程，如 CC）。Paw 只定义协议。→ M20 F068-F070 |
-| B038 | Claude Code 作为工具 | kenefe | P0 | 第一个持久进程类工具。Agent 在需要编码时调用 CC，CC 不是 agent，是 agent 手里的工具。依赖 B037。→ M20 F071-F073 |
-| B039 | ACP 协议接入 | kenefe | P0 | 用 acpx 协议驱动 CC，替代 PTY spawn。标准化 session/cancel/steer/多 harness。→ M22 F085-F088 |
-| B040 | 多 Harness 支持 | kenefe | P1 | 同一套接口支持 Claude Code/Codex/Gemini CLI。依赖 B039。→ M22 F090 |
+| B046 | 存储统一到 ~/.paw/ | kenefe | P0 | 全局配置、workspaces.json、prefs 统一路径。→ M35 F200-F201 |
+| B047 | Session 存储归属 | kenefe | P0 | 每个 workspace 各自 sessions.db。→ M35 F202 |
+| B048 | 错误消息持久化 + 重试 | kenefe | P1 | API 报错存入 messages 表 + 重试按钮。→ M35 F209/F211 |
+| B049 | IM 接入（Discord/Telegram/飞书）| kenefe | P2 | 远期目标，Paw 开着时通过外部 IM 对话 |
 
 ## 已完成（✅ 已分配到里程碑）
 
@@ -55,6 +55,14 @@
 | B043 | MCP 支持（Native Client）| kenefe | P0 | M33 |
 | B044 | Cron 定时任务 | kenefe | P0 | M33 |
 | B045 | mcp_config 对话管理 | kenefe | P1 | M33 |
+| B046_done | 多 Workspace IM 体验 | kenefe | P0 | M32 |
+| B047_done | React UI 重写 | kenefe | P0 | M34-M37 |
+| B048_done | Coding Agent 作为对话参与者 | kenefe | P0 | M38 |
+| B049_done | Claude Code SDK 集成 | kenefe | P0 | M38 |
+| B037 | 工具层抽象 | kenefe | P1 | ✅ M20 F068-F070 |
+| B038 | Claude Code 作为工具 | kenefe | P0 | ✅ M20 F071-F073 |
+| B039 | ACP 协议接入 | kenefe | P0 | ✅ M38（ACPX + SDK） |
+| B040 | 多 Harness 支持 | kenefe | P1 | 部分完成（Claude Code 可用，其他引擎待接入）|
 
 ## 流程规范
 

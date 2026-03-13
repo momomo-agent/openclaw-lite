@@ -126,6 +126,11 @@ const { streamAnthropicRaw: coreLlmAnthropicRaw, streamOpenAIRaw: coreLlmOpenAIR
 const acpx = require('./core/acpx')
 const codingAgents = require('./core/coding-agents')
 // coding-agent-registry.js removed — coding agents are now workspace records
+// M39 extracted modules
+const { streamAnthropic } = require('./core/stream-anthropic')
+const { streamOpenAI } = require('./core/stream-openai')
+const { handleDelegateTo } = require('./core/delegate')
+const { loadCCSessions: _loadCCSessions, routeToCodingAgent, streamCodingAgent } = require('./core/coding-agent-router')
 
 // Legacy globals - kept for backward compat, synced to state via syncState()
 let mainWindow
@@ -284,7 +289,7 @@ async function executeTool(name, input, config, { sessionId: _sid, agentName: _a
   const aname = _aname || currentAgentName
   // ── Group chat tools ──
   if (name === 'delegate_to') {
-    return await handleDelegateTo(input, config, sid)
+    return await handleDelegateTo(input, config, sid, ctx)
   }
   if (name === 'stay_silent') {
     return 'OK'
@@ -350,6 +355,35 @@ async function executeTool(name, input, config, { sessionId: _sid, agentName: _a
   }
 
   return `Unknown tool: ${name}`;
+}
+
+// ── Shared context for extracted modules (M39) ──
+// Provides cross-cutting deps to core/stream-*.js, core/delegate.js, core/coding-agent-router.js
+const ctx = {
+  // Mutable state refs (modules read/write these directly)
+  get _activeRequestId() { return _activeRequestId },
+  set _activeRequestId(v) { _activeRequestId = v },
+  get _activeAbortController() { return _activeAbortController },
+  set _activeAbortController(v) { _activeAbortController = v },
+  get _activeCodingProcess() { return _activeCodingProcess },
+  set _activeCodingProcess(v) { _activeCodingProcess = v },
+  _pendingDelegateMessages,
+  // Functions
+  pushStatus,
+  executeTool,
+  getToolsWithMcp,
+  truncateToolResult,
+  scrubMagicStrings,
+  isContextOverflowError,
+  compactHistory,
+  configPath,
+  loadConfig,
+  resolveSessionDb,
+  sessionStore,
+  // Streaming (for delegate.js which calls streaming recursively)
+  streamAnthropic: (msgs, sp, cfg, rid, tools, sid, wsId) => streamAnthropic(msgs, sp, cfg, rid, tools, sid, wsId, ctx),
+  streamOpenAI: (msgs, sp, cfg, rid, tools, sid, wsId) => streamOpenAI(msgs, sp, cfg, rid, tools, sid, wsId, ctx),
+  routeToCodingAgent: (ws, msg, opts) => routeToCodingAgent(ws, msg, opts, ctx),
 }
 
 // Persist directory choices
@@ -1118,7 +1152,7 @@ ipcMain.handle('chat', async (_, { prompt, message, history, rawMessages, agentI
             requestId,
             senderName: null,
             senderAvatar: null
-          })
+          }, ctx)
         } catch (err) {
           console.error(`[chat] 1v1 CA routeToCodingAgent error:`, err)
           result = `Error: ${err.message}`
@@ -1168,7 +1202,7 @@ ipcMain.handle('chat', async (_, { prompt, message, history, rawMessages, agentI
         cwd: wsPath || clawDir || process.cwd(),
         sessionId,
         requestId,
-      })
+      }, ctx)
       finishChat(sessionId, requestId, result?.answer, null, result?.toolSteps)
       return result
     }
@@ -1360,10 +1394,10 @@ ${roster}
       let result
       const streamConfig = { apiKey, baseUrl, model: target.model, tavilyKey: config.tavilyKey, maxToolRounds: config.maxToolRounds, maxTokens: config.maxTokens }
       if (target.provider === 'anthropic') {
-        result = await streamAnthropic(finalMessages, systemPrompt, streamConfig, requestId, chatTools, sessionId, _wsIdentity)
+        result = await streamAnthropic(finalMessages, systemPrompt, streamConfig, requestId, chatTools, sessionId, _wsIdentity, ctx)
         _lastAnthropicCallTime = Date.now()
       } else {
-        result = await streamOpenAI(finalMessages, systemPrompt, streamConfig, requestId, chatTools, sessionId, _wsIdentity)
+        result = await streamOpenAI(finalMessages, systemPrompt, streamConfig, requestId, chatTools, sessionId, _wsIdentity, ctx)
       }
       // Track token usage
       if (result?.usage && sessionId) {
@@ -1438,786 +1472,9 @@ function getSessionWorkspacePath(workspaceId, sessionId) {
   return null  // fallback to default clawDir in prompt-builder
 }
 
-// ── Coding Agent routing helper ──
-// Persistent map: ccSessionKey → Claude Code SDK session ID
-// Survives app restart so coding agents don't lose conversation history
-const sessionCCSessions = new Map()
-const CC_SESSIONS_FILE = '.paw/cc-sessions.json'
-
-function _loadCCSessions() {
-  const workspaces = workspaceRegistry.listWorkspaces()
-  for (const ws of workspaces) {
-    if (ws.type !== 'coding-agent' && ws.path) {
-      const filePath = path.join(ws.path, CC_SESSIONS_FILE)
-      try {
-        if (fs.existsSync(filePath)) {
-          const data = JSON.parse(fs.readFileSync(filePath, 'utf8'))
-          for (const [k, v] of Object.entries(data)) {
-            sessionCCSessions.set(k, v)
-          }
-        }
-      } catch {}
-    }
-  }
-}
-
-function _saveCCSession(ccSessionKey, ccSessionId) {
-  sessionCCSessions.set(ccSessionKey, ccSessionId)
-  // Persist to the workspace that owns this session
-  // ccSessionKey format: pawSessionId-engine-workdir
-  // We save to the first local workspace's .paw/ dir
-  const workspaces = workspaceRegistry.listWorkspaces()
-  const localWs = workspaces.find(w => w.type !== 'coding-agent' && w.path)
-  if (localWs) {
-    const filePath = path.join(localWs.path, CC_SESSIONS_FILE)
-    try {
-      const obj = {}
-      for (const [k, v] of sessionCCSessions.entries()) obj[k] = v
-      fs.writeFileSync(filePath, JSON.stringify(obj, null, 2))
-    } catch (err) {
-      console.warn('[cc-sessions] save error:', err.message)
-    }
-  }
-}
-
-async function routeToCodingAgent(workspace, message, { sessionId, requestId, senderName, senderAvatar }) {
-  const { engine, path: workdir, identity } = workspace
-  const agentName = identity?.name || engine
-  const agentAvatar = identity?.avatar
-
-  // Claude engine → use SDK for real-time streaming
-  if (engine === 'claude') {
-    return routeToCodingAgentSDK(workspace, message, { sessionId, requestId, senderName, senderAvatar })
-  }
-
-  // Other engines (codex, gemini, kiro) → fallback to CLI
-  if (!codingAgents.isAvailable(engine)) {
-    return `Error: coding agent '${engine}' not available`
-  }
-
-  const parentRequestId = requestId || _activeRequestId
-  if (parentRequestId && senderName) {
-    eventBus.dispatch('chat-delegate-start', { requestId: parentRequestId, sender: senderName, workspaceId: workspace.id, avatar: senderAvatar, sessionId })
-  } else if (parentRequestId) {
-    eventBus.dispatch('chat-text-start', { requestId: parentRequestId, sessionId })
-  }
-
-  let output = ''
-  const ccSessionKey = `${sessionId}-${engine}-${workdir}`
-  const existingSession = sessionCCSessions.get(ccSessionKey)
-
-  try {
-    const result = await codingAgents.run(engine, message, {
-      cwd: workdir,
-      session: existingSession,
-      onOutput: (chunk) => {
-        output += chunk
-        if (parentRequestId && senderName) {
-          eventBus.dispatch('chat-delegate-token', { requestId: parentRequestId, sender: senderName, token: chunk, sessionId })
-        } else if (parentRequestId) {
-          eventBus.dispatch('chat-token', { requestId: parentRequestId, text: chunk, sessionId })
-        }
-      }
-    })
-
-    if (parentRequestId && senderName) {
-      eventBus.dispatch('chat-delegate-end', { requestId: parentRequestId, sender: senderName, sessionId })
-    }
-
-    return output || result.stdout || 'Coding agent completed'
-  } catch (err) {
-    if (parentRequestId && senderName) {
-      eventBus.dispatch('chat-delegate-end', { requestId: parentRequestId, sender: senderName, sessionId })
-    }
-    return `Error: ${err.message}`
-  }
-}
-
-// ── Claude Code SDK integration (real-time streaming) ──
-async function routeToCodingAgentSDK(workspace, message, { sessionId, requestId, senderName, senderAvatar }) {
-  const { ClaudeCodeSession } = require('./core/claude-code-sdk')
-  const { getApiKey } = require('./core/api-keys')
-
-  const { engine, path: workdir, identity } = workspace
-  const agentName = identity?.name || engine
-  const agentAvatar = identity?.avatar
-
-  const parentRequestId = requestId || _activeRequestId
-  if (parentRequestId && senderName) {
-    eventBus.dispatch('chat-delegate-start', { requestId: parentRequestId, sender: senderName, workspaceId: workspace.id, avatar: senderAvatar, sessionId })
-  } else if (parentRequestId) {
-    eventBus.dispatch('chat-text-start', { requestId: parentRequestId, sessionId, agentName, avatar: agentAvatar })
-  }
-
-  let output = ''
-  const ccSessionKey = `${sessionId}-${engine}-${workdir}`
-  const existingSessionId = sessionCCSessions.get(ccSessionKey)
-
-  // Get API key, base URL, and model from config
-  const config = loadConfig()
-  const apiKey = getApiKey(config)
-  const baseUrl = config.baseUrl  // Support custom base URL (e.g., subrouter.ai)
-  const model = config.model || 'claude-opus-4-6'  // Default to opus if not specified
-
-  const session = new ClaudeCodeSession({
-    cwd: workdir,
-    sessionId: existingSessionId,
-    apiKey,
-    baseUrl,
-    model,
-    onToken: (delta) => {
-      output += delta
-      if (parentRequestId && senderName) {
-        eventBus.dispatch('chat-delegate-token', { requestId: parentRequestId, sender: senderName, token: delta, sessionId })
-      } else if (parentRequestId) {
-        eventBus.dispatch('chat-token', { requestId: parentRequestId, text: delta, sessionId })
-      }
-    },
-    onDone: (fullText, metadata) => {
-      // Save session ID for resumption (persisted to disk)
-      if (session.sessionId) {
-        _saveCCSession(ccSessionKey, session.sessionId)
-      }
-    },
-    onError: (err) => {
-      console.error(`[claude-code-sdk] error:`, err)
-    }
-  })
-
-  try {
-    const result = await session.send(message)
-
-    if (parentRequestId && senderName) {
-      eventBus.dispatch('chat-delegate-end', { requestId: parentRequestId, sender: senderName, sessionId })
-    }
-
-    console.log('[routeToCodingAgentSDK] Result length:', result?.length || 0)
-    return result || 'Coding agent completed'
-  } catch (err) {
-    console.error('[routeToCodingAgentSDK] Error:', err)
-    if (parentRequestId && senderName) {
-      eventBus.dispatch('chat-delegate-end', { requestId: parentRequestId, sender: senderName, sessionId })
-    }
-    return `Error: ${err.message}`
-  } finally {
-    session.close()
-  }
-}
-
-// ── Group Chat: delegate_to handler ──
-// Owner calls this tool to route a message to another participant.
-// We build the participant's system prompt, call LLM, and return their response.
-async function handleDelegateTo(input, config, sessionId) {
-  const { participant_name, message } = input
-  if (!participant_name || !message) return 'Error: participant_name and message are required'
-  const delegateDb = resolveSessionDb(sessionId)
-  if (!sessionId || !delegateDb) return 'Error: no active session'
-
-  // Find participant — all participants are workspace IDs now
-  const participantIds = sessionStore.getSessionParticipants(delegateDb, sessionId)
-  const allWs = participantIds.map(pid => workspaceRegistry.getWorkspace(pid)).filter(Boolean)
-
-  // Match by name (case-insensitive, partial)
-  const q = participant_name.toLowerCase()
-  const targetWs = allWs.find(w => {
-    const n = (w.identity?.name || '').toLowerCase()
-    return n === q || n.startsWith(q) || q.startsWith(n)
-  })
-
-  if (!targetWs) return `Error: participant "${participant_name}" not found in group. Available: ${allWs.map(w => w.identity?.name).join(', ')}`
-
-  // Route to coding agent if applicable
-  if (targetWs.type === 'coding-agent') {
-    const myName = targetWs.identity?.name || targetWs.engine
-    console.log(`[delegate_to] routing to coding-agent ${targetWs.engine} at ${targetWs.path}`)
-    const parentRequestId = _activeRequestId
-    const responseText = await routeToCodingAgent(targetWs, message, {
-      sessionId,
-      requestId: parentRequestId,
-      senderName: myName,
-      senderAvatar: targetWs.identity?.avatar || '🤖'
-    })
-    // Accumulate delegate message for finishChat (same as non-coding-agent path)
-    if (parentRequestId && (responseText || '').trim()) {
-      if (!_pendingDelegateMessages.has(parentRequestId)) _pendingDelegateMessages.set(parentRequestId, [])
-      _pendingDelegateMessages.get(parentRequestId).push({
-        sender: myName, senderWorkspaceId: targetWs.id,
-        content: responseText, timestamp: Date.now(),
-      })
-    }
-    console.log(`[delegate_to] ${myName} (coding-agent) responded (${(responseText||'').length} chars), accumulated for finishChat`)
-    return responseText
-  }
-
-  console.log(`[delegate_to] routing to ${targetWs.identity?.name} (${targetWs.id})`)
-
-  // Build target participant's system prompt
-  const targetPrompt = await coreBuildSystemPrompt(targetWs.path)
-
-  // Add group context to their prompt
-  const names = allWs.map(w => w.identity?.name || w.id)
-  const myName = targetWs.identity?.name || 'Assistant'
-  const groupContext = `\n\n---\n\n## Group Chat\nYou are **${myName}** in a group conversation.\nParticipants: ${names.join(', ')}.\nThe user is talking to you. Respond as yourself (${myName}). Be natural and in-character.`
-  const fullPrompt = targetPrompt + groupContext
-
-  // Build conversation context — load recent messages from session
-  const delegateMessages = []
-  try {
-    const fullSession = sessionStore.loadSession(delegateDb, sessionId)
-    if (fullSession?.messages?.length) {
-      const recent = fullSession.messages.slice(-20)
-      for (const m of recent) {
-        if (m.role === 'user') {
-          delegateMessages.push({ role: 'user', content: m.content })
-        } else if (m.role === 'assistant') {
-          const senderLabel = m.sender && m.sender !== 'Assistant' ? `[${m.sender}]: ` : ''
-          delegateMessages.push({ role: 'assistant', content: senderLabel + (m.content || '') })
-        }
-      }
-    }
-  } catch {}
-
-  // Add the delegation message as the final user message
-  delegateMessages.push({ role: 'user', content: message })
-
-  // Full agent config
-  const llmConfig = (() => { try { return JSON.parse(fs.readFileSync(configPath(), 'utf8')) } catch { return {} } })()
-  const provider = llmConfig.provider || 'anthropic'
-  const fullConfig = { ...llmConfig, apiKey: config?.apiKey || llmConfig.apiKey, model: config?.model || llmConfig.model, baseUrl: config?.baseUrl || llmConfig.baseUrl }
-
-  // Delegate gets all tools EXCEPT delegate_to (no recursion)
-  const delegateTools = getToolsWithMcp().filter(t => t.name !== 'delegate_to')
-
-  try {
-    // Signal delegate start — frontend creates independent bubble
-    const avatar = targetWs.identity?.avatar || '🤖'
-    console.log(`[delegate_to] sending delegate-start: sender=${myName}, avatar=${avatar}, wsId=${targetWs.id}`)
-    const parentRequestId = _activeRequestId
-    if (parentRequestId) {
-      eventBus.dispatch('chat-delegate-start', { requestId: parentRequestId, sender: myName, workspaceId: targetWs.id, avatar, sessionId })
-    }
-
-    // Intercept delegate stream events and remap to delegate channels via eventBus
-    const delegateRid = parentRequestId + '-delegate'
-    const remapHandlers = []
-    const remapChannels = { 'chat-token': true, 'chat-tool-step': true, 'chat-round-info': true, 'chat-status': true, 'chat-text-start': true }
-    for (const ch of Object.keys(remapChannels)) {
-      const handler = (data) => {
-        if (data?.requestId !== delegateRid) return
-        if (ch === 'chat-token') {
-          eventBus.dispatch('chat-delegate-token', { requestId: parentRequestId, sender: myName, token: data.text, thinking: data.thinking || false, sessionId })
-        } else if (ch === 'chat-tool-step') {
-          eventBus.dispatch('chat-delegate-token', { requestId: parentRequestId, sender: myName, toolStep: data, sessionId })
-        } else if (ch === 'chat-round-info') {
-          eventBus.dispatch('chat-delegate-token', { requestId: parentRequestId, sender: myName, roundInfo: data, sessionId })
-        } else if (ch === 'chat-status') {
-          eventBus.dispatch('chat-status', { ...data, sessionId })
-        }
-        // chat-text-start: no-op for delegate (text appends to same bubble)
-      }
-      eventBus.on(ch, handler)
-      remapHandlers.push({ ch, handler })
-    }
-
-    // Save and restore active request state (delegate runs inside orchestrator's tool loop)
-    const savedRequestId = _activeRequestId
-    const savedAbortController = _activeAbortController
-
-    let result
-    if (provider === 'anthropic') {
-      result = await streamAnthropic(delegateMessages, fullPrompt, fullConfig, delegateRid, delegateTools, sessionId)
-    } else {
-      result = await streamOpenAI(delegateMessages, fullPrompt, fullConfig, delegateRid, delegateTools, sessionId)
-    }
-
-    // Cleanup delegate event remapping
-    for (const { ch, handler } of remapHandlers) eventBus.off(ch, handler)
-
-    // Restore parent state
-    _activeRequestId = savedRequestId
-    _activeAbortController = savedAbortController
-
-    const responseText = result?.answer || ''
-
-    // Signal delegate end — frontend finalizes bubble
-    if (parentRequestId) {
-      eventBus.dispatch('chat-delegate-end', { requestId: parentRequestId, sender: myName, workspaceId: targetWs.id, fullText: responseText, sessionId })
-    }
-
-    // Accumulate delegate message — finishChat saves all messages in correct visual order
-    if (parentRequestId && responseText.trim()) {
-      if (!_pendingDelegateMessages.has(parentRequestId)) _pendingDelegateMessages.set(parentRequestId, [])
-      _pendingDelegateMessages.get(parentRequestId).push({
-        sender: myName, senderWorkspaceId: targetWs.id,
-        content: responseText, timestamp: Date.now(),
-        toolSteps: result?.toolSteps || undefined,
-      })
-    }
-
-    console.log(`[delegate_to] ${myName} responded (${responseText.length} chars), accumulated for finishChat`)
-    // Return delegate's response to the orchestrator so they can make informed decisions
-    // (chain to another participant, add context, or stay silent)
-    const preview = responseText.length > 300 ? responseText.slice(0, 300) + '…' : responseText
-    return `[${myName} responded directly to the user]\nContent: ${preview}\n\nThe response is already visible to the user. Reply NO_REPLY unless you need to delegate further or add genuine value.`
-  } catch (err) {
-    console.error(`[delegate_to] error:`, err.message)
-    // Cleanup delegate event remapping
-    for (const { ch, handler } of remapHandlers) eventBus.off(ch, handler)
-    // Restore parent state
-    _activeRequestId = savedRequestId
-    _activeAbortController = savedAbortController
-    // Signal delegate end so frontend cleans up the bubble
-    if (parentRequestId) {
-      eventBus.dispatch('chat-delegate-end', { requestId: parentRequestId, sender: myName, workspaceId: targetWs.id, fullText: `Error: ${err.message}`, sessionId })
-    }
-    return `Error delegating to ${myName}: ${err.message}`
-  }
-}
-
-// ── Coding Agent Streaming ──
-
-async function streamCodingAgent(agentId, prompt, { cwd, sessionId, requestId }) {
-  _activeRequestId = requestId
-  _activeCodingProcess = null
-
-  // Resolve workspace identity for streaming events
-  const _ccWs = workspaceRegistry.listWorkspaces()[0] || null
-  const _ccIdent = { agentName: _ccWs?.identity?.name || agentId, avatar: _ccWs?.identity?.avatar || null, wsPath: _ccWs?.path || cwd, workspaceId: _ccWs?.id || null }
-
-  pushStatus('running', `${agentId} working...`)
-  eventBus.dispatch('chat-text-start', { requestId, ..._ccIdent, sessionId })
-
-  try {
-    const result = await codingAgents.run(agentId, prompt, {
-      cwd,
-      session: sessionId ? `paw-${sessionId}` : undefined,
-      onOutput(chunk) {
-        eventBus.dispatch('chat-token', { token: chunk, requestId })
-      },
-      onProcess(proc) {
-        _activeCodingProcess = proc
-      },
-    })
-
-    _activeCodingProcess = null
-    pushStatus('idle', '')
-    // chat-done dispatched by chat handler after persisting to SQLite
-    return { answer: result.stdout, mode: 'coding', agentId }
-  } catch (err) {
-    _activeCodingProcess = null
-    pushStatus('error', err.message?.slice(0, 80))
-    throw err
-  }
-}
-
-// ── Anthropic Streaming ──
-
-async function streamAnthropic(messages, systemPrompt, config, requestId, tools, sessionId, wsIdentity) {
-  _activeRequestId = requestId
-  _activeAbortController = new AbortController()
-  // Session-scoped dispatch helper — injects sessionId into every payload
-  const ipc = (channel, data) => eventBus.dispatch(channel, { ...data, sessionId })
-  // Agent timeout — prevent infinite waits (OpenClaw default: 600s)
-  const timeoutMs = (config.timeoutSeconds || 600) * 1000
-  const timeoutId = setTimeout(() => {
-    console.warn(`[Paw] Agent timeout after ${config.timeoutSeconds || 600}s`)
-    _activeAbortController?.abort(new Error('Agent timeout'))
-    ipc('chat-status', { text: '超时', requestId })
-  }, timeoutMs)
-  const activeTools = tools || getToolsWithMcp()
-  const base = (config.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '')
-  const endpoint = base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`
-  const headers = { 'Content-Type': 'application/json', 'x-api-key': getApiKey(config), 'anthropic-version': '2023-06-01', 'anthropic-beta': 'prompt-caching-2024-07-31' }
-  let fullText = '', roundText = '', msgs = [...messages]
-  let flowSteps = []  // Accumulate thinking + tool steps in chronological order
-
-  // Transcript sanitization before streaming (OpenClaw-aligned)
-  const cfg = config || {}
-  msgs = sanitizeTranscript(msgs, {
-    historyLimit: cfg.historyLimit,
-    provider: 'anthropic',
-    removeTrailingUser: false,
-  })
-  const loopDetector = new LoopDetector()
-
-  // Usage accumulator — tracks across all rounds (OpenClaw-aligned)
-  let totalUsageInput = 0, totalUsageOutput = 0
-  let totalCacheRead = 0, totalCacheWrite = 0
-  let lastUsageInput = 0, lastCacheRead = 0, lastCacheWrite = 0
-
-  // OpenClaw-aligned: no hard round limit. Loop detection + timeout guard against stuck loops.
-  for (let round = 0; ; round++) {
-    roundText = ''
-    // Send text-start for every round (including round 0) with workspace identity
-    ipc('chat-text-start', { requestId, ...(wsIdentity || {}) })
-    pushStatus('thinking', 'Thinking...')
-
-    // Build system with cache_control for prompt caching
-    const scrubbedSystemPrompt = scrubMagicStrings(systemPrompt)
-    const systemContent = scrubbedSystemPrompt ? [
-      { type: 'text', text: scrubbedSystemPrompt, cache_control: { type: 'ephemeral' } }
-    ] : undefined
-
-    // Mark last tool with cache_control for tool schema caching
-    const cachedTools = activeTools.map((t, i) =>
-      i === activeTools.length - 1 ? { ...t, cache_control: { type: 'ephemeral' } } : t
-    )
-
-    // Mark last user message with cache_control for conversation caching
-    // Scrub magic strings from user messages before sending
-    const scrubbedMsgs = msgs.map(m => {
-      if (m.role === 'user' && typeof m.content === 'string') {
-        return { ...m, content: scrubMagicStrings(m.content) }
-      }
-      return m
-    })
-    const cachedMsgs = scrubbedMsgs.map((m, i) => {
-      if (i === msgs.length - 1 && m.role === 'user') {
-        if (typeof m.content === 'string') {
-          return { ...m, content: [{ type: 'text', text: m.content, cache_control: { type: 'ephemeral' } }] }
-        }
-        if (Array.isArray(m.content)) {
-          const last = m.content.length - 1
-          const newContent = m.content.map((c, j) =>
-            j === last ? { ...c, cache_control: { type: 'ephemeral' } } : c
-          )
-          return { ...m, content: newContent }
-        }
-      }
-      return m
-    })
-
-    // Context window guard — enforce budget before API call
-    const contextWindowTokens = resolveContextWindow(config)
-    enforceContextBudget(cachedMsgs, contextWindowTokens)
-
-    const body = {
-      model: config.model || 'claude-sonnet-4-20250514',
-      max_tokens: config.maxTokens || 4096, stream: true,
-      system: systemContent,
-      messages: cachedMsgs, tools: cachedTools,
-    }
-    console.log(`[Paw] streamAnthropic round=${round} endpoint=${endpoint} model=${body.model} msgCount=${msgs.length} toolCount=${activeTools.length}`)
-    const res = await fetchWithRetry(endpoint, { method: 'POST', headers, body: JSON.stringify(body), signal: _activeAbortController?.signal })
-    console.log(`[Paw] streamAnthropic response status=${res.status}`)
-    if (!res.ok) {
-      const errText = await res.text()
-      const err = new Error(`Anthropic API ${res.status}: ${errText}`)
-      err.status = res.status
-      err.body = errText
-      // Context overflow detection — auto-compact and retry
-      if (isContextOverflowError(res.status, errText)) {
-        console.warn('[Paw] Context overflow detected, attempting compaction...')
-        ipc('chat-status', { text: '上下文溢出，压缩中...', requestId })
-        const compactResult = await compactHistory(msgs, { apiKey: getApiKey(config), baseUrl: config.baseUrl, model: config.model, provider: 'anthropic' })
-        if (compactResult.length < msgs.length) {
-          msgs.splice(0, msgs.length, ...compactResult)
-          round-- // Retry this round
-          continue
-        }
-      }
-      throw err
-    }
-
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let buf = '', toolCalls = [], curBlock = null
-    let roundUsageInput = 0, roundUsageOutput = 0
-    let roundThinking = '' // Accumulate thinking for this round (tool group purpose)
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      const lines = buf.split('\n'); buf = lines.pop()
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-        try {
-          const evt = JSON.parse(line.slice(6))
-          // Track token usage (including cache stats)
-          if (evt.type === 'message_start' && evt.message?.usage) {
-            roundUsageInput += evt.message.usage.input_tokens || 0
-            // Anthropic cache fields
-            if (evt.message.usage.cache_read_input_tokens) totalCacheRead += evt.message.usage.cache_read_input_tokens
-            if (evt.message.usage.cache_creation_input_tokens) totalCacheWrite += evt.message.usage.cache_creation_input_tokens
-            lastCacheRead = evt.message.usage.cache_read_input_tokens || 0
-            lastCacheWrite = evt.message.usage.cache_creation_input_tokens || 0
-          }
-          if (evt.type === 'message_delta' && evt.usage) {
-            roundUsageOutput += evt.usage.output_tokens || 0
-          }
-          if (evt.type === 'content_block_start' && evt.content_block?.type === 'tool_use') {
-            curBlock = { id: evt.content_block.id, name: evt.content_block.name, json: '' }
-          } else if (evt.type === 'content_block_delta') {
-            if (evt.delta?.type === 'thinking_delta' && evt.delta?.thinking) {
-              roundThinking += evt.delta.thinking
-              ipc('chat-token', { requestId, text: evt.delta.thinking, thinking: true })
-            }
-            if (evt.delta?.text && !curBlock) { roundText += evt.delta.text; fullText += evt.delta.text; ipc('chat-token', { requestId, text: evt.delta.text }) }
-            if (evt.delta?.partial_json && curBlock) curBlock.json += evt.delta.partial_json
-          } else if (evt.type === 'content_block_stop' && curBlock) {
-            toolCalls.push(curBlock); curBlock = null
-          }
-        } catch {}
-      }
-    }
-
-    // Accumulate usage across rounds
-    totalUsageInput += roundUsageInput
-    totalUsageOutput += roundUsageOutput
-    lastUsageInput = roundUsageInput
-
-    // Persist thinking block into flowSteps
-    if (roundThinking) flowSteps.push({ name: '__thinking__', output: roundThinking })
-
-    if (!toolCalls.length) {
-      pushStatus('done', 'Done')
-      // chat-done dispatched by chat handler after persisting to SQLite
-      console.log('[Paw] streamAnthropic done, fullText length:', fullText.length)
-      clearTimeout(timeoutId)
-      return { answer: fullText, toolSteps: flowSteps.length ? flowSteps : undefined, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput, cacheRead: totalCacheRead, cacheWrite: totalCacheWrite, lastInputTokens: lastUsageInput, lastCacheRead, lastCacheWrite } }
-    }
-
-    // Extract purpose from thinking — last meaningful line before tool calls
-    let roundPurpose = ''
-    if (roundThinking) {
-      const lines = roundThinking.trim().split('\n').filter(l => l.trim().length > 5)
-      // Take the last line that looks like a plan/intent (often starts with 让我/I'll/Let me/需要)
-      roundPurpose = (lines[lines.length - 1] || '').trim().slice(0, 80)
-    }
-    // Also check roundText for intent (visible text before tool calls)
-    if (!roundPurpose && roundText) {
-      roundPurpose = roundText.trim().split('\n').pop()?.trim().slice(0, 80) || ''
-    }
-
-    // Execute tools and continue
-    const assistantContent = []
-    if (roundText) assistantContent.push({ type: 'text', text: roundText })
-    for (const tc of toolCalls) assistantContent.push({ type: 'tool_use', id: tc.id, name: tc.name, input: JSON.parse(tc.json || '{}') })
-    msgs.push({ role: 'assistant', content: assistantContent })
-
-    const SILENT_TOOLS = ['ui_status_set', 'notify', 'delegate_to', 'stay_silent', 'session_title_set']
-    const toolResults = []
-    let loopBlocked = false
-    for (const tc of toolCalls) {
-      const input = JSON.parse(tc.json || '{}')
-      // Record call first, then detect (OpenClaw-aligned: record → detect → execute → recordOutcome)
-      loopDetector.recordToolCall(tc.name, input)
-      const loopCheck = loopDetector.check(tc.name, input)
-      if (loopCheck.blocked) {
-        console.warn(`[Paw] ${loopCheck.reason}`)
-        toolResults.push({ type: 'tool_result', tool_use_id: tc.id, content: loopCheck.reason })
-        ipc('chat-tool-step', { requestId, name: tc.name, input, output: loopCheck.reason })
-        loopBlocked = true
-        continue
-      }
-      if (loopCheck.warning) {
-        console.warn(`[Paw] ${loopCheck.reason}`)
-      }
-      const silent = SILENT_TOOLS.includes(tc.name)
-      if (!silent) pushStatus('tool', `Running ${tc.name}...`)
-      let result, execError
-      try {
-        result = await executeTool(tc.name, input, config, { sessionId })
-      } catch (err) {
-        execError = err
-        result = `Error: ${err.message}`
-      }
-      loopDetector.recordOutcome(tc.name, input, result, execError)
-      if (!silent) {
-        ipc('chat-tool-step', { requestId, name: tc.name, input, output: String(result).slice(0, 500) })
-      }
-      // Always persist to flowSteps (including silent tools like delegate_to) for DB persistence
-      flowSteps.push({ name: tc.name, input, output: String(result).slice(0, 500) })
-      toolResults.push({ type: 'tool_result', tool_use_id: tc.id, content: truncateToolResult(result) })
-    }
-    // Send round info to renderer (include purpose extracted from thinking)
-    if (toolCalls.length > 0) {
-      ipc('chat-round-info', { requestId, round: round + 1, purpose: roundPurpose })
-    }
-    msgs.push({ role: 'user', content: toolResults })
-    fullText += '\n'
-    ipc('chat-token', { requestId, text: '\n' })
-  }
-}
-
-// ── OpenAI Streaming ──
-
-async function streamOpenAI(messages, systemPrompt, config, requestId, tools, sessionId, wsIdentity) {
-  _activeRequestId = requestId
-  _activeAbortController = new AbortController()
-  // Session-scoped dispatch helper — injects sessionId into every payload
-  const ipc = (channel, data) => eventBus.dispatch(channel, { ...data, sessionId })
-  // Agent timeout
-  const timeoutMs = (config.timeoutSeconds || 600) * 1000
-  const timeoutId = setTimeout(() => {
-    console.warn(`[Paw] Agent timeout after ${config.timeoutSeconds || 600}s`)
-    _activeAbortController?.abort(new Error('Agent timeout'))
-    ipc('chat-status', { text: '超时', requestId })
-  }, timeoutMs)
-  const activeTools = tools || getToolsWithMcp()
-  const base = (config.baseUrl || 'https://api.openai.com').replace(/\/+$/, '')
-  const endpoint = base.endsWith('/v1') ? `${base}/chat/completions` : `${base}/v1/chat/completions`
-
-  // Convert tools to OpenAI function calling format
-  const oaiTools = activeTools.map(t => ({
-    type: 'function',
-    function: { name: t.name, description: t.description, parameters: t.input_schema }
-  }))
-
-  const msgs = []
-  if (systemPrompt) msgs.push({ role: 'system', content: scrubMagicStrings(systemPrompt) })
-
-  // Sanitize transcript before adding to msgs (OpenClaw-aligned)
-  const sanitizedHistory = sanitizeTranscript([...messages], {
-    historyLimit: config?.historyLimit,
-    provider: (config?.provider || 'openai'),
-    removeTrailingUser: false,
-  })
-  msgs.push(...sanitizedHistory)
-
-  let fullText = '', roundText = ''
-  let flowSteps = []  // Accumulate tool steps in chronological order
-  const loopDetector = new LoopDetector()
-  // Usage accumulator — tracks across all rounds (OpenClaw-aligned)
-  let totalUsageInput = 0, totalUsageOutput = 0
-
-  // OpenClaw-aligned: no hard round limit
-  for (let round = 0; ; round++) {
-    roundText = ''
-    // Send text-start for every round (including round 0) with workspace identity
-    ipc('chat-text-start', { requestId, ...(wsIdentity || {}) })
-    pushStatus('thinking', 'Thinking...')
-
-    // Context window guard — enforce budget before API call
-    const contextWindowTokens = resolveContextWindow(config)
-    enforceContextBudget(msgs, contextWindowTokens)
-
-    const res = await fetchWithRetry(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getApiKey(config)}` },
-      body: JSON.stringify({ model: config.model || 'gpt-4o', messages: msgs, stream: true, stream_options: { include_usage: true }, tools: oaiTools }),
-      signal: _activeAbortController?.signal,
-    })
-    if (!res.ok) {
-      const errText = await res.text()
-      const err = new Error(`OpenAI API ${res.status}: ${errText}`)
-      err.status = res.status
-      err.body = errText
-      if (isContextOverflowError(res.status, errText)) {
-        console.warn('[Paw] Context overflow detected (OpenAI), attempting compaction...')
-        ipc('chat-status', { text: '上下文溢出，压缩中...', requestId })
-        const compactResult = await compactHistory(msgs, { apiKey: getApiKey(config), baseUrl: config.baseUrl, model: config.model, provider: config.provider || 'openai' })
-        if (compactResult.length < msgs.length) {
-          msgs.splice(0, msgs.length, ...compactResult)
-          round--
-          continue
-        }
-      }
-      throw err
-    }
-
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let buf = '', toolCalls = {}
-    let roundUsageInput = 0, roundUsageOutput = 0
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      const lines = buf.split('\n'); buf = lines.pop()
-      for (const line of lines) {
-        if (!line.startsWith('data: ') || line === 'data: [DONE]') continue
-        try {
-          const parsed = JSON.parse(line.slice(6))
-          // Track usage (OpenAI includes it in the final chunk with stream_options)
-          if (parsed.usage) {
-            roundUsageInput += parsed.usage.prompt_tokens || 0
-            roundUsageOutput += parsed.usage.completion_tokens || 0
-          }
-          const choice = parsed.choices?.[0]
-          const delta = choice?.delta
-          if (delta?.content) {
-            roundText += delta.content
-            fullText += delta.content
-            ipc('chat-token', { requestId, text: delta.content })
-          }
-          if (delta?.tool_calls) {
-            for (const tc of delta.tool_calls) {
-              const idx = tc.index
-              if (!toolCalls[idx]) toolCalls[idx] = { id: '', name: '', args: '' }
-              if (tc.id) toolCalls[idx].id = tc.id
-              if (tc.function?.name) toolCalls[idx].name = tc.function.name
-              if (tc.function?.arguments) toolCalls[idx].args += tc.function.arguments
-            }
-          }
-        } catch {}
-      }
-    }
-
-    const tcList = Object.values(toolCalls)
-
-    // Accumulate usage across rounds
-    totalUsageInput += roundUsageInput
-    totalUsageOutput += roundUsageOutput
-
-    if (!tcList.length || !tcList[0].name) {
-      pushStatus('done', 'Done')
-      // chat-done dispatched by chat handler after persisting to SQLite
-      clearTimeout(timeoutId)
-      return { answer: fullText, toolSteps: flowSteps.length ? flowSteps : undefined, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput } }
-    }
-
-    // Build assistant message with tool_calls
-    const assistantMsg = { role: 'assistant', content: roundText || null, tool_calls: tcList.map(tc => ({
-      id: tc.id, type: 'function', function: { name: tc.name, arguments: tc.args }
-    }))}
-    msgs.push(assistantMsg)
-
-    // Execute tools and add results
-    const SILENT_TOOLS_OAI = ['ui_status_set', 'notify', 'delegate_to', 'stay_silent', 'session_title_set']
-    for (const tc of tcList) {
-      let input = {}
-      try { input = JSON.parse(tc.args || '{}') } catch {}
-      // Record call first, then detect (OpenClaw-aligned)
-      loopDetector.recordToolCall(tc.name, input)
-      const loopCheck = loopDetector.check(tc.name, input)
-      if (loopCheck.blocked) {
-        console.warn(`[Paw] ${loopCheck.reason}`)
-        ipc('chat-tool-step', { requestId, name: tc.name, input, output: loopCheck.reason })
-        msgs.push({ role: 'tool', tool_call_id: tc.id, content: loopCheck.reason })
-        continue
-      }
-      if (loopCheck.warning) {
-        console.warn(`[Paw] ${loopCheck.reason}`)
-      }
-      const silent = SILENT_TOOLS_OAI.includes(tc.name)
-      if (!silent) pushStatus('tool', `Running ${tc.name}...`)
-      let result, execError
-      try {
-        result = await executeTool(tc.name, input, config, { sessionId })
-      } catch (err) {
-        execError = err
-        result = `Error: ${err.message}`
-      }
-      loopDetector.recordOutcome(tc.name, input, result, execError)
-      if (!silent) {
-        ipc('chat-tool-step', { requestId, name: tc.name, input, output: String(result).slice(0, 500) })
-      }
-      // Always persist to flowSteps (including silent tools) for DB persistence
-      flowSteps.push({ name: tc.name, input, output: String(result).slice(0, 500) })
-      msgs.push({ role: 'tool', tool_call_id: tc.id, content: truncateToolResult(result) })
-    }
-    // Send round info to renderer (purpose from visible text for OpenAI)
-    if (tcList.length > 0) {
-      const oaiPurpose = roundText ? roundText.trim().split('\n').pop()?.trim().slice(0, 80) || '' : ''
-      ipc('chat-round-info', { requestId, round: round + 1, purpose: oaiPurpose })
-    }
-    fullText += '\n'
-    ipc('chat-token', { requestId, text: '\n' })
-  }
-}
+// ── Coding Agent routing → extracted to core/coding-agent-router.js (M39) ──
+// ── Group Chat delegate_to → extracted to core/delegate.js (M39) ──
+// ── Streaming engines → extracted to core/stream-anthropic.js + core/stream-openai.js (M39) ──
 
 // ── M8-01: Heartbeat ──
 
@@ -2242,10 +1499,10 @@ function startHeartbeat() {
       if (!c.apiKey) return
       const sp = await buildSystemPrompt()
       const msgs = [{ role: 'user', content: prompt }]
-      const fn = (c.provider || 'anthropic') === 'anthropic' ? streamAnthropic : streamOpenAI
+      const hbStreamFn = (c.provider || 'anthropic') === 'anthropic' ? streamAnthropic : streamOpenAI
       // Use a dedicated heartbeat requestId to avoid hijacking active user chats
       const hbRequestId = 'hb-' + Date.now().toString(36)
-      const r = await fn(msgs, sp, c, hbRequestId)
+      const r = await hbStreamFn(msgs, sp, c, hbRequestId, null, null, null, ctx)
       if (r?.answer && !r.answer.includes('HEARTBEAT_OK')) {
         sendNotification('Paw', r.answer.slice(0, 200))
         eventBus.dispatch('heartbeat-result', r.answer)
@@ -2286,9 +1543,9 @@ async function initMcpAndCron() {
           if (!c.apiKey) return { error: 'No API key' };
           const sp = await buildSystemPrompt();
           const msgs = [{ role: 'user', content: payload.message || payload.text || 'Cron task' }];
-          const fn = (c.provider || 'anthropic') === 'anthropic' ? streamAnthropic : streamOpenAI;
+          const cronStreamFn = (c.provider || 'anthropic') === 'anthropic' ? streamAnthropic : streamOpenAI;
           const rid = 'cron-' + Date.now().toString(36);
-          await fn(msgs, sp, c, rid);
+          await cronStreamFn(msgs, sp, c, rid, null, null, null, ctx);
           return { status: 'ok' };
         } catch (e) {
           return { error: e.message };

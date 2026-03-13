@@ -2,38 +2,46 @@
 
 ## 技术栈
 - **Electron** — 桌面壳，macOS 先行
-- **前端** — 纯 HTML/CSS/JS，不引入框架
+- **前端** — React + Vite + TypeScript（src/ → renderer/）
+- **主进程** — 纯 CommonJS JS（main.js + core/ + tools/）
 - **LLM** — Anthropic/OpenAI streaming，直接 fetch
-- **工具** — search(Tavily)/code_exec(vm sandbox)/file_read/file_write/shell_exec/notify
+- **工具** — 20+ 内置工具（registry 模式）+ MCP 动态工具
+- **数据** — SQLite（sessions/messages/tasks），JSON（config）
+- **构建** — Vite（renderer）+ electron-builder（DMG）
 
-## 架构（v0.9.0 现状）
+## 架构（当前状态）
 
 ```
-Electron Main
-├── Config/Workspace Loader
-├── System Prompt Builder（SOUL.md + MEMORY.md + skills/ + memory/）
-├── Streaming Engine（Anthropic SSE / OpenAI SSE）
-├── Tool Loop（最多 5 轮）
-├── Heartbeat Timer（可配置间隔）
-├── Tray Icon（状态同步）
-└── Notification（Electron Notification API）
-    ↕ IPC
-Electron Renderer
-├── Chat UI（消息/streaming/工具步骤折叠）
-├── Sidebar（sessions + agent status）
-├── Settings Overlay（provider/key/heartbeat）
-├── Members Panel（multi-agent）
-└── File Link Handler（图片预览/md渲染/系统打开）
+Electron Main (main.js ~2350 lines)
+├── core/              — 33 modules (~3800 lines)
+│   ├── State/Config    — state.js, config.js, workspace-registry.js, workspace-identity.js
+│   ├── LLM             — llm-raw.js, api-keys.js, api-retry.js, failover.js, model-context.js
+│   ├── Prompt          — prompt-builder.js, context-guard.js, compaction.js
+│   ├── Routing         — router.js, loop-detection.js
+│   ├── Tools           — tool-registry.js, mcp-client.js
+│   ├── Agents          — agents.js, coding-agents.js, coding-agent-registry.js, claude-code-sdk.js, acpx.js
+│   ├── Services        — cron.js, heartbeat.js, notify.js, tray.js, memory-watch.js, event-bus.js
+│   └── Maintenance     — transcript-repair.js, session-expiry.js, session-pruning.js, process-manager.js, poll-backoff.js
+├── tools/             — 20 tool files (~1900 lines)
+├── skills/            — frontmatter.js + installer.js
+└── IPC handlers
+    ↕ preload.js bridge
+React Renderer (src/ → Vite build → renderer/)
+├── App.tsx            — workspace/session management shell
+├── components/        — 13 components (ChatView, Sidebar, InputBar, etc.)
+├── store/             — React Context state (AppProvider)
+├── hooks/             — useIPC, useSession, useDraft, useTheme
+├── utils/             — agentContext, markdown, tools
+├── styles/global.css  — 5 themes (~1050 lines)
+└── types/             — TypeScript type definitions
 ```
 
 ## 开发流程（铁律）
 
-遵循 `docs/dev-methodology.md`，以下是 Paw 项目的具体补充：
-
 ### 每个 feature 必须走的流程
 
 ```
-1. PLAN  — 写 .ai/roadmap.md（checkbox 步骤）+ 意图确认 5 步
+1. PLAN  — 写 .ai/roadmap.md（checkbox 步骤）+ 意图确认
 2. DO    — 按 roadmap 逐步执行，每步打勾
 3. REVIEW — Layer 1 自审 + Layer 2 DBB + Layer 3 Review
 4. GATE  — 全过才 commit
@@ -42,29 +50,22 @@ Electron Renderer
 ### commit 前必做（自审 checklist）
 
 ```
-□ node --check main.js（语法校验，M9 教训）
-□ 新增目录/文件 → 检查 package.json build.files 是否包含（M17 教训：tools/ skills/ 漏打包导致 v0.18.0 crash）
-□ node .ai/dbb/dbb-test.js（DBB 6/6）
-□ E2E 对话验证（CDP 9224）
-□ agent-control --pid 截图 + 目视确认
-□ features.json 更新 passes
-□ state.json 更新
+□ node --check main.js（语法校验）
+□ npx tsc --noEmit（TypeScript 类型检查）
+□ npx vite build（Vite 构建通过）
+□ 新增目录/文件 → 检查 package.json build.files 是否包含
+□ E2E 对话验证
 □ growth.md 写本轮记录
 ```
 
-### M8/M9/M17/M19 教训（已发生，不可再犯）
+### 历史教训（已发生，不可再犯）
 
 1. **一次只做一个 feature** — M8 塞了 5 个 feature 一起做，跳过了 PLAN，没有逐个验证
-2. **Edit 匹配唯一性** — main.js 有两处 `return { answer: fullText }`，Edit 报错。用更长上下文或先 Read 确认行号
-3. **插入代码破坏相邻函数** — pushStatus 插入时把 sendNotification 的函数体切断，导致语法错误。插入前后必须 Read 确认上下文完整
-4. **node --check 是最后防线** — 语法错误应该在 commit 前被拦住，不是等 E2E 启动失败才发现
+2. **Edit 匹配唯一性** — main.js 有两处相同代码，Edit 报错。用更长上下文或先 Read 确认行号
+3. **插入代码破坏相邻函数** — pushStatus 插入时把 sendNotification 的函数体切断。插入前后必须 Read 确认上下文完整
+4. **node --check 是最后防线** — 语法错误应在 commit 前拦住
 5. **growth.md 实时写** — 做完就记，不攒着事后补
-6. **DBB 不能只跑脚本** — 必须截图 + taste.md 对照，自动化测试只验功能不验体验
-7. **新增目录必须加 build.files** — v0.18.0 加了 tools/ 和 skills/ 但没加到 package.json build.files，asar 打包不包含，导致生产环境 crash（Cannot find module './tools'）。node --check 在源码目录能过，但打包后找不到模块
-8. **发布前必须启动测试打包产物** — 不是测试源码 `npm start`，是测试 `dist/` 里的 .app，两者区别是 asar 打包
-9. **工具调用路径必须端到端验证** — node --check 只验语法，npm start 只验启动不崩溃，都不能替代"实际触发一次工具调用"。M19 的 create_agent 工具因为 main.js 的 currentSessionId 从未被 renderer 同步，运行时必定报 "No active session"，但语法检查和启动测试都发现不了。新增 LLM 工具后，必须实际让 AI 调一次或手动模拟一次完整调用链
-
-## 约束（已解除）
-- ~~MVP 不做：cron/heartbeat~~ → M8 已实现
-- ~~MVP 不做：多窗口~~ → M7 已实现
-- ~~MVP 不做：sub-agent~~ → 暂未实现，backlog B013
+6. **DBB 不能只跑脚本** — 必须截图 + taste.md 对照
+7. **新增目录必须加 build.files** — v0.18.0 加了 tools/ 和 skills/ 但没加到 package.json build.files，生产环境 crash
+8. **发布前必须启动测试打包产物** — 测试 dist/ 里的 .app，不只是 npm start
+9. **工具调用路径必须端到端验证** — node --check 只验语法，新增 LLM 工具后必须实际触发一次完整调用链

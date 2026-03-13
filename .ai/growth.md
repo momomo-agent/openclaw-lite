@@ -134,3 +134,44 @@
 - 改动文件：skills/frontmatter.js (重写)、tools/skill.js、skills/installer.js、main.js (重大)、tools/index.js、renderer/index.html、renderer/app.js、preload.js、core/prompt-builder.js、package.json
 - 工具数从 20 增加到 24（skill_create、cron、mcp_config + 动态 MCP 工具）
 - Gate: 语法检查 ✅，运行验证 ✅（npm start 无报错，MCP 实测可用）
+
+## M34 — UI Polish + React 迁移启动
+- React + Vite + TypeScript 替换 vanilla HTML/CSS/JS renderer
+- 5 主题系统（dark/codex/claude/light + variations）
+- 磨砂玻璃 headers、bootstrap 仪式动画
+- per-session streaming 架构、thinking 持久化
+- Tray unread badge
+- Gate: 语法 ✅，Vite build ✅
+
+## M36–M37 — React 分支对齐 main
+- 14 项核心 Feature（F220-F233）+ 21 项补齐缺口（F234-F254）
+- React 组件完整实现：ChatView、Sidebar、InputBar、SettingsPanel、MembersPanel、NewChatSelector 等 13 个组件
+- 头像系统、streaming 完整对齐、delegate 多 agent 接力、session 容器隔离
+- AI-driven session 标题（session_title_set 工具）
+- 文件路径渲染为 inline chips、rich media rendering、web_download 工具
+- sidebar rename zero layout shift
+- Gate: Vite dev + production build 通过 ✅
+
+## M38 — Coding Agent 作为对话参与者
+- F255-F259: Coding Agent 从工具面板升级为对话参与者
+- Claude Code SDK 集成，real-time streaming
+- Unified workspace architecture — coding agents 共用 participant 模型
+- 消息路由支持 coding agent（1v1 和群聊 @mention）
+- CC session persistence — `sessionCCSessions` Map + `.paw/cc-sessions.json` 持久化到磁盘，app restart 后 CC 记得上文
+- `workspace-changed` 全局事件 — eventBus 广播 + EVENT_CHANNELS 桥接 + App.tsx 全局监听，workspace 增删改后 sidebar/header/members 自动刷新
+- 清理旧 cc-status/cc-output 面板代码
+- sidebar rename zero layout shift（overlay input 方案）
+- 群聊历史 sender label 修复（React 路径）
+- frosted glass headers + coding agent sidebar 状态显示
+- Gate: 语法 ✅，功能验证进行中
+
+## M39 — main.js 大重构
+- main.js 从 2388 行缩减到 1654 行（-31%）
+- 抽取 4 个 core/ 模块（共 824 行）：
+  - `core/stream-anthropic.js` (245行) — Anthropic SSE 流式引擎
+  - `core/stream-openai.js` (192行) — OpenAI SSE 流式引擎
+  - `core/delegate.js` (178行) — 群聊 delegate_to 处理器
+  - `core/coding-agent-router.js` (209行) — coding agent 路由 + CC session 持久化
+- 共享上下文模式：`ctx` 对象传递跨模块依赖（mutable state + helper functions）
+- core/ 模块数从 33 增至 37
+- Gate: `node --check` 全部通过 ✅

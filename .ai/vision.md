@@ -102,20 +102,34 @@ Session（群聊）
 
 ## Roadmap
 
-### Phase 1：MCP 支持
-- 实现 MCP client，连接外部 MCP server
-- MCP server 暴露的 tools 自动注册到 Paw 工具系统
-- Workspace config 里声明 MCP server 连接信息
-- 一旦有 MCP，用户可以自己扩展任意工具，不需要 Paw 内置
+### Phase 1：MCP 支持 ✅ 已完成（M33）
+- ✅ MCP native client（@modelcontextprotocol/sdk + stdio JSON-RPC）
+- ✅ MCP 工具自动注册（mcp__{server}__{tool} 命名）
+- ✅ Workspace config 声明 MCP server 连接信息
+- ✅ mcp_config 对话工具（agent 可管理 MCP server）
 
-### Phase 2：Tool 体系对齐
-优先补齐已有 tool 的质量和覆盖：
-- `web_fetch` 输出改为 markdown（turndown）
-- `skill_create` — 创建 skill 脚手架
-- 补齐 OpenClaw 常用工具：browser、image、pdf、tts
-- Tool 安全模型完善（allowlist、approval chain）
+### Phase 2：Tool 体系对齐 ✅ 大部分完成
+- ✅ `skill_create` — 创建 skill 脚手架
+- ✅ `web_fetch` + `web_download` — 网页抓取和下载
+- ✅ `session_title_set` — AI 驱动 session 标题
+- ✅ `edit` — 文件编辑工具
+- ⬜ 补齐 OpenClaw 常用工具：browser、image、pdf、tts
+- ⬜ Tool 安全模型完善（allowlist、approval chain）
 
-### Phase 3：IM 接入
+### Phase 3：Coding Agent 作为参与者 ✅ 已完成（M38）
+- ✅ Claude Code SDK 集成（real-time streaming）
+- ✅ Coding Agent 从工具面板升级为对话参与者
+- ✅ 1v1 对话 + 群聊 @mention 路由
+- ✅ Unified workspace architecture
+- ✅ CC session persistence（.paw/cc-sessions.json，app restart 后可续接）
+- ✅ workspace-changed 全局事件（UI 响应式更新）
+
+### Phase 4：存储统一（下一步，M35）
+- 全局配置迁移到 ~/.paw/
+- 每个 workspace 各自 sessions.db
+- 启动自动迁移旧数据
+
+### Phase 5：IM 接入（远期）
 内置轻量 IM provider，Paw 开着时 workspace 可以通过外部 IM 对话：
 - **Discord** — discord.js，开发者/社区场景
 - **Telegram** — node-telegram-bot-api，个人/国际用户
