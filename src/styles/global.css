@@ -365,10 +365,6 @@ button:hover { background: var(--border-muted); }
 /* (global watson status removed — now per-session) */
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
-/* File links */
-.file-link { color: var(--accent-link); text-decoration: underline; cursor: pointer; }
-.file-link:hover { color: var(--accent-link-hover); }
-
 .input-bar {
   display: flex; gap: 3px; padding: 10px 10px; align-items: center;
 }
