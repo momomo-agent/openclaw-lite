@@ -86,6 +86,7 @@ contextBridge.exposeInMainWorld('api', {
   // ── Status events (watson-status has two consumers: App + ChatView) ──
   onStatus: (cb) => onIpc('agent-status', cb),
   onWatsonStatus: (cb) => onIpc('watson-status', cb),
+  onSessionTitleUpdated: (cb) => onIpc('session-title-updated', cb),
   onTrayNewChat: (cb) => onIpc('tray-new-chat', cb),
   // File operations
   openFile: (p) => ipcRenderer.invoke('open-file', p),

@@ -198,6 +198,13 @@ function renameSession(clawDir, id, title) {
   d.prepare('UPDATE sessions SET title = ? WHERE id = ?').run(title, id)
 }
 
+function getSessionTitle(clawDir, id) {
+  const d = getDb(clawDir)
+  if (!d) return null
+  const row = d.prepare('SELECT title FROM sessions WHERE id = ?').get(id)
+  return row?.title || null
+}
+
 function createSession(clawDir, title, { participants, mode } = {}) {
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
   const now = Date.now()
@@ -380,4 +387,4 @@ function removeSessionParticipant(clawDir, sessionId, workspaceId) {
   return true
 }
 
-module.exports = { getDb, listSessions, loadSession, saveSession, appendMessage, deleteMessage, deleteSession, renameSession, createSession, closeDb, updateSessionStatus, getSessionStatus, getSessionMode, setSessionMode, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, addSessionParticipant, removeSessionParticipant, getSessionParticipants, findSessionWorkspace, listAllSessions, updateMessageMeta, findLastMessage }
+module.exports = { getDb, listSessions, loadSession, saveSession, appendMessage, deleteMessage, deleteSession, renameSession, getSessionTitle, createSession, closeDb, updateSessionStatus, getSessionStatus, getSessionMode, setSessionMode, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, addSessionParticipant, removeSessionParticipant, getSessionParticipants, findSessionWorkspace, listAllSessions, updateMessageMeta, findLastMessage }

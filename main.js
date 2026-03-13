@@ -1689,7 +1689,7 @@ async function streamAnthropic(messages, systemPrompt, config, requestId, tools,
     for (const tc of toolCalls) assistantContent.push({ type: 'tool_use', id: tc.id, name: tc.name, input: JSON.parse(tc.json || '{}') })
     msgs.push({ role: 'assistant', content: assistantContent })
 
-    const SILENT_TOOLS = ['ui_status_set', 'notify', 'delegate_to', 'stay_silent']
+    const SILENT_TOOLS = ['ui_status_set', 'notify', 'delegate_to', 'stay_silent', 'session_title_set']
     const toolResults = []
     let loopBlocked = false
     for (const tc of toolCalls) {
@@ -1869,7 +1869,7 @@ async function streamOpenAI(messages, systemPrompt, config, requestId, tools, se
     msgs.push(assistantMsg)
 
     // Execute tools and add results
-    const SILENT_TOOLS_OAI = ['ui_status_set', 'notify', 'delegate_to', 'stay_silent']
+    const SILENT_TOOLS_OAI = ['ui_status_set', 'notify', 'delegate_to', 'stay_silent', 'session_title_set']
     for (const tc of tcList) {
       let input = {}
       try { input = JSON.parse(tc.args || '{}') } catch {}

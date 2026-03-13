@@ -15,6 +15,7 @@ require('./agents');
 require('./claude-code');
 require('./cron');
 require('./mcp-config');
+require('./session-title');
 
 const { getAllTools, getTool, getAnthropicTools, getToolsPrompt } = require('./registry');
 

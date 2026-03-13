@@ -72,6 +72,7 @@ const TOOL_ACTIONS: Record<string, ToolAction> = {
   // Hidden tools
   stay_silent:   { verb: '(silent)', icon: '🤫', hidden: true },
   ui_status_set: { verb: 'Updated status', icon: '📊', hidden: true },
+  session_title_set: { verb: 'Updated title', icon: '📝', hidden: true },
 }
 
 export function humanizeToolStep(name: string, input?: any): { text: string; icon: string; hidden?: boolean } {

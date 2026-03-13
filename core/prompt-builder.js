@@ -52,6 +52,7 @@ async function buildSystemPrompt(workspacePath) {
 **Built-in tools:**
 - **notify**: Send a desktop notification
 - **ui_status_set**: Update the sidebar status line (4-20 Chinese chars). **Always call this** at start, before/after tool use, and when done. Write like first-person inner monologue. Examples: '让我想想…', '找到线索了', '写完了，挺满意的'. This is the primary way the user sees your personality.
+- **session_title_set**: Update the conversation title. Call this when you notice the topic has drifted significantly from the current title. Title should be ≤15 Chinese chars, concise and descriptive.
 - **memory_search**: Search MEMORY.md + memory/*.md by keywords. Use BEFORE answering questions about prior work, decisions, dates, people, preferences, or todos.
 - **memory_get**: Read a snippet from MEMORY.md or memory/*.md with optional line range. Use AFTER memory_search to pull only the needed lines.
 - **task**: Manage shared tasks (action: create/update/list)
@@ -180,6 +181,16 @@ If something needs attention, do NOT include "HEARTBEAT_OK"; reply with the aler
   const pkg = (() => { try { return require('../package.json'); } catch { return { version: 'unknown' }; } })();
   parts.push(`## Runtime
 host=${os.hostname()} | os=${os.type()} ${os.release()} (${os.arch()}) | node=${process.version} | paw=${pkg.version}`);
+
+  // ── Current Session Title ──
+  if (state.currentSessionId && wsDir) {
+    try {
+      const title = sessionStore.getSessionTitle(wsDir, state.currentSessionId) || '';
+      parts.push(`## Current Session
+title: ${title || '(untitled)'}
+If the conversation topic drifts significantly from this title, call session_title_set to update it.${!title ? ' This is a new conversation — set a title after the first exchange.' : ''}`);
+    } catch {}
+  }
 
   // ── Shared Task List ──
   if (state.currentSessionId && state.clawDir) {

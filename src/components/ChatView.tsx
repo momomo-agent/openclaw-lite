@@ -565,17 +565,7 @@ export default function ChatView() {
         }
         routeSet(sid, dbMessages)
 
-        // Auto-generate title from first user message (only if still empty / never renamed)
-        if (!session.title) {
-          const firstUser = dbMessages.find((m: any) => m.role === 'user')
-          if (firstUser) {
-            let title = (firstUser.content || '').split(/[。！？\n.!?]/)[0].trim()
-            if (title.length > 30) title = title.slice(0, 30) + '...'
-            if (!title) title = (firstUser.content || '').slice(0, 30).trim()
-            if (title) await apiRef.current.renameSession(sid, title)
-          }
-        }
-        // Refresh sessions to pick up title changes
+        // Refresh sessions to pick up any title/status changes
         const updated = await apiRef.current.listSessions()
         storeRef.current.setSessions(updated)
       } catch (err) {
@@ -599,6 +589,12 @@ export default function ChatView() {
       storeRef.current.setActivity(sid, 'idle')
     }
 
+    // --- Session title updated by AI tool ---
+    const handleTitleUpdated = async () => {
+      const updated = await apiRef.current.listSessions()
+      storeRef.current.setSessions(updated)
+    }
+
     // Register all listeners
     const cleanups = [
       api.onTextStart?.(handleTextStart),
@@ -607,6 +603,7 @@ export default function ChatView() {
       api.onRoundInfo?.(handleRoundInfo),
       api.onStatus?.(handleStatus),
       api.onWatsonStatus?.(handleWatsonStatus),
+      api.onSessionTitleUpdated?.(handleTitleUpdated),
       api.onDelegateStart?.(handleDelegateStart),
       api.onDelegateToken?.(handleDelegateToken),
       api.onDelegateEnd?.(handleDelegateEnd),
