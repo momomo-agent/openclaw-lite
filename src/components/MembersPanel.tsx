@@ -128,11 +128,6 @@ export default function MembersPanel({ visible, sessionId, onClose, onChanged, o
                       </div>
                     )}
                   </div>
-                  {ws.type === 'coding-agent' && ws.engine && (
-                    <span className="members-tag" style={{ background: ENGINE_COLORS[ws.engine] || 'var(--text-faint)', color: '#000', fontSize: 10, padding: '1px 6px', borderRadius: 4 }}>
-                      {ws.engine}
-                    </span>
-                  )}
                   {i === 0 && <span className="members-tag">群主</span>}
                   {i > 0 && (
                     <button className="icon-btn members-remove" onClick={() => removeParticipant(ws.id)} title="移除">

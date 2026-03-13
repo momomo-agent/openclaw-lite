@@ -65,9 +65,14 @@ interface SessionItemProps {
   onClick: () => void
   onContextMenu: (e: React.MouseEvent) => void
   onDoubleClick: () => void
+  renaming?: boolean
+  renameText?: string
+  onRenameChange?: (text: string) => void
+  onRenameSubmit?: () => void
+  onRenameCancel?: () => void
 }
 
-function SessionItem({ session, workspaces, isActive, onClick, onContextMenu, onDoubleClick }: SessionItemProps) {
+function SessionItem({ session, workspaces, isActive, onClick, onContextMenu, onDoubleClick, renaming, renameText, onRenameChange, onRenameSubmit, onRenameCancel }: SessionItemProps) {
   const { activityState, aiStatus } = useAppState()
   const activity = activityState.get(session.id) || 'idle'
   const statusText = aiStatus.get(session.id) || ''
@@ -129,7 +134,19 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu, on
       <div className={`session-avatar${isGroup ? ' group' : ''}`}>{avatarEl}</div>
       <div className="session-body">
         <div className="session-row-top">
-          <span className="session-title">{session.title || (isGroup ? '群聊' : (ws?.identity?.name || ''))}</span>
+          {renaming ? (
+            <input
+              autoFocus
+              value={renameText}
+              onChange={(e) => onRenameChange?.(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') onRenameSubmit?.(); if (e.key === 'Escape') onRenameCancel?.() }}
+              onBlur={onRenameSubmit}
+              className="session-title"
+              style={{ background: 'transparent', border: 'none', outline: 'none', padding: 0, margin: 0, width: '100%', fontFamily: 'inherit', lineHeight: 'inherit', height: 'auto' }}
+            />
+          ) : (
+            <span className="session-title">{session.title || (isGroup ? '群聊' : (ws?.identity?.name || ''))}</span>
+          )}
           <span className="session-time">{formatTime(session.updatedAt)}</span>
         </div>
         <div className="session-row-bottom">
@@ -307,18 +324,6 @@ export default function Sidebar() {
       </div>
       <div className="session-list">
         {sessions.map(s => (
-          renaming === s.id ? (
-            <div key={s.id} className="session-item active" style={{ padding: '8px 12px' }}>
-              <input
-                autoFocus
-                value={renameText}
-                onChange={(e) => setRenameText(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') submitRename(); if (e.key === 'Escape') setRenaming(null) }}
-                onBlur={submitRename}
-                style={{ width: '100%', background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: 13, outline: 'none' }}
-              />
-            </div>
-          ) : (
             <SessionItem
               key={s.id}
               session={s}
@@ -327,8 +332,12 @@ export default function Sidebar() {
               onClick={() => setCurrentSessionId(s.id)}
               onDoubleClick={() => handleRename(s.id)}
               onContextMenu={(e) => handleContextMenu(e, s.id)}
+              renaming={renaming === s.id}
+              renameText={renameText}
+              onRenameChange={setRenameText}
+              onRenameSubmit={submitRename}
+              onRenameCancel={() => setRenaming(null)}
             />
-          )
         ))}
       </div>
       {/* F250: Resize handle */}
