@@ -1266,8 +1266,12 @@ ${roster}
     const savedSession = sessionStore.loadSession(wsPath, sessionId)
     if (savedSession?.messages?.length) {
       for (const m of savedSession.messages) {
-        if (m.role === 'user' || m.role === 'assistant') {
-          messages.push({ role: m.role, content: m.content })
+        if (m.role === 'user') {
+          messages.push({ role: 'user', content: m.content })
+        } else if (m.role === 'assistant') {
+          // Group chat: annotate sender so orchestrator knows who said what
+          const senderLabel = _isGroupChat && m.sender && m.sender !== 'Assistant' ? `[${m.sender}]: ` : ''
+          messages.push({ role: 'assistant', content: senderLabel + (m.content || '') })
         }
       }
     }
