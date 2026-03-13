@@ -478,6 +478,9 @@ app.whenReady().then(() => {
   // Initialize workspace registry
   workspaceRegistry.initRegistry()
 
+  // Load persisted coding agent session IDs (for Claude Code SDK resume)
+  _loadCCSessions()
+
   // Derive clawDir from CLI arg or first registered workspace
   const clawDirArg = process.argv.find(a => a.startsWith('--claw-dir='))
   if (clawDirArg) {
@@ -1435,7 +1438,46 @@ function getSessionWorkspacePath(workspaceId, sessionId) {
 }
 
 // ── Coding Agent routing helper ──
-const sessionCCSessions = new Map() // pawSessionId -> acpx session name
+// Persistent map: ccSessionKey → Claude Code SDK session ID
+// Survives app restart so coding agents don't lose conversation history
+const sessionCCSessions = new Map()
+const CC_SESSIONS_FILE = '.paw/cc-sessions.json'
+
+function _loadCCSessions() {
+  const workspaces = workspaceRegistry.listWorkspaces()
+  for (const ws of workspaces) {
+    if (ws.type !== 'coding-agent' && ws.path) {
+      const filePath = path.join(ws.path, CC_SESSIONS_FILE)
+      try {
+        if (fs.existsSync(filePath)) {
+          const data = JSON.parse(fs.readFileSync(filePath, 'utf8'))
+          for (const [k, v] of Object.entries(data)) {
+            sessionCCSessions.set(k, v)
+          }
+        }
+      } catch {}
+    }
+  }
+}
+
+function _saveCCSession(ccSessionKey, ccSessionId) {
+  sessionCCSessions.set(ccSessionKey, ccSessionId)
+  // Persist to the workspace that owns this session
+  // ccSessionKey format: pawSessionId-engine-workdir
+  // We save to the first local workspace's .paw/ dir
+  const workspaces = workspaceRegistry.listWorkspaces()
+  const localWs = workspaces.find(w => w.type !== 'coding-agent' && w.path)
+  if (localWs) {
+    const filePath = path.join(localWs.path, CC_SESSIONS_FILE)
+    try {
+      const obj = {}
+      for (const [k, v] of sessionCCSessions.entries()) obj[k] = v
+      fs.writeFileSync(filePath, JSON.stringify(obj, null, 2))
+    } catch (err) {
+      console.warn('[cc-sessions] save error:', err.message)
+    }
+  }
+}
 
 async function routeToCodingAgent(workspace, message, { sessionId, requestId, senderName, senderAvatar }) {
   const { engine, path: workdir, identity } = workspace
@@ -1531,9 +1573,9 @@ async function routeToCodingAgentSDK(workspace, message, { sessionId, requestId,
       }
     },
     onDone: (fullText, metadata) => {
-      // Save session ID for resumption
+      // Save session ID for resumption (persisted to disk)
       if (session.sessionId) {
-        sessionCCSessions.set(ccSessionKey, session.sessionId)
+        _saveCCSession(ccSessionKey, session.sessionId)
       }
     },
     onError: (err) => {

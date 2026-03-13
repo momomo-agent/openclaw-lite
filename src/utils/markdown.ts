@@ -87,9 +87,15 @@ function getRenderer() {
   // Image renderer: detect audio/video by extension, otherwise render as <img>
   const originalImage = renderer.image.bind(renderer)
   renderer.image = function (token: any) {
-    const href = resolveLocalHref(token.href || '')
+    const rawHref = token.href || ''
+    const href = resolveLocalHref(rawHref)
     const title = token.title || ''
     const text = token.text || ''
+
+    // Skip broken images: no href, or href that's just a description with no actual path
+    if (!rawHref || (!rawHref.includes('.') && !rawHref.includes('/') && !rawHref.startsWith('data:'))) {
+      return text ? `<em>[${text}]</em>` : ''
+    }
 
     if (AUDIO_EXT.test(href)) return renderAudio(href, title)
     if (VIDEO_EXT.test(href)) return renderVideo(href, title, text)
