@@ -766,16 +766,7 @@ button:hover { background: var(--border-muted); }
   padding: 4px 0 4px 20px;
   border-left: 1.5px solid var(--border-default); margin-left: 4px; margin-top: 2px;
 }
-/* Pulse dot for running state — shown as ::before on the header */
-.tool-group-inline.tool-streaming .tool-group-header::before {
-  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
-  background: var(--accent-primary); margin-right: 2px; flex-shrink: 0;
-  animation: tool-pulse-anim 1.2s ease-in-out infinite;
-}
-@keyframes tool-pulse-anim {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
-}
+/* Pulse dot removed — streaming state no longer shows breathing dot on tool group header */
 .tool-group-header:not(.tool-running) .tool-pulse { display: none; }
 .tool-step-item {
   padding: 2px 0;
