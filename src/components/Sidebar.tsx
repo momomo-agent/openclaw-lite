@@ -281,8 +281,6 @@ export default function Sidebar() {
 
   const handleDelete = async (id: string) => {
     setCtxMenu(prev => ({ ...prev, visible: false }))
-    const session = sessions.find(s => s.id === id)
-    if (!confirm(`确定要删除 "${session?.title || id}" 吗？`)) return
     await api.deleteSession(id)
     if (currentSessionId === id) setCurrentSessionId(null)
     const updated = await api.listSessions()
