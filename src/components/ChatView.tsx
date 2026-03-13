@@ -134,6 +134,8 @@ export default function ChatView() {
     if (sid === currentSidRef.current) {
       setStreamingStatus(status)
     }
+    // Update sidebar status text (visible in session list)
+    storeRef.current.setStatus(sid, status)
   }
 
   // === Session switch: load messages and restore streaming status ===
