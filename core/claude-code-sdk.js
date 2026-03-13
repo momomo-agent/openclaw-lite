@@ -1,121 +1,105 @@
 // core/claude-code-sdk.js — Claude Agent SDK wrapper
-// Elegant streaming interface for Claude Code integration
+// Uses V1 query() API for real streaming support
 
-const { unstable_v2_createSession, unstable_v2_resumeSession } = require('@anthropic-ai/claude-agent-sdk')
+const { query } = require('@anthropic-ai/claude-agent-sdk')
 
 /**
- * Claude Code session with streaming support.
- * Wraps the SDK's session API and maps events to simple callbacks.
+ * Claude Code session with real-time streaming.
+ * Uses V1 query() API which supports includePartialMessages.
+ * (V2 session API hardcodes includePartialMessages=false internally)
  */
 class ClaudeCodeSession {
-  constructor({ cwd, sessionId, onToken, onDone, onError, model = 'claude-opus-4-6' }) {
+  constructor({ cwd, sessionId, apiKey, baseUrl, onToken, onDone, onError, model = 'claude-opus-4-6' }) {
     this.cwd = cwd
-    this.existingSessionId = sessionId
+    this.apiKey = apiKey
+    this.baseUrl = baseUrl
     this.onToken = onToken
     this.onDone = onDone
     this.onError = onError
     this.model = model
-    this.session = null
     this.sessionId = sessionId || null
   }
 
   /**
    * Send a message and stream the response.
-   * Calls onToken for each text delta, onDone when complete.
+   * Returns the final text output.
    */
   async send(message) {
     try {
-      // Create or resume session
-      if (!this.session) {
-        const opts = this._getOptions()
-        this.session = this.existingSessionId
-          ? unstable_v2_resumeSession(this.existingSessionId, opts)
-          : unstable_v2_createSession(opts)
+      const env = {
+        ...process.env,
+        CLAUDECODE: undefined,  // Bypass nested session detection
       }
+      if (this.apiKey) env.ANTHROPIC_AUTH_TOKEN = this.apiKey
+      if (this.baseUrl) env.ANTHROPIC_BASE_URL = this.baseUrl
 
-      // Send message
-      await this.session.send(message)
+      const opts = {
+        model: this.model,
+        cwd: this.cwd,
+        env,
+        includePartialMessages: true,
+        allowedTools: ['*'],
+        permissionMode: 'bypassPermissions',
+      }
+      // Resume existing session if we have a sessionId
+      if (this.sessionId) opts.resume = this.sessionId
 
-      // Stream response
+      console.log('[ClaudeCodeSession] query() with:', { model: opts.model, cwd: opts.cwd, resume: opts.resume })
+
       let output = ''
-      for await (const msg of this.session.stream()) {
-        if (msg.type === 'stream_event') {
-          // Real-time text delta
+      let resultText = ''
+      let assistantText = ''
+
+      for await (const msg of query({ prompt: message, options: opts })) {
+        if (msg.type === 'system' && msg.subtype === 'init') {
+          this.sessionId = msg.session_id
+          console.log('[ClaudeCodeSession] Session:', this.sessionId)
+        } else if (msg.type === 'stream_event') {
+          // Real-time text delta from includePartialMessages
           const delta = this._extractTextDelta(msg.event)
           if (delta) {
             output += delta
             if (this.onToken) this.onToken(delta)
           }
         } else if (msg.type === 'assistant') {
-          // Complete assistant message
-          const fullText = this._extractFullText(msg.message)
-          if (this.onDone) this.onDone(fullText || output, { message: msg.message })
-          break
+          // Complete assistant message (non-streaming fallback)
+          assistantText = this._extractFullText(msg.message)
         } else if (msg.type === 'result') {
-          // Final result with metadata
-          if (this.onDone) {
-            this.onDone(msg.result || output, {
-              usage: msg.usage,
-              cost: msg.total_cost_usd,
-              duration: msg.duration_ms,
-              turns: msg.num_turns
-            })
-          }
-          break
+          resultText = msg.result || ''
         }
       }
 
-      // Capture session ID for resumption
-      if (!this.sessionId && this.session.sessionId) {
-        this.sessionId = this.session.sessionId
-      }
+      const finalText = resultText || assistantText || output
+      if (this.onDone) this.onDone(finalText, {})
+      return finalText
     } catch (err) {
+      console.error('[ClaudeCodeSession] Error:', err)
       if (this.onError) this.onError(err)
       throw err
     }
   }
 
-  _getOptions() {
-    return {
-      model: this.model,
-      env: {
-        ...process.env,
-        CLAUDE_CWD: this.cwd,
-      },
-      // Auto-allow all tools (bypass permissions for now)
-      allowedTools: ['*'],
-      // Permission callback — always allow
-      canUseTool: async () => ({ allowed: true }),
-    }
-  }
-
   _extractTextDelta(event) {
-    // Extract text from streaming event
-    if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+    if (event?.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
       return event.delta.text
     }
     return null
   }
 
   _extractFullText(message) {
-    // Extract full text from complete message
-    if (!message.content) return ''
-    return message.content
-      .filter(block => block.type === 'text')
-      .map(block => block.text)
+    if (!message?.content) return ''
+    const text = message.content
+      .filter(b => b.type === 'text')
+      .map(b => b.text)
       .join('')
+    return text || message.content
+      .filter(b => b.type === 'thinking')
+      .map(b => b.thinking)
+      .join('\n\n')
   }
 
   close() {
-    if (this.session) {
-      try {
-        this.session.close()
-      } catch {}
-    }
-  }
-
-  [Symbol.asyncDispose]() {
-    this.close()
+    // V1 query() is an async generator — no explicit close needed
   }
 }
 

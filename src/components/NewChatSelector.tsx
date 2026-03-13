@@ -381,7 +381,11 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
                     onSelect({ participants: [participantId] })
                   }}>
                     <span className="ncs-avatar">
-                      <span className="ncs-engine-dot" style={{ background: ENGINE_COLORS[agent.engine || ''] || 'var(--text-faint)' }} />
+                      {(agent as any).avatar ? (
+                        <img src={(agent as any).avatar} alt={agent.name} style={{ width: 28, height: 28, borderRadius: '50%' }} />
+                      ) : (
+                        <span className="ncs-engine-dot" style={{ background: ENGINE_COLORS[agent.engine || ''] || 'var(--text-faint)' }} />
+                      )}
                     </span>
                     <div className="ncs-info">
                       <div className="ncs-name">{agent.name}</div>

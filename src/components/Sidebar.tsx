@@ -75,6 +75,23 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu, on
   const wsId = session.participants?.[0] || session.workspaceId
   const ws = wsId ? workspaces.find(w => w.id === wsId) : workspaces[0]
 
+  // Parse coding-agent participant (ca:engine:/path)
+  let codingAgentName = ''
+  let codingAgentAvatar = ''
+  if (wsId?.startsWith('ca:')) {
+    const parts = wsId.split(':')
+    if (parts.length >= 2) {
+      const engine = parts[1]
+      // Map engine to display name and avatar
+      if (engine === 'claude') {
+        codingAgentName = 'Claude'
+        codingAgentAvatar = '../avatars/claude.png'
+      } else {
+        codingAgentName = engine
+      }
+    }
+  }
+
   // Group sessions: composite avatar from participants
   let avatarEl: React.ReactNode
   if (isGroup) {
@@ -82,6 +99,16 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu, on
       .map(id => workspaces.find(w => w.id === id))
       .filter(Boolean) as Workspace[]
     avatarEl = <GroupAvatar members={members} />
+  } else if (codingAgentAvatar) {
+    // Coding agent avatar
+    avatarEl = (
+      <img
+        src={codingAgentAvatar}
+        alt={codingAgentName}
+        style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover' }}
+        onError={(e) => { e.currentTarget.src = '../avatars/1.png' }}
+      />
+    )
   } else {
     avatarEl = (
       <Avatar
@@ -128,7 +155,7 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu, on
       <div className={`session-avatar${isGroup ? ' group' : ''}`}>{avatarEl}</div>
       <div className="session-body">
         <div className="session-row-top">
-          <span className="session-title">{session.title || (isGroup ? '群聊' : (ws?.identity?.name || ''))}</span>
+          <span className="session-title">{session.title || (isGroup ? '群聊' : (codingAgentName || ws?.identity?.name || ''))}</span>
           <span className="session-time">{formatTime(session.updatedAt)}</span>
         </div>
         <div className="session-row-bottom">

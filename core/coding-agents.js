@@ -5,7 +5,8 @@ const { spawn, execSync } = require('child_process')
 const agents = {
   claude: {
     id: 'claude',
-    name: 'Claude Code',
+    name: 'Claude',
+    avatar: '../avatars/claude.png',
     bin: 'claude',
     _path: null,
     detect() {
@@ -171,7 +172,11 @@ function init() {
 }
 
 function listAvailable() {
-  return _available.map(id => ({ id, name: agents[id].name }))
+  return _available.map(id => ({
+    id,
+    name: agents[id].name,
+    avatar: agents[id].avatar
+  }))
 }
 
 function isAvailable(agentId) {

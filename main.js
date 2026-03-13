@@ -1076,6 +1076,13 @@ ipcMain.handle('chat', async (_, { prompt, message, history, rawMessages, agentI
     if (parsed.length === 1 && parsed[0].type === 'coding-agent') {
       const ca = parsed[0]
       console.log(`[chat] 1v1 coding-agent session: ${ca.engine} at ${ca.workdir}`)
+
+      // Get coding agent identity (name + avatar)
+      const agentList = codingAgents.listAvailable()
+      const agentInfo = agentList.find(a => a.id === ca.engine)
+      const agentName = agentInfo?.name || ca.engine
+      const agentAvatar = agentInfo?.avatar
+
       const result = await routeToCodingAgent(ca.engine, ca.workdir, prompt, {
         sessionId,
         requestId,
@@ -1086,9 +1093,13 @@ ipcMain.handle('chat', async (_, { prompt, message, history, rawMessages, agentI
       sessionStore.appendMessage(caDb, sessionId, {
         role: 'user', content: prompt, timestamp: Date.now()
       })
-      // Save assistant response
+      // Save assistant response with coding agent identity
       sessionStore.appendMessage(caDb, sessionId, {
-        role: 'assistant', content: result, timestamp: Date.now()
+        role: 'assistant',
+        content: result,
+        timestamp: Date.now(),
+        sender: agentName,
+        avatar: agentAvatar
       })
       // Auto-title: if session has no title, set from user's first message
       try {
@@ -1441,21 +1452,37 @@ async function routeToCodingAgent(engine, workdir, message, { sessionId, request
 // ── Claude Code SDK integration (real-time streaming) ──
 async function routeToCodingAgentSDK(engine, workdir, message, { sessionId, requestId, senderName, senderAvatar }) {
   const { ClaudeCodeSession } = require('./core/claude-code-sdk')
+  const { getApiKey } = require('./core/api-keys')
+
+  // Get coding agent identity (name + avatar)
+  const agentList = codingAgents.listAvailable()
+  const agentInfo = agentList.find(a => a.id === engine)
+  const agentName = agentInfo?.name || engine
+  const agentAvatar = agentInfo?.avatar
 
   const parentRequestId = requestId || _activeRequestId
   if (parentRequestId && senderName) {
     eventBus.dispatch('chat-delegate-start', { requestId: parentRequestId, sender: senderName, workspaceId: `ca:${engine}:${workdir}`, avatar: senderAvatar, sessionId })
   } else if (parentRequestId) {
-    eventBus.dispatch('chat-text-start', { requestId: parentRequestId, sessionId })
+    eventBus.dispatch('chat-text-start', { requestId: parentRequestId, sessionId, agentName, avatar: agentAvatar })
   }
 
   let output = ''
   const ccSessionKey = `${sessionId}-${engine}-${workdir}`
   const existingSessionId = sessionCCSessions.get(ccSessionKey)
 
+  // Get API key, base URL, and model from config
+  const config = loadConfig()
+  const apiKey = getApiKey(config)
+  const baseUrl = config.baseUrl  // Support custom base URL (e.g., subrouter.ai)
+  const model = config.model || 'claude-opus-4-6'  // Default to opus if not specified
+
   const session = new ClaudeCodeSession({
     cwd: workdir,
     sessionId: existingSessionId,
+    apiKey,
+    baseUrl,
+    model,
     onToken: (delta) => {
       output += delta
       if (parentRequestId && senderName) {
@@ -1466,7 +1493,7 @@ async function routeToCodingAgentSDK(engine, workdir, message, { sessionId, requ
     },
     onDone: (fullText, metadata) => {
       // Save session ID for resumption
-      if (!existingSessionId && session.sessionId) {
+      if (session.sessionId) {
         sessionCCSessions.set(ccSessionKey, session.sessionId)
       }
     },
@@ -1476,14 +1503,16 @@ async function routeToCodingAgentSDK(engine, workdir, message, { sessionId, requ
   })
 
   try {
-    await session.send(message)
+    const result = await session.send(message)
 
     if (parentRequestId && senderName) {
       eventBus.dispatch('chat-delegate-end', { requestId: parentRequestId, sender: senderName, sessionId })
     }
 
-    return output || 'Coding agent completed'
+    console.log('[routeToCodingAgentSDK] Result length:', result?.length || 0)
+    return result || 'Coding agent completed'
   } catch (err) {
+    console.error('[routeToCodingAgentSDK] Error:', err)
     if (parentRequestId && senderName) {
       eventBus.dispatch('chat-delegate-end', { requestId: parentRequestId, sender: senderName, sessionId })
     }
