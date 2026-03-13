@@ -96,6 +96,8 @@ contextBridge.exposeInMainWorld('api', {
   readFile: (p) => ipcRenderer.invoke('read-file', p),
   // Memory watch
   onMemoryChanged: (cb) => onIpc('memory-changed', cb),
+  // Workspace changes
+  onWorkspaceChanged: (cb) => onIpc('workspace-changed', cb),
   // Notify
   notify: (title, body) => ipcRenderer.invoke('notify', { title, body }),
   // Status persistence

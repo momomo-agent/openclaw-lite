@@ -122,10 +122,29 @@ function AppContent() {
       })
     })
 
+    const cleanupWs = api.onWorkspaceChanged?.(async () => {
+      const ws = await api.listWorkspaces()
+      setWorkspaces(ws)
+      // Update clawDir
+      if (ws.length > 0 && ws[0].path) {
+        setClawDir(ws[0].path)
+        setMarkdownClawDir(ws[0].path)
+      }
+      // Refresh sessions (titles/participants may be affected)
+      const sessions = await api.listSessions()
+      setSessions(sessions)
+      // If all workspaces deleted, go back to setup
+      if (ws.length === 0) {
+        setReady(false)
+        setNeedsSetup(true)
+      }
+    })
+
     return () => {
       if (typeof cleanupWatson === 'function') cleanupWatson()
       if (typeof cleanupMemory === 'function') cleanupMemory()
       if (typeof cleanupTray === 'function') cleanupTray()
+      if (typeof cleanupWs === 'function') cleanupWs()
     }
   }, [ready])
 

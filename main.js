@@ -454,7 +454,7 @@ const EVENT_CHANNELS = [
   'agent-status', 'watson-status',
   'session-agents-changed', 'session-expired', 'tasks-changed',
   'heartbeat-result', 'tray-new-chat', 'memory-changed',
-  'auto-rotate',
+  'auto-rotate', 'workspace-changed',
 ]
 
 function bridgeEventBus(win) {
@@ -711,6 +711,7 @@ ipcMain.handle('workspace-add-coding-agent', async (_, { engine, projectPath }) 
     projectPath = result.filePaths[0]
   }
   const ws = workspaceRegistry.addCodingAgentWorkspace(engine, projectPath)
+  eventBus.emit('workspace-changed')
   return { ok: true, workspace: ws }
 })
 
@@ -886,10 +887,16 @@ ipcMain.handle('workspace-add', async (_, wsPath) => {
     if (result.canceled || !result.filePaths[0]) return { ok: false, error: 'cancelled' }
     wsPath = result.filePaths[0]
   }
-  return workspaceRegistry.addWorkspace(wsPath)
+  const res = workspaceRegistry.addWorkspace(wsPath)
+  eventBus.emit('workspace-changed')
+  return res
 })
 
-ipcMain.handle('workspace-remove', (_, id) => workspaceRegistry.removeWorkspace(id))
+ipcMain.handle('workspace-remove', (_, id) => {
+  const res = workspaceRegistry.removeWorkspace(id)
+  eventBus.emit('workspace-changed')
+  return res
+})
 
 ipcMain.handle('workspace-create', async (_, { name, parentDir, avatar, description } = {}) => {
   if (!parentDir) {
@@ -897,26 +904,34 @@ ipcMain.handle('workspace-create', async (_, { name, parentDir, avatar, descript
     if (result.canceled || !result.filePaths[0]) return { ok: false, error: 'cancelled' }
     parentDir = result.filePaths[0]
   }
-  return workspaceRegistry.createWorkspace(parentDir, name, { avatar, description })
+  const res = workspaceRegistry.createWorkspace(parentDir, name, { avatar, description })
+  eventBus.emit('workspace-changed')
+  return res
 })
 
 ipcMain.handle('workspace-update-identity', (_, { id, name, avatar, description }) => {
-  return workspaceRegistry.updateWorkspaceIdentity(id, { name, avatar, description })
+  const res = workspaceRegistry.updateWorkspaceIdentity(id, { name, avatar, description })
+  eventBus.emit('workspace-changed')
+  return res
 })
 
 ipcMain.handle('workspace-set-avatar', async (_, { id, presetIndex, customPath }) => {
   const ws = workspaceRegistry.getWorkspace(id)
   if (!ws) return { ok: false, error: 'not_found' }
   try {
+    let res
     if (presetIndex !== undefined) {
-      return workspaceRegistry.updateWorkspaceIdentity(id, { avatar: `preset:${presetIndex}` })
+      res = workspaceRegistry.updateWorkspaceIdentity(id, { avatar: `preset:${presetIndex}` })
     } else if (customPath) {
       const dest = path.join(ws.path, '.paw', 'avatar.png')
       fs.mkdirSync(path.join(ws.path, '.paw'), { recursive: true })
       fs.copyFileSync(customPath, dest)
-      return workspaceRegistry.updateWorkspaceIdentity(id, { avatar: 'avatar.png' })
+      res = workspaceRegistry.updateWorkspaceIdentity(id, { avatar: 'avatar.png' })
+    } else {
+      return { ok: false, error: 'no_source' }
     }
-    return { ok: false, error: 'no_source' }
+    eventBus.emit('workspace-changed')
+    return res
   } catch (e) {
     return { ok: false, error: e.message }
   }
