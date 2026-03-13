@@ -36,6 +36,11 @@ export function Avatar({ raw, role, wsPath }: AvatarProps) {
     return <img src={presetSrc(raw, DEFAULT_ASSISTANT_AVATAR)} className="avatar-img" onError={(e) => { e.currentTarget.src = DEFAULT_ASSISTANT_AVATAR }} />
   }
 
+  // Relative path (e.g. ../avatars/claude.png) — use as-is, resolved relative to HTML
+  if (raw && raw.startsWith('../')) {
+    return <img src={raw} className="avatar-img" onError={(e) => { e.currentTarget.src = DEFAULT_ASSISTANT_AVATAR }} />
+  }
+
   if (raw && raw.includes('.') && wsPath) {
     return <img src={`file://${wsPath}/.paw/${raw}?v=${avatarVersion}`} className="avatar-img" onError={(e) => { e.currentTarget.src = DEFAULT_ASSISTANT_AVATAR }} />
   }

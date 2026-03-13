@@ -125,7 +125,7 @@ const { routeMessage: coreRouteMessage } = require('./core/router')
 const { streamAnthropicRaw: coreLlmAnthropicRaw, streamOpenAIRaw: coreLlmOpenAIRaw } = require('./core/llm-raw')
 const acpx = require('./core/acpx')
 const codingAgents = require('./core/coding-agents')
-const codingAgentRegistry = require('./core/coding-agent-registry')
+// coding-agent-registry.js removed — coding agents are now workspace records
 
 // Legacy globals - kept for backward compat, synced to state via syncState()
 let mainWindow
@@ -196,7 +196,8 @@ function listSessions(opts) {
 
 function loadSession(id) {
   const wsPath = getSessionWorkspace(id)
-  return wsPath ? sessionStore.loadSession(wsPath, id) : null
+  if (!wsPath) return null
+  return sessionStore.loadSession(wsPath, id)
 }
 
 function saveSession(session) {
@@ -206,17 +207,26 @@ function saveSession(session) {
 
 function createSession(title, opts) {
   // Resolve target workspace: explicit workspaceId > first participant > active clawDir > first registered
+  // IMPORTANT: coding-agent workspaces don't have their own DB, so use the first local workspace instead
   let targetWsPath = null
   const wsId = opts?.workspaceId || (opts?.participants && opts.participants[0])
   if (wsId) {
     const ws = workspaceRegistry.getWorkspace(wsId)
-    if (ws) targetWsPath = ws.path
+    if (ws && ws.type !== 'coding-agent') targetWsPath = ws.path
   }
-  if (!targetWsPath) targetWsPath = clawDir || workspaceRegistry.listWorkspaces()[0]?.path
+  if (!targetWsPath) targetWsPath = clawDir || workspaceRegistry.listWorkspaces().find(w => w.type !== 'coding-agent')?.path
   if (!targetWsPath) return null
   // Auto-populate participants from workspaceId if not explicitly provided
   if (opts?.workspaceId && (!opts.participants || opts.participants.length === 0)) {
     opts = { ...opts, participants: [opts.workspaceId] }
+  }
+  // Auto-title for coding-agent sessions: use agent name + project folder
+  if (!title && opts?.participants?.length) {
+    const firstWs = workspaceRegistry.getWorkspace(opts.participants[0])
+    if (firstWs?.type === 'coding-agent') {
+      const folder = require('path').basename(firstWs.path)
+      title = `${firstWs.identity?.name || firstWs.engine} · ${folder}`
+    }
   }
   return sessionStore.createSession(targetWsPath, title, opts)
 }
@@ -464,7 +474,6 @@ app.whenReady().then(() => {
   // Initialize acpx + coding agents
   acpx.init()
   codingAgents.init()
-  codingAgentRegistry.init()
 
   // Initialize workspace registry
   workspaceRegistry.initRegistry()
@@ -686,26 +695,38 @@ ipcMain.handle('list-coding-agents', () => {
   return codingAgents.listAvailable()
 })
 
-// ── IPC: Coding Agent Registry (F206) ──
+// ── IPC: Coding Agent as Workspace (unified architecture) ──
 
 ipcMain.handle('coding-agents-list', () => {
-  const available = codingAgents.listAvailable()
-  const registry = codingAgentRegistry.list()
-  return { available, registry }
+  // Return coding-agent workspaces instead of separate registry
+  const allWs = workspaceRegistry.listWorkspaces()
+  const codingWs = allWs.filter(w => w.type === 'coding-agent')
+  return codingWs
 })
 
+ipcMain.handle('workspace-add-coding-agent', async (_, { engine, projectPath }) => {
+  if (!projectPath) {
+    const result = await dialog.showOpenDialog({ properties: ['openDirectory'], title: 'Select Project Folder' })
+    if (result.canceled || !result.filePaths[0]) return { ok: false, error: 'cancelled' }
+    projectPath = result.filePaths[0]
+  }
+  const ws = workspaceRegistry.addCodingAgentWorkspace(engine, projectPath)
+  return { ok: true, workspace: ws }
+})
+
+// Legacy: coding-agent-add redirects to workspace-add-coding-agent
 ipcMain.handle('coding-agent-add', async (_, { engine, projectPath, name }) => {
   if (!projectPath) {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'], title: 'Select Project Folder' })
     if (result.canceled || !result.filePaths[0]) return { ok: false, error: 'cancelled' }
     projectPath = result.filePaths[0]
   }
-  const agent = codingAgentRegistry.add({ engine, projectPath, name })
-  return { ok: true, agent }
+  const ws = workspaceRegistry.addCodingAgentWorkspace(engine, projectPath)
+  return { ok: true, agent: ws }
 })
 
 ipcMain.handle('coding-agent-delete', (_, id) => {
-  return codingAgentRegistry.remove(id)
+  return workspaceRegistry.removeWorkspace(id)
 })
 
 // ── IPC: Sessions ──
@@ -806,12 +827,6 @@ ipcMain.handle('session-get-participants', (_, sessionId) => {
   if (!sessionId) return []
   const wsPath = getSessionWorkspace(sessionId)
   return wsPath ? sessionStore.getSessionParticipants(wsPath, sessionId) : []
-})
-
-ipcMain.handle('session-get-participants-parsed', (_, sessionId) => {
-  if (!sessionId) return []
-  const wsPath = getSessionWorkspace(sessionId)
-  return wsPath ? sessionStore.getSessionParticipantsParsed(wsPath, sessionId) : []
 })
 
 // ── IPC: Session Agents (M19: lightweight agents, gated) ──
@@ -1072,51 +1087,54 @@ ipcMain.handle('chat', async (_, { prompt, message, history, rawMessages, agentI
   // ── Check for 1v1 coding-agent session ──
   const caDb = resolveSessionDb(sessionId)
   if (sessionId && caDb) {
-    const parsed = sessionStore.getSessionParticipantsParsed(caDb, sessionId)
-    if (parsed.length === 1 && parsed[0].type === 'coding-agent') {
-      const ca = parsed[0]
-      console.log(`[chat] 1v1 coding-agent session: ${ca.engine} at ${ca.workdir}`)
+    const participants = sessionStore.getSessionParticipants(caDb, sessionId)
+    if (participants.length === 1) {
+      const ws = workspaceRegistry.getWorkspace(participants[0])
+      if (ws?.type === 'coding-agent') {
+        console.log(`[chat] 1v1 coding-agent session: ${ws.engine} at ${ws.path}`)
 
-      // Get coding agent identity (name + avatar)
-      const agentList = codingAgents.listAvailable()
-      const agentInfo = agentList.find(a => a.id === ca.engine)
-      const agentName = agentInfo?.name || ca.engine
-      const agentAvatar = agentInfo?.avatar
-
-      const result = await routeToCodingAgent(ca.engine, ca.workdir, prompt, {
-        sessionId,
-        requestId,
-        senderName: null,
-        senderAvatar: null
-      })
-      // Save user message
-      sessionStore.appendMessage(caDb, sessionId, {
-        role: 'user', content: prompt, timestamp: Date.now()
-      })
-      // Save assistant response with coding agent identity
-      sessionStore.appendMessage(caDb, sessionId, {
-        role: 'assistant',
-        content: result,
-        timestamp: Date.now(),
-        sender: agentName,
-        avatar: agentAvatar
-      })
-      // Auto-title: if session has no title, set from user's first message
-      try {
-        const title = sessionStore.getSessionTitle(caDb, sessionId)
-        if (!title) {
-          const autoTitle = prompt.replace(/\n+/g, ' ').trim()
-          const trimmed = autoTitle.length > 20 ? autoTitle.slice(0, 20) + '…' : autoTitle
-          if (trimmed) {
-            sessionStore.renameSession(caDb, sessionId, trimmed)
-            if (mainWindow?.webContents) {
-              mainWindow.webContents.send('session-title-updated', { sessionId, title: trimmed })
+        let result
+        try {
+          result = await routeToCodingAgent(ws, prompt, {
+            sessionId,
+            requestId,
+            senderName: null,
+            senderAvatar: null
+          })
+        } catch (err) {
+          console.error(`[chat] 1v1 CA routeToCodingAgent error:`, err)
+          result = `Error: ${err.message}`
+        }
+        // Save user message
+        sessionStore.appendMessage(caDb, sessionId, {
+          role: 'user', content: prompt, timestamp: Date.now()
+        })
+        // Save assistant response with workspace identity
+        sessionStore.appendMessage(caDb, sessionId, {
+          role: 'assistant',
+          content: result,
+          timestamp: Date.now(),
+          sender: ws.identity?.name || ws.engine,
+          avatar: ws.identity?.avatar,
+          senderWorkspaceId: ws.id
+        })
+        // Auto-title: if session has no title, set from user's first message
+        try {
+          const title = sessionStore.getSessionTitle(caDb, sessionId)
+          if (!title) {
+            const autoTitle = prompt.replace(/\n+/g, ' ').trim()
+            const trimmed = autoTitle.length > 20 ? autoTitle.slice(0, 20) + '…' : autoTitle
+            if (trimmed) {
+              sessionStore.renameSession(caDb, sessionId, trimmed)
+              if (mainWindow?.webContents) {
+                mainWindow.webContents.send('session-title-updated', { sessionId, title: trimmed })
+              }
             }
           }
-        }
-      } catch {}
-      eventBus.dispatch('chat-done', { requestId, sessionId })
-      return { answer: result }
+        } catch {}
+        eventBus.dispatch('chat-done', { requestId, sessionId })
+        return { answer: result }
+      }
     }
   }
 
@@ -1400,10 +1418,14 @@ function getSessionWorkspacePath(workspaceId, sessionId) {
 // ── Coding Agent routing helper ──
 const sessionCCSessions = new Map() // pawSessionId -> acpx session name
 
-async function routeToCodingAgent(engine, workdir, message, { sessionId, requestId, senderName, senderAvatar }) {
+async function routeToCodingAgent(workspace, message, { sessionId, requestId, senderName, senderAvatar }) {
+  const { engine, path: workdir, identity } = workspace
+  const agentName = identity?.name || engine
+  const agentAvatar = identity?.avatar
+
   // Claude engine → use SDK for real-time streaming
   if (engine === 'claude') {
-    return routeToCodingAgentSDK(engine, workdir, message, { sessionId, requestId, senderName, senderAvatar })
+    return routeToCodingAgentSDK(workspace, message, { sessionId, requestId, senderName, senderAvatar })
   }
 
   // Other engines (codex, gemini, kiro) → fallback to CLI
@@ -1413,7 +1435,7 @@ async function routeToCodingAgent(engine, workdir, message, { sessionId, request
 
   const parentRequestId = requestId || _activeRequestId
   if (parentRequestId && senderName) {
-    eventBus.dispatch('chat-delegate-start', { requestId: parentRequestId, sender: senderName, workspaceId: `ca:${engine}:${workdir}`, avatar: senderAvatar, sessionId })
+    eventBus.dispatch('chat-delegate-start', { requestId: parentRequestId, sender: senderName, workspaceId: workspace.id, avatar: senderAvatar, sessionId })
   } else if (parentRequestId) {
     eventBus.dispatch('chat-text-start', { requestId: parentRequestId, sessionId })
   }
@@ -1450,19 +1472,17 @@ async function routeToCodingAgent(engine, workdir, message, { sessionId, request
 }
 
 // ── Claude Code SDK integration (real-time streaming) ──
-async function routeToCodingAgentSDK(engine, workdir, message, { sessionId, requestId, senderName, senderAvatar }) {
+async function routeToCodingAgentSDK(workspace, message, { sessionId, requestId, senderName, senderAvatar }) {
   const { ClaudeCodeSession } = require('./core/claude-code-sdk')
   const { getApiKey } = require('./core/api-keys')
 
-  // Get coding agent identity (name + avatar)
-  const agentList = codingAgents.listAvailable()
-  const agentInfo = agentList.find(a => a.id === engine)
-  const agentName = agentInfo?.name || engine
-  const agentAvatar = agentInfo?.avatar
+  const { engine, path: workdir, identity } = workspace
+  const agentName = identity?.name || engine
+  const agentAvatar = identity?.avatar
 
   const parentRequestId = requestId || _activeRequestId
   if (parentRequestId && senderName) {
-    eventBus.dispatch('chat-delegate-start', { requestId: parentRequestId, sender: senderName, workspaceId: `ca:${engine}:${workdir}`, avatar: senderAvatar, sessionId })
+    eventBus.dispatch('chat-delegate-start', { requestId: parentRequestId, sender: senderName, workspaceId: workspace.id, avatar: senderAvatar, sessionId })
   } else if (parentRequestId) {
     eventBus.dispatch('chat-text-start', { requestId: parentRequestId, sessionId, agentName, avatar: agentAvatar })
   }
@@ -1531,37 +1551,41 @@ async function handleDelegateTo(input, config, sessionId) {
   const delegateDb = resolveSessionDb(sessionId)
   if (!sessionId || !delegateDb) return 'Error: no active session'
 
-  // Find participant (workspace or coding-agent)
+  // Find participant — all participants are workspace IDs now
   const participantIds = sessionStore.getSessionParticipants(delegateDb, sessionId)
-  const parsed = sessionStore.getSessionParticipantsParsed(delegateDb, sessionId)
+  const allWs = participantIds.map(pid => workspaceRegistry.getWorkspace(pid)).filter(Boolean)
 
-  // Check coding-agents first
-  const caMatch = parsed.find(p => {
-    if (p.type !== 'coding-agent') return false
-    const name = `${p.engine} (${path.basename(p.workdir)})`
-    const q = participant_name.toLowerCase()
-    return name.toLowerCase().includes(q) || p.engine.toLowerCase() === q
-  })
-
-  if (caMatch) {
-    console.log(`[delegate_to] routing to coding-agent ${caMatch.engine} at ${caMatch.workdir}`)
-    const senderName = `${caMatch.engine} (${path.basename(caMatch.workdir)})`
-    return await routeToCodingAgent(caMatch.engine, caMatch.workdir, message, {
-      sessionId,
-      requestId: _activeRequestId,
-      senderName,
-      senderAvatar: '🤖'
-    })
-  }
-
-  // Fallback to workspace participants
-  const workspaces = participantIds.map(pid => workspaceRegistry.getWorkspace(pid)).filter(Boolean)
-  const targetWs = workspaces.find(w => {
+  // Match by name (case-insensitive, partial)
+  const q = participant_name.toLowerCase()
+  const targetWs = allWs.find(w => {
     const n = (w.identity?.name || '').toLowerCase()
-    const q = participant_name.toLowerCase()
     return n === q || n.startsWith(q) || q.startsWith(n)
   })
-  if (!targetWs) return `Error: participant "${participant_name}" not found in group. Available: ${workspaces.map(w => w.identity?.name).join(', ')}`
+
+  if (!targetWs) return `Error: participant "${participant_name}" not found in group. Available: ${allWs.map(w => w.identity?.name).join(', ')}`
+
+  // Route to coding agent if applicable
+  if (targetWs.type === 'coding-agent') {
+    const myName = targetWs.identity?.name || targetWs.engine
+    console.log(`[delegate_to] routing to coding-agent ${targetWs.engine} at ${targetWs.path}`)
+    const parentRequestId = _activeRequestId
+    const responseText = await routeToCodingAgent(targetWs, message, {
+      sessionId,
+      requestId: parentRequestId,
+      senderName: myName,
+      senderAvatar: targetWs.identity?.avatar || '🤖'
+    })
+    // Accumulate delegate message for finishChat (same as non-coding-agent path)
+    if (parentRequestId && (responseText || '').trim()) {
+      if (!_pendingDelegateMessages.has(parentRequestId)) _pendingDelegateMessages.set(parentRequestId, [])
+      _pendingDelegateMessages.get(parentRequestId).push({
+        sender: myName, senderWorkspaceId: targetWs.id,
+        content: responseText, timestamp: Date.now(),
+      })
+    }
+    console.log(`[delegate_to] ${myName} (coding-agent) responded (${(responseText||'').length} chars), accumulated for finishChat`)
+    return responseText
+  }
 
   console.log(`[delegate_to] routing to ${targetWs.identity?.name} (${targetWs.id})`)
 

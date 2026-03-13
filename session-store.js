@@ -78,20 +78,38 @@ function _parseParticipants(raw) {
   try { return JSON.parse(raw) } catch { return [] }
 }
 
-// Parse participant ID into structured object
-// Old format: "ws-abc" → {type: 'workspace', id: 'ws-abc'}
-// New format: "ca:claude:/path" → {type: 'coding-agent', engine: 'claude', workdir: '/path', id: 'ca:claude:/path'}
-function parseParticipantId(pid) {
-  if (!pid) return null
-  if (pid.startsWith('ca:')) {
+/**
+ * Migrate ca: prefixed participant IDs to workspace IDs.
+ * Called lazily when reading participants.
+ * ca:engine:/path → look up workspace by engine+path → use workspace.id
+ */
+function _migrateParticipantIds(db, sessionId, pids) {
+  let changed = false
+  const migrated = pids.map(pid => {
+    if (!pid || !pid.startsWith('ca:')) return pid
     const parts = pid.split(':')
-    if (parts.length >= 3) {
-      const engine = parts[1]
-      const workdir = parts.slice(2).join(':')
-      return { type: 'coding-agent', engine, workdir, id: pid }
+    if (parts.length < 3) return pid
+    const engine = parts[1]
+    const workdir = parts.slice(2).join(':')
+    // Lazy-require to avoid circular deps
+    const wsRegistry = require('./core/workspace-registry')
+    const ws = wsRegistry.findCodingAgentWorkspace(engine, workdir)
+    if (ws) { changed = true; return ws.id }
+    // If workspace not found, create one on-the-fly
+    const newWs = wsRegistry.addCodingAgentWorkspace(engine, workdir)
+    if (newWs) { changed = true; return newWs.id }
+    return pid // fallback: keep old format
+  })
+  // Persist migrated IDs back to DB
+  if (changed && db) {
+    try {
+      db.prepare('UPDATE sessions SET participants = ? WHERE id = ?').run(JSON.stringify(migrated), sessionId)
+      console.log(`[session-store] Migrated ca: participant IDs for session ${sessionId}`)
+    } catch (err) {
+      console.warn('[session-store] participant migration error:', err.message)
     }
   }
-  return { type: 'workspace', id: pid }
+  return migrated
 }
 
 function listSessions(clawDir, { workspaceId } = {}) {
@@ -106,7 +124,11 @@ function listSessions(clawDir, { workspaceId } = {}) {
     FROM sessions s ORDER BY s.updated_at DESC
   `).all()
   for (const s of sessions) {
-    s.participants = _parseParticipants(s.participants)
+    const raw = _parseParticipants(s.participants)
+    // Migrate ca: prefixed IDs to workspace IDs on read
+    s.participants = raw.some(p => typeof p === 'string' && p.startsWith('ca:'))
+      ? _migrateParticipantIds(d, s.id, raw)
+      : raw
   }
   if (workspaceId) {
     return sessions.filter(s => s.participants.includes(workspaceId))
@@ -120,6 +142,10 @@ function loadSession(clawDir, id) {
   const session = d.prepare('SELECT id, title, mode, created_at as createdAt, updated_at as updatedAt, participants FROM sessions WHERE id = ?').get(id)
   if (!session) return null
   session.participants = _parseParticipants(session.participants)
+  // Migrate ca: prefixed IDs to workspace IDs on read
+  if (session.participants.some(p => typeof p === 'string' && p.startsWith('ca:'))) {
+    session.participants = _migrateParticipantIds(d, id, session.participants)
+  }
   const rows = d.prepare('SELECT id, role, content, timestamp, metadata FROM messages WHERE session_id = ? ORDER BY id').all(id)
   session.messages = rows.map(r => {
     const msg = { id: String(r.id), role: r.role, content: r.content, timestamp: r.timestamp }
@@ -244,6 +270,8 @@ function closeDb() {
 
 function findSessionWorkspace(workspaces, sessionId) {
   for (const ws of workspaces) {
+    // coding-agent workspaces don't have their own sessions DB
+    if (ws.type === 'coding-agent') continue
     const db = getDb(ws.path)
     if (!db) continue
     const exists = db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(sessionId)
@@ -257,6 +285,8 @@ function listAllSessions(workspaces, opts = {}) {
   const seenIds = new Set()
   const allSessions = []
   for (const ws of workspaces) {
+    // coding-agent workspaces don't have their own sessions DB
+    if (ws.type === 'coding-agent') continue
     const dbPath = path.resolve(ws.path, '.paw', 'sessions.db')
     if (queriedDbs.has(dbPath)) continue
     queriedDbs.add(dbPath)
@@ -382,12 +412,12 @@ function getSessionParticipants(clawDir, sessionId) {
   const d = getDb(clawDir)
   if (!d) return []
   const row = d.prepare('SELECT participants FROM sessions WHERE id = ?').get(sessionId)
-  return _parseParticipants(row?.participants)
-}
-
-function getSessionParticipantsParsed(clawDir, sessionId) {
-  const pids = getSessionParticipants(clawDir, sessionId)
-  return pids.map(parseParticipantId).filter(Boolean)
+  const pids = _parseParticipants(row?.participants)
+  // Migrate ca: prefixed IDs to workspace IDs on read
+  if (pids.some(p => typeof p === 'string' && p.startsWith('ca:'))) {
+    return _migrateParticipantIds(d, sessionId, pids)
+  }
+  return pids
 }
 
 function addSessionParticipant(clawDir, sessionId, workspaceId) {
@@ -408,4 +438,4 @@ function removeSessionParticipant(clawDir, sessionId, workspaceId) {
   return true
 }
 
-module.exports = { getDb, listSessions, loadSession, saveSession, appendMessage, deleteMessage, deleteSession, renameSession, getSessionTitle, createSession, closeDb, updateSessionStatus, getSessionStatus, getSessionMode, setSessionMode, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, addSessionParticipant, removeSessionParticipant, getSessionParticipants, getSessionParticipantsParsed, parseParticipantId, findSessionWorkspace, listAllSessions, updateMessageMeta, findLastMessage }
+module.exports = { getDb, listSessions, loadSession, saveSession, appendMessage, deleteMessage, deleteSession, renameSession, getSessionTitle, createSession, closeDb, updateSessionStatus, getSessionStatus, getSessionMode, setSessionMode, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, addSessionParticipant, removeSessionParticipant, getSessionParticipants, findSessionWorkspace, listAllSessions, updateMessageMeta, findLastMessage }

@@ -29,7 +29,7 @@ function createStreamState(): StreamState {
 }
 
 export default function ChatView() {
-  const { currentSessionId, setCurrentSessionId, sessions, setSessions, setActivity, setStatus, workspaces, userProfile, sidebarVisible, setSidebarVisible } = useAppState()
+  const { currentSessionId, setCurrentSessionId, sessions, setSessions, setActivity, setStatus, workspaces, setWorkspaces, userProfile, sidebarVisible, setSidebarVisible } = useAppState()
   const api = useIPC()
   const [messages, setMessages] = useState<Message[]>([])
   const [showSettings, setShowSettings] = useState(false)
@@ -99,6 +99,15 @@ export default function ChatView() {
     } else {
       const cached = sessionCache.current.get(sid) || []
       sessionCache.current.set(sid, [...cached, msg])
+    }
+  }
+
+  const routeRemove = (sid: string, msgId: string) => {
+    if (sid === currentSidRef.current) {
+      setMessages(prev => prev.filter(m => m.id !== msgId))
+    } else {
+      const cached = sessionCache.current.get(sid) || []
+      sessionCache.current.set(sid, cached.filter(m => m.id !== msgId))
     }
   }
 
@@ -398,6 +407,14 @@ export default function ChatView() {
           workspacePath: ss.streamingMsg.workspacePath,
           workspaceId: ss.streamingMsg.workspaceId,
         }
+        // Remove empty orchestrator card from UI (no content, no visible tools = nothing to show)
+        const hasContent = !!(ss.streamingMsg.content?.trim())
+        const hasVisibleSteps = (ss.streamingMsg.toolSteps || []).some((s: any) =>
+          s.name !== '__thinking__' || (s.output || '').trim()
+        )
+        if (!hasContent && !hasVisibleSteps) {
+          routeRemove(sid, ss.streamingMsg.id)
+        }
         ss.streamingMsg = null
       }
       const wsPath = data.workspaceId
@@ -518,6 +535,11 @@ export default function ChatView() {
         }
         const dbMessages = session.messages || []
         dbg('done-db', { sid: sid.slice(0, 8), msgCount: dbMessages.length, msgs: dbMessages.map((m: any) => ({ role: m.role, sender: m.sender, textLen: (m.content || '').length, steps: (m.toolSteps || []).map((s: any) => s.name) })) })
+        // Safety net: if DB returns 0 messages but we had streaming content, don't wipe the UI
+        if (dbMessages.length === 0) {
+          console.warn('[ChatView] handleDone: DB returned 0 messages — keeping existing UI messages')
+          return
+        }
         // Error handling
         if (data.error) {
           const lastUserIdx = dbMessages.map((m: any) => m.role).lastIndexOf('user')
@@ -847,6 +869,10 @@ export default function ChatView() {
         onChanged={async () => {
           const updated = await api.listSessions()
           setSessions(updated)
+        }}
+        onWorkspacesChanged={async () => {
+          const ws = await api.listWorkspaces()
+          setWorkspaces(ws)
         }}
       />
     </div>

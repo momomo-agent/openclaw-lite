@@ -86,7 +86,7 @@ export default function InputBar({ sessionId, onSend }: InputBarProps) {
   const [mentionIdx, setMentionIdx] = useState(0)
   const mentionStartPos = useRef(-1)
 
-  const agentNames = workspaces.map(w => w.identity?.name || w.id)
+  const agentNames = [...new Set(workspaces.map(w => w.identity?.name || w.id))]
 
   const filteredMentions = mentionFilter
     ? agentNames.filter(n => n.toLowerCase().includes(mentionFilter.toLowerCase()))

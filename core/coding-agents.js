@@ -52,6 +52,7 @@ const agents = {
   codex: {
     id: 'codex',
     name: 'Codex',
+    avatar: '../avatars/codex.png',
     bin: 'codex',
     _path: null,
     detect() {
@@ -72,6 +73,7 @@ const agents = {
   gemini: {
     id: 'gemini',
     name: 'Gemini CLI',
+    avatar: '../avatars/gemini.png',
     bin: 'gemini',
     _path: null,
     detect() {
@@ -92,6 +94,7 @@ const agents = {
   kiro: {
     id: 'kiro',
     name: 'Kiro',
+    avatar: '../avatars/kiro.png',
     bin: 'kiro',
     _path: null,
     detect() {

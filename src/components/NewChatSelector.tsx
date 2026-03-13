@@ -11,12 +11,6 @@ interface NewChatSelectorProps {
   onWorkspacesChanged: () => void
 }
 
-interface CodingAgentDef {
-  id: string
-  name: string
-  engine?: string
-}
-
 const ENGINE_COLORS: Record<string, string> = {
   claude: '#f59e0b', codex: '#22c55e', gemini: '#3b82f6', kiro: '#a855f7',
 }
@@ -166,9 +160,10 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
   const [managing, setManaging] = useState(false)
   const [groupMode, setGroupMode] = useState(false)
   const [groupSelected, setGroupSelected] = useState<Set<string>>(new Set())
-  const [codingAgents, setCodingAgents] = useState<CodingAgentDef[]>([])
-  const [addingCA, setAddingCA] = useState(false)
-  const [selectedEngine, setSelectedEngine] = useState<string | null>(null)
+  const [availableEngines, setAvailableEngines] = useState<{id: string, name: string, avatar?: string}[]>([])
+
+  // Local workspaces only (coding-agent workspaces are shown via engine list)
+  const localWorkspaces = workspaces.filter(w => w.type !== 'coding-agent')
 
   // Editor overlay state
   const [editorMode, setEditorMode] = useState<'create' | 'edit' | null>(null)
@@ -180,14 +175,15 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
   const editorInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    api.codingAgentsList?.().then((list: CodingAgentDef[]) => {
-      if (list?.length) setCodingAgents(list)
-    }).catch(() => {})
-  }, [])
-
-  useEffect(() => {
     if (editorMode) setTimeout(() => editorInputRef.current?.focus(), 50)
   }, [editorMode])
+
+  // Load available coding agent engines (claude, kiro, etc.)
+  useEffect(() => {
+    api.listCodingAgents?.().then((list: any[]) => {
+      if (list?.length) setAvailableEngines(list)
+    }).catch(() => {})
+  }, [])
 
   // ── Editor actions ──
 
@@ -294,16 +290,11 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
   const handleAddCA = async (engine: string) => {
     const projectPath = await api.selectDirectory?.()
     if (!projectPath) return
-    const name = projectPath.split('/').pop() || 'Project'
-    const agent = await api.codingAgentAdd?.({ engine, projectPath, name })
-    if (agent) {
-      const list = await api.codingAgentsList?.()
-      if (list) setCodingAgents(list)
-      const participantId = `ca:${engine}:${projectPath}`
-      onSelect({ participants: [participantId] })
+    const result = await (api as any).workspaceAddCodingAgent?.({ engine, projectPath })
+    if (result?.ok && result.workspace) {
+      onWorkspacesChanged()
+      onSelect({ participants: [result.workspace.id] })
     }
-    setAddingCA(false)
-    setSelectedEngine(null)
   }
 
   const [closing, setClosing] = useState(false)
@@ -342,7 +333,8 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
           </div>
           <div className="ncs-body" style={bodyHeight !== undefined ? { height: bodyHeight, transition: 'height 0.2s ease' } : {}}>
             <div ref={bodyRef}>
-            {workspaces.map(ws => (
+            {/* Local workspaces */}
+            {localWorkspaces.map(ws => (
               <div key={ws.id} className="ncs-agent-row"
                 onClick={() => {
                   if (groupMode) { handleGroupToggle(ws.id); return }
@@ -370,73 +362,30 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
               </div>
             ))}
 
-            {/* Coding agents */}
-            {!managing && (
+            {/* Coding agent engines — click to select folder and start chat */}
+            {!managing && availableEngines.length > 0 && (
               <>
                 <div className="ncs-divider" />
                 <div className="ncs-section-title">编码助手</div>
-                {codingAgents.map(agent => (
-                  <div key={agent.id} className="ncs-agent-row" onClick={() => {
-                    const participantId = `ca:${agent.engine}:${(agent as any).projectPath}`
-                    onSelect({ participants: [participantId] })
-                  }}>
+                {availableEngines.map(engine => (
+                  <div key={engine.id} className="ncs-agent-row" onClick={() => handleAddCA(engine.id)}>
+                    {groupMode && (
+                      <input type="checkbox" disabled readOnly className="ncs-checkbox" />
+                    )}
                     <span className="ncs-avatar">
-                      {(agent as any).avatar ? (
-                        <img src={(agent as any).avatar} alt={agent.name} style={{ width: 28, height: 28, borderRadius: '50%' }} />
+                      {engine.avatar ? (
+                        <img src={engine.avatar} alt={engine.name} style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover' }}
+                          onError={(e) => { e.currentTarget.src = '../avatars/1.png' }} />
                       ) : (
-                        <span className="ncs-engine-dot" style={{ background: ENGINE_COLORS[agent.engine || ''] || 'var(--text-faint)' }} />
+                        <span className="ncs-engine-dot" style={{ background: ENGINE_COLORS[engine.id] || 'var(--text-faint)' }} />
                       )}
                     </span>
                     <div className="ncs-info">
-                      <div className="ncs-name">{agent.name}</div>
-                      {agent.engine && <div className="ncs-path">{agent.engine}</div>}
+                      <div className="ncs-name">{engine.name}</div>
+                      <div className="ncs-path">选择项目文件夹开始</div>
                     </div>
                   </div>
                 ))}
-                {!addingCA && (
-                  <div className="ncs-agent-row" onClick={() => setAddingCA(true)}>
-                    <span className="ncs-avatar" style={{
-                      width: 28, height: 28, borderRadius: '50%', background: 'var(--hover-bg)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-faint)',
-                    }}>
-                      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-                    </span>
-                    <div className="ncs-info">
-                      <div className="ncs-name">添加编码助手</div>
-                    </div>
-                  </div>
-                )}
-                {addingCA && (
-                  <div style={{ padding: '12px 16px', background: 'var(--bg-elevated)', borderRadius: 8, margin: '8px 0' }}>
-                    <div style={{ fontSize: 12, color: 'var(--text-faint)', marginBottom: 8 }}>选择引擎</div>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      {Object.entries(ENGINE_COLORS).map(([engine, color]) => (
-                        <button
-                          key={engine}
-                          onClick={() => handleAddCA(engine)}
-                          style={{
-                            padding: '6px 12px', borderRadius: 6, border: 'none',
-                            background: 'var(--hover-bg)', cursor: 'pointer',
-                            display: 'flex', alignItems: 'center', gap: 6,
-                            fontSize: 13, color: 'var(--text-primary)',
-                            transition: 'background 0.15s',
-                          }}
-                          onMouseEnter={e => e.currentTarget.style.background = 'var(--border-muted)'}
-                          onMouseLeave={e => e.currentTarget.style.background = 'var(--hover-bg)'}
-                        >
-                          <span style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />
-                          {engine}
-                        </button>
-                      ))}
-                    </div>
-                    <button
-                      onClick={() => { setAddingCA(false); setSelectedEngine(null) }}
-                      style={{ marginTop: 8, fontSize: 12, color: 'var(--text-faint)', background: 'none', border: 'none', cursor: 'pointer' }}
-                    >
-                      取消
-                    </button>
-                  </div>
-                )}
               </>
             )}
 

@@ -1,19 +1,72 @@
 // core/workspace-registry.js — Multi-workspace registry (M32 refactor)
-// Registry only stores paths. ID lives in workspace's .paw/config.json.
+// Registry stores paths + type/engine for coding-agent workspaces.
 
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
+const crypto = require('crypto')
 const { loadWorkspaceIdentity, saveWorkspaceIdentity } = require('./workspace-identity')
 
 const GLOBAL_DIR = path.join(os.homedir(), '.paw')
 let _registryPath = null
-let _workspaces = []  // [{ id, path, identity }]
+let _workspaces = []  // [{ id, path, type?, engine?, identity }]
 
 function initRegistry() {
   fs.mkdirSync(GLOBAL_DIR, { recursive: true })
   _registryPath = path.join(GLOBAL_DIR, 'workspaces.json')
+  _migrateCodingAgents()
   _load()
+}
+
+/**
+ * Migrate old coding-agents.json → workspace records (one-time)
+ * Each coding agent becomes a workspace with type='coding-agent'
+ */
+function _migrateCodingAgents() {
+  const oldPath = path.join(GLOBAL_DIR, 'coding-agents.json')
+  if (!fs.existsSync(oldPath)) return
+  try {
+    const old = JSON.parse(fs.readFileSync(oldPath, 'utf8'))
+    const agents = old.agents || []
+    if (agents.length === 0) { fs.unlinkSync(oldPath); return }
+
+    // Load existing registry to merge
+    let existing = { workspaces: [] }
+    try { existing = JSON.parse(fs.readFileSync(_registryPath, 'utf8')) } catch {}
+    const workspaces = existing.workspaces || []
+
+    // Get identity info from coding-agents.js (if available)
+    let codingAgentsModule = null
+    try { codingAgentsModule = require('./coding-agents') } catch {}
+
+    for (const agent of agents) {
+      // Skip if already migrated (check by engine+path combo)
+      const already = workspaces.find(w => w.type === 'coding-agent' && w.engine === agent.engine && w.path === agent.projectPath)
+      if (already) continue
+
+      // Get identity from coding-agents module
+      let name = agent.name || agent.engine
+      let avatar = null
+      if (codingAgentsModule) {
+        const info = (codingAgentsModule.listAvailable?.() || []).find(a => a.id === agent.engine)
+        if (info) { name = info.name || name; avatar = info.avatar || null }
+      }
+
+      workspaces.push({
+        id: agent.id || crypto.randomUUID(),
+        path: agent.projectPath,
+        type: 'coding-agent',
+        engine: agent.engine,
+        identity: { name, avatar }
+      })
+    }
+
+    fs.writeFileSync(_registryPath, JSON.stringify({ workspaces }, null, 2) + '\n', 'utf8')
+    fs.unlinkSync(oldPath)
+    console.log(`[workspace-registry] Migrated ${agents.length} coding agents from coding-agents.json`)
+  } catch (err) {
+    console.warn('[workspace-registry] coding-agents migration error:', err.message)
+  }
 }
 
 function _load() {
@@ -24,33 +77,61 @@ function _load() {
       .filter(w => w && w.path)
       .map(w => ({ ...w, path: path.resolve(w.path) }))
       .filter(w => {
-        if (!fs.existsSync(w.path)) return false
-        if (seen.has(w.path)) return false
-        seen.add(w.path)
+        // coding-agent workspaces don't need to exist on disk (project may be removed)
+        if (w.type !== 'coding-agent' && !fs.existsSync(w.path)) return false
+        const key = w.type === 'coding-agent' ? `ca:${w.engine}:${w.path}` : w.path
+        if (seen.has(key)) return false
+        seen.add(key)
         return true
       })
-      .map(w => _hydrateWorkspace(w.path))
+      .map(w => w.type === 'coding-agent' ? _hydrateCodingAgent(w) : _hydrateWorkspace(w.path))
   } catch {
     _workspaces = []
   }
 }
 
 function _save() {
-  const data = { workspaces: _workspaces.map(w => ({ path: w.path })) }
+  const data = {
+    workspaces: _workspaces.map(w => {
+      if (w.type === 'coding-agent') {
+        return { id: w.id, path: w.path, type: w.type, engine: w.engine, identity: w.identity }
+      }
+      return { path: w.path }
+    })
+  }
   fs.writeFileSync(_registryPath, JSON.stringify(data, null, 2) + '\n', 'utf8')
 }
 
 function _hydrateWorkspace(wsPath) {
   const identity = loadWorkspaceIdentity(wsPath)
-  return { id: identity.id, path: wsPath, identity }
+  return { id: identity.id, path: wsPath, type: 'local', identity }
+}
+
+function _hydrateCodingAgent(w) {
+  // Refresh avatar from coding-agents.js definitions (keeps names from saved data)
+  let avatar = w.identity?.avatar
+  try {
+    const codingAgents = require('./coding-agents')
+    const agentDef = codingAgents.listAvailable().find(a => a.id === w.engine)
+    if (agentDef?.avatar) avatar = agentDef.avatar
+  } catch {}
+  return {
+    id: w.id,
+    path: w.path,
+    type: 'coding-agent',
+    engine: w.engine,
+    identity: { ...(w.identity || { name: w.engine }), avatar: avatar || null }
+  }
 }
 
 function listWorkspaces() {
   return _workspaces.map(w => ({
     id: w.id,
     path: w.path,
+    type: w.type || 'local',
+    engine: w.engine,
     identity: w.identity,
-    exists: fs.existsSync(w.path),
+    exists: w.type === 'coding-agent' || fs.existsSync(w.path),
   }))
 }
 
@@ -81,6 +162,46 @@ function addWorkspace(wsPath) {
   _workspaces.push(ws)
   _save()
   return { ok: true, workspace: ws }
+}
+
+/**
+ * Add a coding-agent workspace (no .paw/config.json needed)
+ * Coding agents are lightweight: identity stored in registry, not on disk.
+ */
+function addCodingAgentWorkspace(engine, projectPath) {
+  const resolved = path.resolve(projectPath)
+
+  // Check for duplicate engine+path
+  const existing = _workspaces.find(w => w.type === 'coding-agent' && w.engine === engine && path.resolve(w.path) === resolved)
+  if (existing) return existing
+
+  // Get identity from coding-agents module
+  let name = engine
+  let avatar = null
+  try {
+    const codingAgentsModule = require('./coding-agents')
+    const info = (codingAgentsModule.listAvailable?.() || []).find(a => a.id === engine)
+    if (info) { name = info.name || name; avatar = info.avatar || null }
+  } catch {}
+
+  const ws = {
+    id: crypto.randomUUID(),
+    path: resolved,
+    type: 'coding-agent',
+    engine,
+    identity: { name, avatar }
+  }
+  _workspaces.push(ws)
+  _save()
+  return ws
+}
+
+/**
+ * Find a coding-agent workspace by engine + projectPath (for migration lookups)
+ */
+function findCodingAgentWorkspace(engine, projectPath) {
+  const resolved = path.resolve(projectPath)
+  return _workspaces.find(w => w.type === 'coding-agent' && w.engine === engine && path.resolve(w.path) === resolved) || null
 }
 
 function removeWorkspace(id) {
@@ -144,11 +265,12 @@ function updateWorkspaceIdentity(id, updates) {
 
 function refreshAll() {
   _workspaces = _workspaces
-    .filter(w => fs.existsSync(w.path))
-    .map(w => _hydrateWorkspace(w.path))
+    .filter(w => w.type === 'coding-agent' || fs.existsSync(w.path))
+    .map(w => w.type === 'coding-agent' ? _hydrateCodingAgent(w) : _hydrateWorkspace(w.path))
 }
 
 module.exports = {
   initRegistry, listWorkspaces, getWorkspace, getWorkspaceByPath,
   addWorkspace, removeWorkspace, createWorkspace, updateWorkspaceIdentity, refreshAll,
+  addCodingAgentWorkspace, findCodingAgentWorkspace,
 }

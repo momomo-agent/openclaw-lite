@@ -67,7 +67,6 @@ contextBridge.exposeInMainWorld('api', {
   addParticipant: (sessionId, workspaceId) => ipcRenderer.invoke('session-add-participant', { sessionId, workspaceId }),
   removeParticipant: (sessionId, workspaceId) => ipcRenderer.invoke('session-remove-participant', { sessionId, workspaceId }),
   getParticipants: (sessionId) => ipcRenderer.invoke('session-get-participants', sessionId),
-  getSessionParticipantsParsed: (sessionId) => ipcRenderer.invoke('session-get-participants-parsed', sessionId),
   // Session agents (M19: lightweight agents)
   createSessionAgent: (sessionId, opts) => ipcRenderer.invoke('session-create-agent', { sessionId, ...opts }),
   listSessionAgents: (sessionId) => ipcRenderer.invoke('session-list-agents', sessionId),
@@ -101,12 +100,13 @@ contextBridge.exposeInMainWorld('api', {
   notify: (title, body) => ipcRenderer.invoke('notify', { title, body }),
   // Status persistence
   updateSessionStatus: (sessionId, level, text) => ipcRenderer.invoke('update-session-status', { sessionId, level, text }),
-  // Coding agent
+  // Coding agent (unified — coding agents are workspaces)
   getCodingAgent: () => ipcRenderer.invoke('get-coding-agent'),
   setCodingAgent: (agent) => ipcRenderer.invoke('set-coding-agent', agent),
   listCodingAgents: () => ipcRenderer.invoke('list-coding-agents'),
-  // Coding agent registry (F206)
+  // Coding agent workspace management (unified architecture)
   codingAgentsList: () => ipcRenderer.invoke('coding-agents-list'),
+  workspaceAddCodingAgent: (opts) => ipcRenderer.invoke('workspace-add-coding-agent', opts),
   codingAgentAdd: (opts) => ipcRenderer.invoke('coding-agent-add', opts),
   codingAgentDelete: (id) => ipcRenderer.invoke('coding-agent-delete', id),
   // ── Delegate events (single consumer: ChatView) ──

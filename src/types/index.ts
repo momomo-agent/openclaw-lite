@@ -41,6 +41,8 @@ export interface ToolStep {
 export interface Workspace {
   id: string
   path: string
+  type?: 'local' | 'coding-agent'
+  engine?: string
   identity?: {
     name: string
     avatar?: string
