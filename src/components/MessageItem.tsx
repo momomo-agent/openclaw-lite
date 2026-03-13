@@ -1,7 +1,6 @@
 import React from 'react'
 import { Message, ToolStep } from '../types'
 import { renderMarkdown } from '../utils/markdown'
-import { linkifyPaths } from '../utils/linkify'
 import { useAppState } from '../store'
 import { Avatar } from './Avatar'
 import ToolGroup from './ToolGroup'
@@ -34,7 +33,7 @@ export default function MessageItem({ message, isStreaming, statusText, ownerWor
   const resolvedAvatar = isUser ? (userProfile?.userAvatar || message.avatar) : (ws?.identity?.avatar || message.avatar)
   const resolvedName = (!isUser && ws?.identity?.name) || message.sender
 
-  const renderContent = (text: string) => linkifyPaths(renderMarkdown(text))
+  const renderContent = (text: string) => renderMarkdown(text)
 
   const attachments = message.attachments
 
