@@ -480,6 +480,15 @@ button:hover { background: var(--border-muted); }
 .md-file-name { font-size: 13px; color: var(--text-primary); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .md-file-open { font-size: 13px; color: var(--text-faint); flex-shrink: 0; margin-left: auto; }
 
+/* Image placeholder — shown for invalid image hrefs */
+.md-img-placeholder {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: 8px;
+  padding: 6px 12px; margin: 4px 0; color: var(--text-faint); font-size: 13px;
+}
+.md-img-placeholder-icon { font-size: 14px; opacity: 0.5; }
+.md-img-placeholder-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }
+
 /* Settings — right drawer */
 .settings-backdrop {
   position: fixed; inset: 0; background: var(--bg-overlay);

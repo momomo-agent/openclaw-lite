@@ -1203,7 +1203,8 @@ ipcMain.handle('chat', async (_, { prompt, message, history, rawMessages, agentI
       const participants = sessionStore.getSessionParticipants(_sessionDb, sessionId)
       const participantInfos = participants.map(pid => {
         const w = workspaceRegistry.getWorkspace(pid)
-        return { id: pid, name: w?.identity?.name || pid, description: w?.identity?.description || '' }
+        const typeHint = w?.type === 'coding-agent' ? ` (coding agent — ${w.engine || 'code'})` : ''
+        return { id: pid, name: w?.identity?.name || pid, description: (w?.identity?.description || '') + typeHint }
       })
       const ownerWsId = targetWorkspaceId || participants[0]
       const ownerWs = workspaceRegistry.getWorkspace(ownerWsId)
@@ -1654,7 +1655,7 @@ async function handleDelegateTo(input, config, sessionId) {
   const targetPrompt = await coreBuildSystemPrompt(targetWs.path)
 
   // Add group context to their prompt
-  const names = workspaces.map(w => w.identity?.name || w.id)
+  const names = allWs.map(w => w.identity?.name || w.id)
   const myName = targetWs.identity?.name || 'Assistant'
   const groupContext = `\n\n---\n\n## Group Chat\nYou are **${myName}** in a group conversation.\nParticipants: ${names.join(', ')}.\nThe user is talking to you. Respond as yourself (${myName}). Be natural and in-character.`
   const fullPrompt = targetPrompt + groupContext
@@ -1760,6 +1761,15 @@ async function handleDelegateTo(input, config, sessionId) {
     return `[${myName} responded directly to the user]\nContent: ${preview}\n\nThe response is already visible to the user. Reply NO_REPLY unless you need to delegate further or add genuine value.`
   } catch (err) {
     console.error(`[delegate_to] error:`, err.message)
+    // Cleanup delegate event remapping
+    for (const { ch, handler } of remapHandlers) eventBus.off(ch, handler)
+    // Restore parent state
+    _activeRequestId = savedRequestId
+    _activeAbortController = savedAbortController
+    // Signal delegate end so frontend cleans up the bubble
+    if (parentRequestId) {
+      eventBus.dispatch('chat-delegate-end', { requestId: parentRequestId, sender: myName, workspaceId: targetWs.id, fullText: `Error: ${err.message}`, sessionId })
+    }
     return `Error delegating to ${myName}: ${err.message}`
   }
 }

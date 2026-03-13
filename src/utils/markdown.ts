@@ -85,23 +85,39 @@ function getRenderer() {
   const renderer = new window.marked.Renderer()
 
   // Image renderer: detect audio/video by extension, otherwise render as <img>
-  const originalImage = renderer.image.bind(renderer)
   renderer.image = function (token: any) {
     const rawHref = token.href || ''
     const href = resolveLocalHref(rawHref)
     const title = token.title || ''
     const text = token.text || ''
+    const caption = text || title || ''
+    const escaped = caption.replace(/"/g, '&quot;')
 
-    // Skip broken images: no href, or href that's just a description with no actual path
-    if (!rawHref || (!rawHref.includes('.') && !rawHref.includes('/') && !rawHref.startsWith('data:'))) {
-      return text ? `<em>[${text}]</em>` : ''
+    // Determine if href looks like a real resource path
+    const isValidHref = rawHref && (
+      rawHref.startsWith('http') ||
+      rawHref.startsWith('data:') ||
+      rawHref.startsWith('file://') ||
+      rawHref.startsWith('/') ||
+      rawHref.startsWith('../') ||
+      rawHref.startsWith('./') ||
+      (rawHref.includes('/') && rawHref.includes('.')) ||  // relative path with extension
+      IMAGE_EXT.test(rawHref) ||
+      AUDIO_EXT.test(rawHref) ||
+      VIDEO_EXT.test(rawHref)
+    )
+
+    // Invalid href → placeholder only (deterministic, no runtime events)
+    if (!isValidHref) {
+      if (!caption) return ''
+      return `<span class="md-img-placeholder"><span class="md-img-placeholder-icon">🖼</span><span class="md-img-placeholder-text">${escaped}</span></span>`
     }
 
     if (AUDIO_EXT.test(href)) return renderAudio(href, title)
     if (VIDEO_EXT.test(href)) return renderVideo(href, title, text)
 
-    // Default image — pass resolved href back
-    return originalImage({ ...token, href })
+    // Valid href → always render <img>, no onerror tricks
+    return `<img src="${href}" alt="${escaped}" style="max-width:100%;border-radius:8px;margin:8px 0">`
   }
 
   // Link renderer: detect media files, render inline players or file cards

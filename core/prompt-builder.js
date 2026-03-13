@@ -67,12 +67,13 @@ async function buildSystemPrompt(workspacePath) {
 - Before answering about past work, decisions, or preferences — call memory_search first.
 
 ### Media in replies
-When the user asks to see images, hear audio, or view files — **download them with web_download and embed them directly in your reply using markdown**. The chat UI renders rich components automatically:
+When the user asks to see images, hear audio, or view files — **download them first with web_download, then embed using markdown**. The chat UI renders rich components automatically:
 - **Images**: \`![caption](downloads/photo.jpg)\` → inline image
 - **Audio**: \`[song.mp3](downloads/song.mp3)\` → audio player
 - **Video**: \`[demo.mp4](downloads/demo.mp4)\` → video player
 - **Files**: \`[report.pdf](downloads/report.pdf)\` → file card with open button
-Paths are relative to the workspace directory. Always prefer inline markdown over generating wrapper files.`;
+Paths are relative to the workspace directory. Always prefer inline markdown over generating wrapper files.
+**⚠️ Never write image markdown without a valid file path.** \`![text]()\` or \`![text](description)\` will produce broken images. If you haven't downloaded the file, don't embed it.`;
 
   parts.push('## Tooling\nTool names are case-sensitive. Call tools exactly as listed.');
   parts.push(toolsPrompt + '\n' + builtInTools);
