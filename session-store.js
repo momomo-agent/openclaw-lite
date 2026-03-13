@@ -118,9 +118,9 @@ function listSessions(clawDir, { workspaceId } = {}) {
   const sessions = d.prepare(`
     SELECT s.id, s.title, s.created_at as createdAt, s.updated_at as updatedAt,
            s.mode, s.status_level as statusLevel, s.status_text as statusText, s.participants,
-           (SELECT substr(m.content, 1, 60) FROM messages m WHERE m.session_id = s.id ORDER BY m.id DESC LIMIT 1) as lastMessage,
-           (SELECT json_extract(m.metadata, '$.sender') FROM messages m WHERE m.session_id = s.id ORDER BY m.id DESC LIMIT 1) as lastSender,
-           (SELECT json_extract(m.metadata, '$.senderWorkspaceId') FROM messages m WHERE m.session_id = s.id ORDER BY m.id DESC LIMIT 1) as lastSenderWsId
+           (SELECT substr(m.content, 1, 60) FROM messages m WHERE m.session_id = s.id AND m.content IS NOT NULL AND trim(m.content) != '' ORDER BY m.id DESC LIMIT 1) as lastMessage,
+           (SELECT json_extract(m.metadata, '$.sender') FROM messages m WHERE m.session_id = s.id AND m.content IS NOT NULL AND trim(m.content) != '' ORDER BY m.id DESC LIMIT 1) as lastSender,
+           (SELECT json_extract(m.metadata, '$.senderWorkspaceId') FROM messages m WHERE m.session_id = s.id AND m.content IS NOT NULL AND trim(m.content) != '' ORDER BY m.id DESC LIMIT 1) as lastSenderWsId
     FROM sessions s ORDER BY s.updated_at DESC
   `).all()
   for (const s of sessions) {

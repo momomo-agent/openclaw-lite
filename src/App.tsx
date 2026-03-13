@@ -85,7 +85,8 @@ function AppContent() {
         for (const [sid, st] of Object.entries(runtimeState.latestStatuses)) {
           const s = st as any
           setActivity(sid, s.level)
-          setStatus(sid, s.text || '')
+          // Don't restore idle/done status text — it's meaningless in sidebar
+          setStatus(sid, (s.level === 'idle' || s.level === 'done') ? '' : (s.text || ''))
         }
       }
     } catch {}
@@ -100,7 +101,12 @@ function AppContent() {
     const cleanupWatson = api.onWatsonStatus?.((data: any) => {
       if (data.sessionId) {
         setActivity(data.sessionId, data.level)
-        setStatus(data.sessionId, data.text || '')
+        // Clear status text for idle/done — don't show "空闲待命中" in sidebar
+        if (data.level === 'idle' || data.level === 'done') {
+          setStatus(data.sessionId, '')
+        } else {
+          setStatus(data.sessionId, data.text || '')
+        }
       }
     })
 

@@ -112,12 +112,22 @@ export default function MembersPanel({ visible, sessionId, onClose, onChanged, o
             {/* All participants (workspaces and coding agents unified) */}
             {participantWorkspaces.map((ws, i) => {
               if (!ws) return null
+              const shortPath = ws.type === 'coding-agent' && ws.path
+                ? ws.path.replace(/^\/Users\/[^/]+/, '~')
+                : null
               return (
                 <div key={ws.id} className="members-item">
                   <div className="members-avatar">
                     <Avatar raw={ws.identity?.avatar} role="assistant" wsPath={ws.path} />
                   </div>
-                  <span className="members-name">{ws.identity?.name || ws.id}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <span className="members-name">{ws.identity?.name || ws.id}</span>
+                    {shortPath && (
+                      <div style={{ fontSize: 11, color: 'var(--text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>
+                        {shortPath}
+                      </div>
+                    )}
+                  </div>
                   {ws.type === 'coding-agent' && ws.engine && (
                     <span className="members-tag" style={{ background: ENGINE_COLORS[ws.engine] || 'var(--text-faint)', color: '#000', fontSize: 10, padding: '1px 6px', borderRadius: 4 }}>
                       {ws.engine}

@@ -525,6 +525,7 @@ export default function ChatView() {
 
       clearStreamState(sid)
       storeRef.current.setActivity(sid, 'idle')
+      storeRef.current.setStatus(sid, '')
 
       try {
         // Load authoritative messages from DB
@@ -575,6 +576,7 @@ export default function ChatView() {
       })
       clearStreamState(sid)
       storeRef.current.setActivity(sid, 'idle')
+      storeRef.current.setStatus(sid, '')
     }
 
     // --- Session title updated by AI tool ---
@@ -748,6 +750,7 @@ export default function ChatView() {
 
     if (dbgEnabled()) console.log('[Paw🐾] send', { sid: currentSessionId.slice(0, 8), requestId: requestId.slice(0, 8), text: text.slice(0, 50), streamingId })
     setActivity(currentSessionId, 'thinking')
+    setStatus(currentSessionId, '')
     try {
       await api.chat({ sessionId: currentSessionId, message: text, requestId, attachments: files })
     } catch (err: any) {
