@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ToolStep } from '../types'
-import { humanizeToolStep, summarizeToolSteps, extractArgPreview } from '../utils/tools'
+import { humanizeToolStep, summarizeToolSteps, extractArgPreview, isVisibleToolStep } from '../utils/tools'
 
 interface ToolGroupProps {
   steps: ToolStep[]
@@ -11,13 +11,9 @@ interface ToolGroupProps {
 export default function ToolGroup({ steps, isStreaming, roundPurpose }: ToolGroupProps) {
   const [expanded, setExpanded] = useState(false)
 
-  if (!steps.length) return null
-
-  // Filter out hidden steps for display purposes
-  const visibleSteps = steps.filter(s => {
-    const h = humanizeToolStep(s.name, s.input)
-    return !h.hidden
-  })
+  // Filter: only show visible steps (exclude hidden + __thinking__)
+  const visibleSteps = steps.filter(s => isVisibleToolStep(s))
+  if (!visibleSteps.length) return null
 
   // Determine header text
   let headerIcon = '🔧'
@@ -27,28 +23,36 @@ export default function ToolGroup({ steps, isStreaming, roundPurpose }: ToolGrou
     // Round purpose takes priority when available
     headerIcon = '🔧'
     headerText = roundPurpose
-  } else if (isStreaming && steps.length > 0) {
-    // While streaming, show the last step's humanized text
-    const lastStep = steps[steps.length - 1]
+  } else if (visibleSteps.length === 1) {
+    // Single step — always show its humanized text (concise and clear)
+    const h = humanizeToolStep(visibleSteps[0].name, visibleSteps[0].input)
+    headerIcon = h.icon
+    headerText = h.text
+  } else if (isStreaming && visibleSteps.length > 0) {
+    // While streaming, show the last visible step's humanized text
+    const lastStep = visibleSteps[visibleSteps.length - 1]
     const h = humanizeToolStep(lastStep.name, lastStep.input)
     headerIcon = h.icon
     headerText = h.text
   } else {
     // When done, show summary
-    const summary = summarizeToolSteps(steps)
+    const summary = summarizeToolSteps(visibleSteps)
     if (summary) {
       headerText = summary
     } else {
-      // Fallback to last step
-      const lastStep = steps[steps.length - 1]
+      // Fallback to last visible step
+      const lastStep = visibleSteps[visibleSteps.length - 1]
       const h = humanizeToolStep(lastStep.name, lastStep.input)
       headerIcon = h.icon
       headerText = h.text
     }
   }
 
+  // Safety: never render with empty header
+  if (!headerText) headerText = `${visibleSteps.length} 个操作`
+
   return (
-    <div className={`tool-group-inline ${isStreaming ? 'tool-pulse' : ''}`}>
+    <div className={`tool-group-inline${isStreaming ? ' tool-streaming' : ''}`}>
       <div
         className="tool-group-header"
         onClick={() => setExpanded(!expanded)}

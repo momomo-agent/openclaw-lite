@@ -77,10 +77,7 @@ export default function MembersPanel({ visible, sessionId, onClose, onChanged }:
             {/* User */}
             <div className="members-item">
               <div className="members-avatar">
-                {userProfile?.avatarAbsPath
-                  ? <img src={`file://${userProfile.avatarAbsPath}?t=${Date.now()}`} className="avatar-img" />
-                  : <span className="ic"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
-                }
+                <Avatar role="user" />
               </div>
               <span className="members-name">{userProfile?.userName || '你'}</span>
               <span className="members-tag">你</span>

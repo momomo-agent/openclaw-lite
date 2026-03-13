@@ -1,50 +1,44 @@
-import { useRef } from 'react'
+import { useAppState } from '../store'
 
 interface AvatarProps {
   raw?: string
   role: 'user' | 'assistant'
   wsPath?: string
-  userAvatarPath?: string
 }
 
 // Default preset images (relative to renderer/src/index.html)
 const DEFAULT_USER_AVATAR = '../avatars/0.png'
 const DEFAULT_ASSISTANT_AVATAR = '../avatars/1.png'
 
-export function Avatar({ raw, role, wsPath, userAvatarPath }: AvatarProps) {
-  // Stable cache-buster: only changes when the component mounts, not every render
-  const ts = useRef(Date.now())
+function presetSrc(raw: string, fallback: string): string {
+  const idx = parseInt(raw.replace('preset:', '')) || 0
+  return `../avatars/${idx}.png`
+}
 
-  // User role: show user profile avatar image
+export function Avatar({ raw, role, wsPath }: AvatarProps) {
+  const { avatarVersion, userProfile } = useAppState()
+
+  // ── User avatar: derived from store, always reactive ──
   if (role === 'user') {
-    const src = userAvatarPath
-      ? `file://${userAvatarPath}?t=${ts.current}`
+    const av = userProfile?.userAvatar || 'preset:0'
+    if (av.startsWith('preset:')) {
+      return <img src={presetSrc(av, DEFAULT_USER_AVATAR)} className="avatar-img" onError={(e) => { e.currentTarget.src = DEFAULT_USER_AVATAR }} />
+    }
+    // Custom file (user-avatar.png)
+    const src = userProfile?.avatarAbsPath
+      ? `file://${userProfile.avatarAbsPath}?v=${avatarVersion}`
       : DEFAULT_USER_AVATAR
-    return (
-      <img
-        src={src}
-        className="avatar-img"
-        onError={(e) => { e.currentTarget.src = DEFAULT_USER_AVATAR }}
-      />
-    )
+    return <img src={src} className="avatar-img" onError={(e) => { e.currentTarget.src = DEFAULT_USER_AVATAR }} />
   }
 
-  // Assistant role: show workspace avatar image
+  // ── Assistant avatar: from workspace identity (passed as raw) ──
+  if (raw && raw.startsWith('preset:')) {
+    return <img src={presetSrc(raw, DEFAULT_ASSISTANT_AVATAR)} className="avatar-img" onError={(e) => { e.currentTarget.src = DEFAULT_ASSISTANT_AVATAR }} />
+  }
+
   if (raw && raw.includes('.') && wsPath) {
-    return (
-      <img
-        src={`file://${wsPath}/.paw/${raw}?t=${ts.current}`}
-        className="avatar-img"
-        onError={(e) => { e.currentTarget.src = DEFAULT_ASSISTANT_AVATAR }}
-      />
-    )
+    return <img src={`file://${wsPath}/.paw/${raw}?v=${avatarVersion}`} className="avatar-img" onError={(e) => { e.currentTarget.src = DEFAULT_ASSISTANT_AVATAR }} />
   }
 
-  // Fallback: always an image, never emoji
-  return (
-    <img
-      src={DEFAULT_ASSISTANT_AVATAR}
-      className="avatar-img"
-    />
-  )
+  return <img src={DEFAULT_ASSISTANT_AVATAR} className="avatar-img" />
 }

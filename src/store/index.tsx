@@ -11,6 +11,7 @@ interface AppState {
   clawDir: string | null
   featureFlags: Record<string, boolean>
   sidebarVisible: boolean
+  avatarVersion: number
 }
 
 interface AppContextType extends AppState {
@@ -23,6 +24,7 @@ interface AppContextType extends AppState {
   setClawDir: (dir: string | null) => void
   setFeatureFlags: (flags: Record<string, boolean>) => void
   setSidebarVisible: (v: boolean) => void
+  bumpAvatarVersion: () => void
 }
 
 const AppContext = createContext<AppContextType | null>(null)
@@ -37,6 +39,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [clawDir, setClawDir] = useState<string | null>(null)
   const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({})
   const [sidebarVisible, setSidebarVisible] = useState(true)
+  const [avatarVersion, setAvatarVersion] = useState(0)
+  const bumpAvatarVersion = () => setAvatarVersion(v => v + 1)
 
   const setActivity = (sessionId: string, level: ActivityLevel) => {
     setActivityState(prev => new Map(prev).set(sessionId, level))
@@ -56,6 +60,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       clawDir, setClawDir,
       featureFlags, setFeatureFlags,
       sidebarVisible, setSidebarVisible,
+      avatarVersion, bumpAvatarVersion,
       setActivity, setStatus
     }}>
       {children}

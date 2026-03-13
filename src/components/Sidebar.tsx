@@ -6,6 +6,57 @@ import { Avatar } from './Avatar'
 import { stripMarkdown } from '../utils/markdown'
 import NewChatSelector from './NewChatSelector'
 
+function presetAvatarSrc(avatar?: string): string {
+  if (avatar?.startsWith('preset:')) {
+    const idx = parseInt(avatar.replace('preset:', '')) || 1
+    return `../avatars/${idx}.png`
+  }
+  return '../avatars/1.png'
+}
+
+function GroupAvatar({ members }: { members: Workspace[] }) {
+  const n = members.length
+  const border = '2px solid var(--bg-surface)'
+
+  function avatarSrcFor(ws: Workspace) {
+    const av = ws.identity?.avatar
+    if (av?.startsWith('preset:')) return presetAvatarSrc(av)
+    if (av?.includes('.') && ws.path) return `file://${ws.path}/.paw/${av}`
+    return '../avatars/1.png'
+  }
+
+  // 2 members: side by side overlapping
+  if (n <= 2) {
+    const size = 22
+    return (
+      <div style={{ width: 32, height: 32, position: 'relative', flexShrink: 0 }}>
+        {members.map((ws, i) => (
+          <img key={ws.id} src={avatarSrcFor(ws)}
+            style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', position: 'absolute', left: i * 12, top: 5, border, zIndex: n - i }}
+            onError={(e) => { e.currentTarget.src = '../avatars/1.png' }} />
+        ))}
+      </div>
+    )
+  }
+
+  // 3 members: 品字形 (1 top center + 2 bottom)
+  const size = 18
+  const positions = [
+    { left: 7, top: 0 },   // top center
+    { left: 0, top: 13 },  // bottom left
+    { left: 14, top: 13 }, // bottom right
+  ]
+  return (
+    <div style={{ width: 32, height: 32, position: 'relative', flexShrink: 0 }}>
+      {members.map((ws, i) => (
+        <img key={ws.id} src={avatarSrcFor(ws)}
+          style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', position: 'absolute', ...positions[i], border, zIndex: n - i }}
+          onError={(e) => { e.currentTarget.src = '../avatars/1.png' }} />
+      ))}
+    </div>
+  )
+}
+
 interface SessionItemProps {
   session: Session
   workspaces: Workspace[]
@@ -24,10 +75,13 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu, on
   const wsId = session.participants?.[0] || session.workspaceId
   const ws = wsId ? workspaces.find(w => w.id === wsId) : workspaces[0]
 
-  // F251: Group sessions use group.png
+  // Group sessions: composite avatar from participants
   let avatarEl: React.ReactNode
   if (isGroup) {
-    avatarEl = <img src="../avatars/group.png" className="avatar-img" />
+    const members = (session.participants || []).slice(0, 3)
+      .map(id => workspaces.find(w => w.id === id))
+      .filter(Boolean) as Workspace[]
+    avatarEl = <GroupAvatar members={members} />
   } else {
     avatarEl = (
       <Avatar
@@ -71,10 +125,10 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu, on
       onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
     >
-      <div className="session-avatar">{avatarEl}</div>
+      <div className={`session-avatar${isGroup ? ' group' : ''}`}>{avatarEl}</div>
       <div className="session-body">
         <div className="session-row-top">
-          <span className="session-title">{session.title}</span>
+          <span className="session-title">{session.title || (isGroup ? '群聊' : (ws?.identity?.name || ''))}</span>
           <span className="session-time">{formatTime(session.updatedAt)}</span>
         </div>
         <div className="session-row-bottom">
@@ -108,7 +162,7 @@ interface ContextMenuState {
 }
 
 export default function Sidebar() {
-  const { sessions, workspaces, currentSessionId, setCurrentSessionId, setSessions, setWorkspaces, setStatus, sidebarVisible, setSidebarVisible } = useAppState()
+  const { sessions, workspaces, currentSessionId, setCurrentSessionId, setSessions, setWorkspaces, setStatus, sidebarVisible, setSidebarVisible, bumpAvatarVersion } = useAppState()
   const api = useIPC()
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState>({ visible: false, x: 0, y: 0, sessionId: null })
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -155,7 +209,7 @@ export default function Sidebar() {
   // F232: Cmd+Shift+S toggle sidebar
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.metaKey && e.shiftKey && e.key.toLowerCase() === 's') {
+      if ((e.metaKey && e.shiftKey && e.key.toLowerCase() === 's') || (e.metaKey && e.key === '.')) {
         e.preventDefault()
         setSidebarVisible(!sidebarVisible)
       }
@@ -199,6 +253,7 @@ export default function Sidebar() {
   const refreshWorkspaces = async () => {
     const ws = await api.listWorkspaces()
     setWorkspaces(ws)
+    bumpAvatarVersion()
   }
 
   const handleContextMenu = (e: React.MouseEvent, sessionId: string) => {
@@ -214,11 +269,13 @@ export default function Sidebar() {
   }
 
   const submitRename = async () => {
-    if (!renaming || !renameText.trim()) return
-    await api.renameSession(renaming, renameText.trim())
+    if (!renaming) return
+    if (renameText.trim()) {
+      await api.renameSession(renaming, renameText.trim())
+      const updated = await api.listSessions()
+      setSessions(updated)
+    }
     setRenaming(null)
-    const updated = await api.listSessions()
-    setSessions(updated)
   }
 
   const handleDelete = async (id: string) => {

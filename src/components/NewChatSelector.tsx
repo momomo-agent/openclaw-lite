@@ -103,48 +103,57 @@ function IconUpload() {
 
 // ── Avatar Picker (SetupScreen pattern) ──
 
-function AvatarPicker({ selected, onSelect, onUpload }: {
-  selected: number; onSelect: (i: number) => void; onUpload?: (file: File) => void
+function AvatarPicker({ selected, onSelect, onUpload, customSrc }: {
+  selected: number; onSelect: (i: number) => void; onUpload?: () => void; customSrc?: string
 }) {
-  const fileRef = useRef<HTMLInputElement>(null)
+  const isCustomSelected = selected === -1
+  const [customImgValid, setCustomImgValid] = useState(true)
+
+  // Reset validity when customSrc changes
+  useEffect(() => { setCustomImgValid(true) }, [customSrc])
+
+  const circleStyle = (active: boolean, dim?: boolean): React.CSSProperties => ({
+    width: 46, height: 46, borderRadius: '50%', padding: 0, border: 'none',
+    outline: active ? '2px solid var(--text-primary)' : '2px solid transparent',
+    outlineOffset: 2,
+    cursor: 'pointer', overflow: 'hidden',
+    background: 'transparent',
+    opacity: active ? 1 : (dim ? 0.45 : 0.45),
+    transition: 'opacity 0.15s, outline-color 0.15s',
+  })
+
+  const showCustom = customSrc && customImgValid
+
   return (
-    <div style={{ display: 'flex', gap: 10, justifyContent: 'center', alignItems: 'center' }}>
+    <div style={{ display: 'flex', gap: 10, justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap' }}>
+      {/* Presets 0-5 */}
       {Array.from({ length: PRESET_COUNT }, (_, i) => (
-        <button
-          key={i}
-          onClick={() => onSelect(i)}
-          style={{
-            width: 46, height: 46, borderRadius: '50%', padding: 0, border: 'none',
-            outline: selected === i ? '2px solid var(--text-primary)' : '2px solid transparent',
-            outlineOffset: 2,
-            cursor: 'pointer', overflow: 'hidden',
-            background: 'transparent',
-            opacity: selected === i ? 1 : 0.45,
-            transition: 'opacity 0.15s, outline-color 0.15s',
-          }}
-        >
+        <button key={i} onClick={() => onSelect(i)} style={circleStyle(selected === i)}>
           <img src={`../avatars/${i}.png`} alt="" style={{ width: '100%', height: '100%', display: 'block' }} />
         </button>
       ))}
+      {/* Custom image (avatar.png) — shown if file exists on disk */}
+      {showCustom && (
+        <button onClick={() => onSelect(-1)} style={circleStyle(isCustomSelected)}>
+          <img src={customSrc} alt="" style={{ width: '100%', height: '100%', display: 'block', objectFit: 'cover' }} onError={() => setCustomImgValid(false)} />
+        </button>
+      )}
+      {/* Upload button */}
       {onUpload && (
-        <>
-          <button
-            onClick={() => fileRef.current?.click()}
-            style={{
-              width: 46, height: 46, borderRadius: '50%', padding: 0,
-              border: '2px dashed var(--border-muted)',
-              cursor: 'pointer', background: 'transparent',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              color: 'var(--text-faint)', fontSize: 16,
-              transition: 'border-color 0.15s, color 0.15s',
-            }}
-            title="上传自定义头像"
-          >
-            <IconUpload />
-          </button>
-          <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }}
-            onChange={(e) => { if (e.target.files?.[0]) onUpload(e.target.files[0]) }} />
-        </>
+        <button
+          onClick={onUpload}
+          style={{
+            width: 46, height: 46, borderRadius: '50%', padding: 0,
+            border: '2px dashed var(--border-muted)',
+            cursor: 'pointer', background: 'transparent',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: 'var(--text-faint)', fontSize: 16,
+            transition: 'border-color 0.15s, color 0.15s',
+          }}
+          title="上传自定义头像"
+        >
+          <IconUpload />
+        </button>
       )}
     </div>
   )
@@ -162,7 +171,8 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
   // Editor overlay state
   const [editorMode, setEditorMode] = useState<'create' | 'edit' | null>(null)
   const [editorName, setEditorName] = useState('')
-  const [editorAvatar, setEditorAvatar] = useState(0)
+  const [editorAvatar, setEditorAvatar] = useState(0) // -1 = custom image
+  const [editorCustomSrc, setEditorCustomSrc] = useState<string | null>(null)
   const [editorWsId, setEditorWsId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const editorInputRef = useRef<HTMLInputElement>(null)
@@ -183,21 +193,28 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
     setEditorMode('create')
     setEditorName('')
     setEditorAvatar(Math.floor(Math.random() * PRESET_COUNT))
+    setEditorCustomSrc(null)
     setEditorWsId(null)
     setSaving(false)
   }
 
-  const openEdit = (e: React.MouseEvent, ws: Workspace) => {
-    e.stopPropagation()
+  const openEdit = (e: React.MouseEvent | null, ws: Workspace) => {
+    e?.stopPropagation()
     setEditorMode('edit')
     setEditorName(ws.identity?.name || '')
     const av = ws.identity?.avatar
+    // Always check for custom avatar.png on disk (even when preset is active)
+    const customPath = ws.path ? `file://${ws.path}/.paw/avatar.png?t=${Date.now()}` : null
     if (typeof av === 'string' && av.startsWith('preset:')) {
       setEditorAvatar(parseInt(av.replace('preset:', '')) || 0)
-    } else if (typeof av === 'number') {
-      setEditorAvatar(av)
+      setEditorCustomSrc(customPath)
+    } else if (typeof av === 'string' && av.includes('.') && ws.path) {
+      // Custom image file (e.g. avatar.png) — show it and select custom slot
+      setEditorAvatar(-1)
+      setEditorCustomSrc(`file://${ws.path}/.paw/${av}?t=${Date.now()}`)
     } else {
       setEditorAvatar(0)
+      setEditorCustomSrc(customPath)
     }
     setEditorWsId(ws.id)
     setSaving(false)
@@ -216,7 +233,12 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
         }
       } else if (editorMode === 'edit' && editorWsId) {
         await api.updateWorkspaceIdentity({ id: editorWsId, name: editorName.trim() })
-        await api.setWorkspaceAvatar?.({ id: editorWsId, presetIndex: editorAvatar })
+        if (editorAvatar >= 0) {
+          await api.setWorkspaceAvatar?.({ id: editorWsId, presetIndex: editorAvatar })
+        } else if (editorAvatar === -1) {
+          // User clicked the custom avatar thumbnail — switch config back to avatar.png
+          await api.updateWorkspaceIdentity({ id: editorWsId, avatar: 'avatar.png' })
+        }
         onWorkspacesChanged()
       }
       setEditorMode(null)
@@ -225,13 +247,14 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
     }
   }
 
-  const handleEditorUpload = async (file: File) => {
+  const handleEditorUpload = async () => {
     if (!editorWsId) return
-    const path = (file as any).path
-    if (path) {
-      await api.setWorkspaceAvatar?.({ id: editorWsId, customPath: path })
-      onWorkspacesChanged()
-    }
+    const filePath = await api.pickImage?.()
+    if (!filePath) return
+    await api.setWorkspaceAvatar?.({ id: editorWsId, customPath: filePath })
+    setEditorAvatar(-1)
+    setEditorCustomSrc(`file://${filePath}?t=${Date.now()}`)
+    onWorkspacesChanged()
   }
 
   // ── List actions ──
@@ -291,7 +314,7 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
         <div className={`new-chat-panel${closing ? ' closing' : ''}`}
           onAnimationEnd={() => { if (closing) { setClosing(false); onClose() } }}>
           <div className="people-header">
-            <span>新建对话</span>
+            <span>{managing ? '管理助手' : '新建对话'}</span>
             <div style={{ display: 'flex', gap: 4 }}>
               <button className={`ncs-manage-btn${managing ? ' active' : ''}`}
                 onClick={() => managing ? exitManaging() : setManaging(true)}>
@@ -306,7 +329,7 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
               <div key={ws.id} className="ncs-agent-row"
                 onClick={() => {
                   if (groupMode) { handleGroupToggle(ws.id); return }
-                  if (managing) return
+                  if (managing) { openEdit(null as any, ws); return }
                   onSelect({ workspaceId: ws.id, mode: 'chat' })
                 }}>
                 {groupMode && (
@@ -393,8 +416,9 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
 
             <AvatarPicker
               selected={editorAvatar}
-              onSelect={setEditorAvatar}
+              onSelect={(i) => setEditorAvatar(i)}
               onUpload={editorMode === 'edit' ? handleEditorUpload : undefined}
+              customSrc={editorCustomSrc || undefined}
             />
 
             <TextInput

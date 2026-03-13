@@ -27,6 +27,8 @@ const workspaceRegistry = require('./core/workspace-registry')
 let _activeRequestId = null
 let _activeAbortController = null
 let _activeCodingProcess = null
+// Per-request delegate message accumulator — saved in correct order by finishChat
+const _pendingDelegateMessages = new Map() // requestId → [{sender, content, toolSteps, senderWorkspaceId, timestamp}]
 
 function pushStatus(st, detail) {
   eventBus.dispatch('agent-status', { state: st, detail })
@@ -355,6 +357,16 @@ function savePrefs(p) {
   fs.writeFileSync(PREFS_PATH, JSON.stringify(merged, null, 2))
 }
 
+// Seed global USER.md from template if missing
+{
+  const globalUserMd = path.join(GLOBAL_DIR, 'USER.md')
+  if (!fs.existsSync(globalUserMd)) {
+    const tpl = path.join(__dirname, 'templates', 'USER.md')
+    fs.mkdirSync(GLOBAL_DIR, { recursive: true })
+    if (fs.existsSync(tpl)) fs.copyFileSync(tpl, globalUserMd)
+  }
+}
+
 const isDev = process.argv.includes('--dev') || process.env.NODE_ENV === 'development'
 
 // app.disableHardwareAcceleration() - removed: conflicts with hiddenInset rendering
@@ -365,7 +377,7 @@ async function createWindow() {
     minWidth: 640, minHeight: 400,
     backgroundColor: '#0a0a0a',
     titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 17, y: 17 },
+    trafficLightPosition: { x: 21, y: 21 },
     vibrancy: 'sidebar',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -541,42 +553,44 @@ ipcMain.handle('get-prefs', () => {
 
 ipcMain.handle('get-user-profile', () => {
   const prefs = loadPrefs()
-  // Ensure user avatar file exists — auto-assign 0.png if missing
-  const avatarPath = prefs.userAvatar ? path.join(GLOBAL_DIR, prefs.userAvatar) : null
-  if (!prefs.userAvatar || (avatarPath && !fs.existsSync(avatarPath))) {
-    const src = path.join(__dirname, 'renderer', 'avatars', '0.png')
-    const dest = path.join(GLOBAL_DIR, 'user-avatar.png')
-    fs.mkdirSync(GLOBAL_DIR, { recursive: true })
-    try { fs.copyFileSync(src, dest) } catch {}
-    prefs.userAvatar = 'user-avatar.png'
+  // Ensure user avatar exists — default to preset:0 if missing
+  if (!prefs.userAvatar) {
+    prefs.userAvatar = 'preset:0'
     savePrefs(prefs)
   }
-  const absPath = path.join(GLOBAL_DIR, prefs.userAvatar || 'user-avatar.png')
+  const absPath = prefs.userAvatar === 'user-avatar.png' ? path.join(GLOBAL_DIR, 'user-avatar.png') : null
   return { userName: prefs.userName || '', userAvatar: prefs.userAvatar || '', avatarAbsPath: absPath }
 })
 
-ipcMain.handle('set-user-profile', (_, { userName, presetIndex, customPath }) => {
+ipcMain.handle('set-user-profile', (_, { userName, presetIndex, customPath, useCustom }) => {
   const prefs = loadPrefs()
   if (userName !== undefined) prefs.userName = userName
   if (presetIndex !== undefined) {
-    const src = path.join(__dirname, 'renderer', 'avatars', `${presetIndex}.png`)
-    const dest = path.join(GLOBAL_DIR, 'user-avatar.png')
-    fs.mkdirSync(GLOBAL_DIR, { recursive: true })
-    try { fs.copyFileSync(src, dest) } catch {}
-    prefs.userAvatar = 'user-avatar.png'
+    prefs.userAvatar = `preset:${presetIndex}`
   } else if (customPath) {
     const dest = path.join(GLOBAL_DIR, 'user-avatar.png')
     fs.mkdirSync(GLOBAL_DIR, { recursive: true })
     try { fs.copyFileSync(customPath, dest) } catch {}
     prefs.userAvatar = 'user-avatar.png'
+  } else if (useCustom) {
+    prefs.userAvatar = 'user-avatar.png'
   }
   savePrefs(prefs)
-  const absPath = path.join(GLOBAL_DIR, prefs.userAvatar || 'user-avatar.png')
+  const absPath = prefs.userAvatar === 'user-avatar.png' ? path.join(GLOBAL_DIR, 'user-avatar.png') : null
   return { userName: prefs.userName || '', userAvatar: prefs.userAvatar || '', avatarAbsPath: absPath }
 })
 
 ipcMain.handle('get-user-avatar-path', () => {
   return path.join(GLOBAL_DIR, 'user-avatar.png')
+})
+
+ipcMain.handle('pick-image', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }],
+  })
+  if (result.canceled || !result.filePaths[0]) return null
+  return result.filePaths[0]
 })
 
 ipcMain.handle('reset-claw-dir', () => {
@@ -865,18 +879,16 @@ ipcMain.handle('workspace-update-identity', (_, { id, name, avatar, description 
 ipcMain.handle('workspace-set-avatar', async (_, { id, presetIndex, customPath }) => {
   const ws = workspaceRegistry.getWorkspace(id)
   if (!ws) return { ok: false, error: 'not_found' }
-  const dest = path.join(ws.path, '.paw', 'avatar.png')
-  fs.mkdirSync(path.join(ws.path, '.paw'), { recursive: true })
   try {
-    if (customPath) {
+    if (presetIndex !== undefined) {
+      return workspaceRegistry.updateWorkspaceIdentity(id, { avatar: `preset:${presetIndex}` })
+    } else if (customPath) {
+      const dest = path.join(ws.path, '.paw', 'avatar.png')
+      fs.mkdirSync(path.join(ws.path, '.paw'), { recursive: true })
       fs.copyFileSync(customPath, dest)
-    } else if (presetIndex !== undefined) {
-      const src = path.join(__dirname, 'renderer', 'avatars', `${presetIndex}.png`)
-      fs.copyFileSync(src, dest)
-    } else {
-      return { ok: false, error: 'no_source' }
+      return workspaceRegistry.updateWorkspaceIdentity(id, { avatar: 'avatar.png' })
     }
-    return workspaceRegistry.updateWorkspaceIdentity(id, { avatar: 'avatar.png' })
+    return { ok: false, error: 'no_source' }
   } catch (e) {
     return { ok: false, error: e.message }
   }
@@ -947,16 +959,66 @@ function persistUserMessage(sessionId, content) {
   if (wsPath) sessionStore.appendMessage(wsPath, sessionId, { role: 'user', content: content || '', timestamp: Date.now() })
 }
 
-function finishChat(sessionId, requestId, assistantText, wsIdentity) {
+function finishChat(sessionId, requestId, assistantText, wsIdentity, toolSteps) {
   const wsPath = sessionId ? (getSessionWorkspace(sessionId) || clawDir) : null
   const isError = assistantText && assistantText.startsWith('❌')
-  console.log(`[Paw] finishChat: sessionId=${sessionId} wsPath=${wsPath} isError=${isError} textLen=${(assistantText||'').length}`)
-  // Only persist real responses, not errors (errors are transient UI state)
-  if (wsPath && assistantText && !isError) {
-    const meta = {}
-    if (wsIdentity?.agentName) meta.sender = wsIdentity.agentName
-    if (wsIdentity?.workspaceId) meta.senderWorkspaceId = wsIdentity.workspaceId
-    sessionStore.appendMessage(wsPath, sessionId, { role: 'assistant', content: assistantText, timestamp: Date.now(), ...meta })
+  // Strip NO_REPLY from orchestrator text (delegate already responded directly)
+  const saveText = (assistantText || '').replace(/\n?NO_REPLY\s*$/i, '').trim()
+  // Gather accumulated delegate messages (always clean up, even on error)
+  const delegateMsgs = _pendingDelegateMessages.get(requestId) || []
+  _pendingDelegateMessages.delete(requestId)
+  console.log(`[Paw] finishChat: sessionId=${sessionId} isError=${isError} textLen=${(assistantText||'').length} saveLen=${saveText.length} steps=${toolSteps?.length || 0} delegates=${delegateMsgs.length}`)
+
+  if (wsPath && !isError) {
+    const orchMeta = {}
+    if (wsIdentity?.agentName) orchMeta.sender = wsIdentity.agentName
+    if (wsIdentity?.workspaceId) orchMeta.senderWorkspaceId = wsIdentity.workspaceId
+    const steps = toolSteps || []
+
+    if (delegateMsgs.length > 0) {
+      // ── Group chat: split orchestrator toolSteps at delegate_to boundaries ──
+      // Save in visual order: orch-segment → delegate → orch-segment → delegate → ...
+      // This matches how cards appear during streaming (pendingSplit creates new cards)
+      let currentSteps = []
+      let delegateIdx = 0
+      for (const step of steps) {
+        currentSteps.push(step)
+        if (step.name === 'delegate_to' && delegateIdx < delegateMsgs.length) {
+          // Flush orchestrator segment (thinking + tools + delegate_to call)
+          if (currentSteps.length) {
+            sessionStore.appendMessage(wsPath, sessionId, {
+              role: 'assistant', content: '', timestamp: Date.now(),
+              toolSteps: currentSteps, ...orchMeta,
+            })
+          }
+          currentSteps = []
+          // Save delegate response
+          const dm = delegateMsgs[delegateIdx++]
+          const dmMeta = { sender: dm.sender, senderWorkspaceId: dm.senderWorkspaceId }
+          if (dm.toolSteps?.length) dmMeta.toolSteps = dm.toolSteps
+          sessionStore.appendMessage(wsPath, sessionId, {
+            role: 'assistant', content: dm.content, timestamp: dm.timestamp, ...dmMeta,
+          })
+        }
+      }
+      // Final orchestrator segment (post-delegation text, if any)
+      if (saveText || currentSteps.length) {
+        const finalMeta = { ...orchMeta }
+        if (currentSteps.length) finalMeta.toolSteps = currentSteps
+        sessionStore.appendMessage(wsPath, sessionId, {
+          role: 'assistant', content: saveText, timestamp: Date.now(), ...finalMeta,
+        })
+      }
+    } else {
+      // ── Simple chat (no delegation) ──
+      if (saveText || steps.length) {
+        const meta = { ...orchMeta }
+        if (steps.length) meta.toolSteps = steps
+        sessionStore.appendMessage(wsPath, sessionId, {
+          role: 'assistant', content: saveText, timestamp: Date.now(), ...meta,
+        })
+      }
+    }
   }
   eventBus.dispatch('chat-done', { requestId, sessionId, error: isError ? assistantText : undefined })
   // Unread count: increment when window not focused
@@ -1007,7 +1069,7 @@ ipcMain.handle('chat', async (_, { prompt, message, history, rawMessages, agentI
         sessionId,
         requestId,
       })
-      finishChat(sessionId, requestId, result?.answer, null)
+      finishChat(sessionId, requestId, result?.answer, null, result?.toolSteps)
       return result
     }
   }
@@ -1201,7 +1263,7 @@ ${roster}
       if (result?.usage && sessionId) {
         sessionStore.addTokenUsage(_sessionDb, sessionId, result.usage.inputTokens, result.usage.outputTokens)
       }
-      finishChat(sessionId, requestId, result?.answer, _wsIdentity)
+      finishChat(sessionId, requestId, result?.answer, _wsIdentity, result?.toolSteps)
       return result
     } catch (err) {
       lastError = err
@@ -1379,12 +1441,22 @@ async function handleDelegateTo(input, config, sessionId) {
 
     const responseText = result?.answer || ''
 
-    // Signal delegate end — frontend finalizes bubble + saves message
+    // Signal delegate end — frontend finalizes bubble
     if (parentRequestId) {
       eventBus.dispatch('chat-delegate-end', { requestId: parentRequestId, sender: myName, workspaceId: targetWs.id, fullText: responseText, sessionId })
     }
 
-    console.log(`[delegate_to] ${myName} responded (${responseText.length} chars), sent delegate-end`)
+    // Accumulate delegate message — finishChat saves all messages in correct visual order
+    if (parentRequestId && responseText.trim()) {
+      if (!_pendingDelegateMessages.has(parentRequestId)) _pendingDelegateMessages.set(parentRequestId, [])
+      _pendingDelegateMessages.get(parentRequestId).push({
+        sender: myName, senderWorkspaceId: targetWs.id,
+        content: responseText, timestamp: Date.now(),
+        toolSteps: result?.toolSteps || undefined,
+      })
+    }
+
+    console.log(`[delegate_to] ${myName} responded (${responseText.length} chars), accumulated for finishChat`)
     // Return delegate's response to the orchestrator so they can make informed decisions
     // (chain to another participant, add context, or stay silent)
     const preview = responseText.length > 300 ? responseText.slice(0, 300) + '…' : responseText
@@ -1450,6 +1522,7 @@ async function streamAnthropic(messages, systemPrompt, config, requestId, tools,
   const endpoint = base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`
   const headers = { 'Content-Type': 'application/json', 'x-api-key': getApiKey(config), 'anthropic-version': '2023-06-01', 'anthropic-beta': 'prompt-caching-2024-07-31' }
   let fullText = '', roundText = '', msgs = [...messages]
+  let flowSteps = []  // Accumulate thinking + tool steps in chronological order
 
   // Transcript sanitization before streaming (OpenClaw-aligned)
   const cfg = config || {}
@@ -1587,12 +1660,15 @@ async function streamAnthropic(messages, systemPrompt, config, requestId, tools,
     totalUsageOutput += roundUsageOutput
     lastUsageInput = roundUsageInput
 
+    // Persist thinking block into flowSteps
+    if (roundThinking) flowSteps.push({ name: '__thinking__', output: roundThinking })
+
     if (!toolCalls.length) {
       pushStatus('done', 'Done')
       // chat-done dispatched by chat handler after persisting to SQLite
       console.log('[Paw] streamAnthropic done, fullText length:', fullText.length)
       clearTimeout(timeoutId)
-      return { answer: fullText, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput, cacheRead: totalCacheRead, cacheWrite: totalCacheWrite, lastInputTokens: lastUsageInput, lastCacheRead, lastCacheWrite } }
+      return { answer: fullText, toolSteps: flowSteps.length ? flowSteps : undefined, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput, cacheRead: totalCacheRead, cacheWrite: totalCacheWrite, lastInputTokens: lastUsageInput, lastCacheRead, lastCacheWrite } }
     }
 
     // Extract purpose from thinking — last meaningful line before tool calls
@@ -1644,6 +1720,8 @@ async function streamAnthropic(messages, systemPrompt, config, requestId, tools,
       if (!silent) {
         ipc('chat-tool-step', { requestId, name: tc.name, input, output: String(result).slice(0, 500) })
       }
+      // Always persist to flowSteps (including silent tools like delegate_to) for DB persistence
+      flowSteps.push({ name: tc.name, input, output: String(result).slice(0, 500) })
       toolResults.push({ type: 'tool_result', tool_use_id: tc.id, content: truncateToolResult(result) })
     }
     // Send round info to renderer (include purpose extracted from thinking)
@@ -1692,6 +1770,7 @@ async function streamOpenAI(messages, systemPrompt, config, requestId, tools, se
   msgs.push(...sanitizedHistory)
 
   let fullText = '', roundText = ''
+  let flowSteps = []  // Accumulate tool steps in chronological order
   const loopDetector = new LoopDetector()
   // Usage accumulator — tracks across all rounds (OpenClaw-aligned)
   let totalUsageInput = 0, totalUsageOutput = 0
@@ -1780,7 +1859,7 @@ async function streamOpenAI(messages, systemPrompt, config, requestId, tools, se
       pushStatus('done', 'Done')
       // chat-done dispatched by chat handler after persisting to SQLite
       clearTimeout(timeoutId)
-      return { answer: fullText, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput } }
+      return { answer: fullText, toolSteps: flowSteps.length ? flowSteps : undefined, usage: { inputTokens: totalUsageInput, outputTokens: totalUsageOutput } }
     }
 
     // Build assistant message with tool_calls
@@ -1819,6 +1898,8 @@ async function streamOpenAI(messages, systemPrompt, config, requestId, tools, se
       if (!silent) {
         ipc('chat-tool-step', { requestId, name: tc.name, input, output: String(result).slice(0, 500) })
       }
+      // Always persist to flowSteps (including silent tools) for DB persistence
+      flowSteps.push({ name: tc.name, input, output: String(result).slice(0, 500) })
       msgs.push({ role: 'tool', tool_call_id: tc.id, content: truncateToolResult(result) })
     }
     // Send round info to renderer (purpose from visible text for OpenAI)

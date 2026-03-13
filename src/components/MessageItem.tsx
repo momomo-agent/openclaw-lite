@@ -1,4 +1,5 @@
-import { Message } from '../types'
+import React from 'react'
+import { Message, ToolStep } from '../types'
 import { renderMarkdown } from '../utils/markdown'
 import { linkifyPaths } from '../utils/linkify'
 import { useAppState } from '../store'
@@ -9,12 +10,11 @@ interface MessageItemProps {
   message: Message
   isStreaming?: boolean
   statusText?: string
-  userAvatarPath?: string
   ownerWorkspaceId?: string  // session's first participant (owner)
   onRetry?: () => void
 }
 
-export default function MessageItem({ message, isStreaming, statusText, userAvatarPath, ownerWorkspaceId, onRetry }: MessageItemProps) {
+export default function MessageItem({ message, isStreaming, statusText, ownerWorkspaceId, onRetry }: MessageItemProps) {
   const { workspaces, userProfile } = useAppState()
   const isUser = message.role === 'user'
   const isError = message.isError === true  // assistant message that errored
@@ -31,7 +31,7 @@ export default function MessageItem({ message, isStreaming, statusText, userAvat
       : (!isUser
         ? (ownerWorkspaceId ? workspaces.find(w => w.id === ownerWorkspaceId) : workspaces[0])
         : undefined))
-  const resolvedAvatar = (!isUser && ws?.identity?.avatar) || message.avatar
+  const resolvedAvatar = isUser ? (userProfile?.userAvatar || message.avatar) : (ws?.identity?.avatar || message.avatar)
   const resolvedName = (!isUser && ws?.identity?.name) || message.sender
 
   const renderContent = (text: string) => linkifyPaths(renderMarkdown(text))
@@ -52,7 +52,6 @@ export default function MessageItem({ message, isStreaming, statusText, userAvat
             raw={resolvedAvatar}
             role={isUser ? 'user' : 'assistant'}
             wsPath={ws?.path || message.workspacePath}
-            userAvatarPath={userAvatarPath}
           />
         )}
       </div>
@@ -61,24 +60,41 @@ export default function MessageItem({ message, isStreaming, statusText, userAvat
           <span className={`msg-name ${isUser ? 'user-name' : ''}${isA2A ? ' a2a-name' : ''}`}>
             {resolvedName || (isUser ? (userProfile?.userName || 'You') : 'Assistant')}
           </span>
+          {isStreaming && statusText && (
+            <span className="msg-status-breathing">({statusText})</span>
+          )}
           <span className="msg-time">
             {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>
         </div>
         <div className="msg-flow">
-          {message.thinking && (
-            <details className="delegate-thinking">
-              <summary>▶ 💭 Thinking...</summary>
-              <div className="thinking-content" dangerouslySetInnerHTML={{ __html: renderContent(message.thinking) }} />
-            </details>
-          )}
-          {message.toolSteps && message.toolSteps.length > 0 && (
-            <ToolGroup
-              steps={message.toolSteps}
-              isStreaming={isStreaming}
-              roundPurpose={message.roundPurpose}
-            />
-          )}
+          {message.toolSteps && message.toolSteps.length > 0 && (() => {
+            const segments: React.ReactNode[] = []
+            let toolBatch: ToolStep[] = []
+            const flushTools = () => {
+              if (toolBatch.length) {
+                segments.push(<ToolGroup key={`tg-${segments.length}`} steps={toolBatch} isStreaming={isStreaming} roundPurpose={message.roundPurpose} />)
+                toolBatch = []
+              }
+            }
+            for (const step of message.toolSteps) {
+              if (step.name === '__thinking__') {
+                flushTools()
+                const text = (step.output || '').trim()
+                if (text) {
+                  segments.push(
+                    <div key={`th-${segments.length}`} className="msg-thinking">
+                      <div className="msg-thinking-content" dangerouslySetInnerHTML={{ __html: renderContent(text) }} />
+                    </div>
+                  )
+                }
+              } else {
+                toolBatch.push(step)
+              }
+            }
+            flushTools()
+            return segments
+          })()}
           {/* F247: Image attachments inline */}
           {isUser && attachments && attachments.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
@@ -99,19 +115,24 @@ export default function MessageItem({ message, isStreaming, statusText, userAvat
               )}
             </>
           ) : (
-            <div
-              className={`msg-content md-content${isA2A ? ' a2a-content' : ''}${isUser && message.status === 'failed' ? ' msg-send-failed' : ''}`}
-              dangerouslySetInnerHTML={{ __html: renderContent(message.content) }}
-            />
+            message.content?.trim() ? (
+              <div
+                className={`msg-content md-content${isA2A ? ' a2a-content' : ''}${isUser && message.status === 'failed' ? ' msg-send-failed' : ''}`}
+                dangerouslySetInnerHTML={{ __html: renderContent(message.content) }}
+              />
+            ) : null
           )}
           {/* Send failure: small retry icon beside message */}
           {isUser && message.status === 'failed' && onRetry && (
             <button className="retry-icon-btn" onClick={onRetry} title="重新发送">↻ 重试</button>
           )}
-          {isStreaming && statusText && (
-            <div className="inline-status">
-              <span className="reading-indicator"><span></span><span></span><span></span></span> {statusText}
-            </div>
+          {/* Typing indicator: three bouncing dots while streaming */}
+          {isStreaming && (
+            <span className="typing-dots">
+              <span className="typing-dot" />
+              <span className="typing-dot" />
+              <span className="typing-dot" />
+            </span>
           )}
         </div>
       </div>

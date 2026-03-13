@@ -10,6 +10,24 @@ import SettingsPanel from './SettingsPanel'
 
 const CHARS_PER_TOKEN = 3.5
 
+// Debug toggle — run `__PAW_DEBUG__=true` in DevTools console to enable
+const dbgEnabled = () => !!(window as any).__PAW_DEBUG__
+
+/** Per-session streaming state — lives in a Map ref, survives session switches */
+interface StreamState {
+  requestId: string | null
+  streamingMsg: Message | null
+  delegateMsg: Message | null
+  pendingSplit: { sender?: string; avatar?: string; workspacePath?: string; workspaceId?: string } | null
+  thinkingAccum: string
+  status: string
+  statusIsAiAuthored: boolean
+}
+
+function createStreamState(): StreamState {
+  return { requestId: null, streamingMsg: null, delegateMsg: null, pendingSplit: null, thinkingAccum: '', status: '', statusIsAiAuthored: false }
+}
+
 export default function ChatView() {
   const { currentSessionId, setCurrentSessionId, sessions, setSessions, setActivity, setStatus, workspaces, userProfile, sidebarVisible, setSidebarVisible } = useAppState()
   const api = useIPC()
@@ -17,41 +35,126 @@ export default function ChatView() {
   const [showSettings, setShowSettings] = useState(false)
   const [showMembers, setShowMembers] = useState(false)
   const [streamingStatus, setStreamingStatus] = useState('')
-  const currentRequestId = useRef<string | null>(null)
-  const streamingMsg = useRef<Message | null>(null)
-  const statusIsAiAuthored = useRef(false)
-
-  // Derive from sessions store (always live, never stale)
-  const currentSession = sessions.find(s => s.id === currentSessionId)
-  const sessionTitle = currentSession?.title || 'New Chat'
-  const sessionParticipants = currentSession?.participants || []
-
-  // F223: Session message cache
-  const sessionCache = useRef<Map<string, Message[]>>(new Map())
-
-  // F222/F242: Delegate state
-  const delegateMsg = useRef<Message | null>(null)
-  // Post-delegate split: orchestrator identity to create new card after delegate ends
-  const pendingSplit = useRef<{ sender?: string; avatar?: string; workspacePath?: string; workspaceId?: string } | null>(null)
 
   // F243: CC output state
   const [ccOutput, setCcOutput] = useState<{ task: string; lines: string[]; running: boolean } | null>(null)
 
+  // Derive from sessions store (always live, never stale)
+  const currentSession = sessions.find(s => s.id === currentSessionId)
+  const sessionParticipants = currentSession?.participants || []
+  const isGroup = sessionParticipants.length > 1
+  const ownerWs = sessionParticipants[0] ? workspaces.find(w => w.id === sessionParticipants[0]) : workspaces[0]
+  const sessionTitle = currentSession?.title || (isGroup ? '群聊' : (ownerWs?.identity?.name || ''))
+
+  // === Refs for latest values (handlers registered once need current values via refs) ===
+  const currentSidRef = useRef<string | null>(null)
+  const workspacesRef = useRef(workspaces)
+  const apiRef = useRef(api)
+  const storeRef = useRef({ setActivity, setStatus, setSessions })
+
+  useEffect(() => { currentSidRef.current = currentSessionId || null })
+  useEffect(() => { workspacesRef.current = workspaces }, [workspaces])
+  useEffect(() => { apiRef.current = api }, [api])
+  useEffect(() => { storeRef.current = { setActivity, setStatus, setSessions } }, [setActivity, setStatus, setSessions])
+
+  // === Per-session streaming state Map ===
+  const streamStates = useRef<Map<string, StreamState>>(new Map())
+  const sessionCache = useRef<Map<string, Message[]>>(new Map())
+
+  const getStreamState = (sid: string): StreamState => {
+    let s = streamStates.current.get(sid)
+    if (!s) {
+      s = createStreamState()
+      streamStates.current.set(sid, s)
+    }
+    return s
+  }
+
+  const clearStreamState = (sid: string) => {
+    streamStates.current.delete(sid)
+    if (sid === currentSidRef.current) {
+      setStreamingStatus('')
+      setCcOutput(null)
+    }
+  }
+
+  // === Message routing: React state for current session, cache for background ===
+  const routeUpdate = (sid: string, msg: Message) => {
+    const updater = (prev: Message[]) => {
+      const idx = prev.findIndex(m => m.id === msg.id)
+      if (idx >= 0) {
+        const next = [...prev]
+        next[idx] = { ...msg }
+        return next
+      }
+      return [...prev.slice(0, -1), { ...msg }]
+    }
+    if (sid === currentSidRef.current) {
+      setMessages(updater)
+    } else {
+      const cached = sessionCache.current.get(sid) || []
+      sessionCache.current.set(sid, updater(cached))
+    }
+  }
+
+  const routeAdd = (sid: string, msg: Message) => {
+    if (sid === currentSidRef.current) {
+      setMessages(prev => [...prev, msg])
+    } else {
+      const cached = sessionCache.current.get(sid) || []
+      sessionCache.current.set(sid, [...cached, msg])
+    }
+  }
+
+  /** Ensure a deferred streaming card is materialized into the message list */
+  const ensureCardAdded = (sid: string, ss: StreamState) => {
+    const msg = ss.streamingMsg as any
+    if (msg?._deferred) {
+      delete msg._deferred
+      routeAdd(sid, msg)
+    }
+  }
+
+  const routeSet = (sid: string, msgs: Message[]) => {
+    if (sid === currentSidRef.current) {
+      setMessages(msgs)
+    } else {
+      sessionCache.current.set(sid, msgs)
+    }
+  }
+
+  const routeStatus = (sid: string, status: string) => {
+    const ss = streamStates.current.get(sid)
+    if (ss) ss.status = status
+    if (sid === currentSidRef.current) {
+      setStreamingStatus(status)
+    }
+  }
+
+  // === Session switch: load messages and restore streaming status ===
   useEffect(() => {
     if (!currentSessionId) return
+    if (dbgEnabled()) console.log('[Paw🐾] session-switch', { sid: currentSessionId.slice(0, 8), hasCache: sessionCache.current.has(currentSessionId), streaming: !!streamStates.current.get(currentSessionId)?.requestId })
+    // Restore streaming status from per-session state
+    const ss = streamStates.current.get(currentSessionId)
+    setStreamingStatus(ss?.status || '')
+    // Load messages from cache (may include live streaming data) or DB
     const cached = sessionCache.current.get(currentSessionId)
     if (cached) {
       setMessages(cached)
     } else {
-      loadSession()
+      // Clear stale messages immediately before async load
+      setMessages([])
+      loadSessionMessages(currentSessionId)
     }
   }, [currentSessionId])
 
+  // Sync messages to cache for current session
   useEffect(() => {
-    if (currentSessionId && messages.length > 0) {
+    if (currentSessionId) {
       sessionCache.current.set(currentSessionId, messages)
     }
-  }, [messages, sessionTitle, currentSessionId])
+  }, [messages, currentSessionId])
 
   // F248 + F249: Global click handler for file links and external links
   useEffect(() => {
@@ -85,153 +188,226 @@ export default function ChatView() {
     return () => document.removeEventListener('click', handleClick)
   }, [api])
 
-  // Helper: reset all streaming state
-  const resetStreaming = () => {
-    currentRequestId.current = null
-    streamingMsg.current = null
-    delegateMsg.current = null
-    pendingSplit.current = null
-    setCcOutput(null)
-    setStreamingStatus('')
-    statusIsAiAuthored.current = false
-  }
-
-  // Helper: update a message in list by ID (or replace last if ID not found)
-  const updateMessage = (msg: Message) => {
-    setMessages(prev => {
-      const idx = prev.findIndex(m => m.id === msg.id)
-      if (idx >= 0) {
-        const next = [...prev]
-        next[idx] = { ...msg }
-        return next
-      }
-      // Fallback: replace last
-      return [...prev.slice(0, -1), { ...msg }]
-    })
-  }
-
+  // === Streaming event handlers — registered ONCE, session-independent ===
   useEffect(() => {
-    // --- Core streaming events ---
-    const handleTextStart = (data: any) => {
-      if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
+    const dbg = (...args: any[]) => { if (dbgEnabled()) console.log('[Paw🐾]', ...args) }
 
-      // Post-delegate split: create NEW orchestrator card below the delegate bubble
-      if (pendingSplit.current) {
-        const split = pendingSplit.current
-        pendingSplit.current = null
-        streamingMsg.current = {
-          id: 'streaming-' + Date.now(),
+    // Guard helper: resolves session, checks requestId, logs rejection reason
+    const guard = (event: string, data: any): { sid: string; ss: StreamState } | null => {
+      const sid = data.sessionId || currentSidRef.current
+      const ss = sid ? streamStates.current.get(sid) : undefined
+      const match = ss?.requestId && data.requestId === ss.requestId
+      dbg(event, {
+        sid: sid?.slice(0, 8) || '(none)',
+        reqId: data.requestId?.slice(0, 8),
+        match,
+      })
+      if (!sid || !ss || !match) return null
+      return { sid, ss }
+    }
+
+    const handleTextStart = (data: any) => {
+      const g = guard('text-start', data)
+      if (!g) return
+      const { sid, ss } = g
+
+      // Post-delegate split: prepare NEW orchestrator card but don't add to UI yet —
+      // the first token/thinking/toolStep will add it (avoids empty card flash)
+      if (ss.pendingSplit) {
+        const split = ss.pendingSplit
+        ss.pendingSplit = null
+        const newId = 'streaming-' + Date.now()
+        ss.streamingMsg = {
+          id: newId,
           role: 'assistant',
           content: '',
           timestamp: Date.now(),
           toolSteps: [],
-          thinking: '',
           sender: split.sender,
           avatar: split.avatar,
           workspacePath: split.workspacePath,
           workspaceId: split.workspaceId,
+          _deferred: true,  // not yet added to messages
+        } as any
+        // Don't steal status — if delegate is still active, status stays on delegate
+        if (!ss.delegateMsg) {
+          routeStatus(sid, 'Thinking...')
         }
-        setStreamingStatus('Thinking...')
-        statusIsAiAuthored.current = false
-        setMessages(prev => [...prev, streamingMsg.current!])
+        ss.statusIsAiAuthored = false
         return
       }
 
-      // For round > 0, update existing streaming message instead of creating a new one
-      if (streamingMsg.current) {
-        // Multi-round: just reset content for new round, keep identity
+      // For round > 0 or pre-created card from handleSend: update identity from backend
+      if (ss.streamingMsg) {
+        dbg('text-start (existing card)', { id: ss.streamingMsg.id, sender: data.agentName })
+        // Update with authoritative identity from backend
+        if (data.agentName) ss.streamingMsg.sender = data.agentName
+        if (data.avatar) ss.streamingMsg.avatar = data.avatar
+        if (data.wsPath) ss.streamingMsg.workspacePath = data.wsPath
+        if (data.workspaceId) ss.streamingMsg.workspaceId = data.workspaceId
+        routeStatus(sid, ss.status || 'Thinking...')
+        routeUpdate(sid, ss.streamingMsg)
         return
       }
-      streamingMsg.current = {
-        id: 'streaming-' + Date.now(),
+
+      const newId = 'streaming-' + Date.now()
+      ss.streamingMsg = {
+        id: newId,
         role: 'assistant',
         content: '',
         timestamp: Date.now(),
         toolSteps: [],
-        thinking: '',
         sender: data.agentName,
         avatar: data.avatar,
         workspacePath: data.wsPath,
         workspaceId: data.workspaceId,
       }
-      setStreamingStatus('Thinking...')
-      statusIsAiAuthored.current = false
-      setMessages(prev => [...prev, streamingMsg.current!])
-    }
+      routeStatus(sid, 'Thinking...')
+      ss.statusIsAiAuthored = false
+      routeAdd(sid, ss.streamingMsg)    }
 
     const handleToken = (data: any) => {
-      if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
-      if (!streamingMsg.current) return
+      const g = guard('token', data)
+      if (!g) return
+      const { sid, ss } = g
+      if (!ss.streamingMsg) {
+        dbg('token skip (no streamingMsg)')
+        return
+      }
       const text = data.text || data.delta || ''
       if (!text) return
+      dbg(data.thinking ? 'think-chunk' : 'text-chunk', text.slice(0, 80))
+      ensureCardAdded(sid, ss)
+      const target = ss.delegateMsg || ss.streamingMsg
       if (data.thinking) {
-        streamingMsg.current.thinking = (streamingMsg.current.thinking || '') + text
+        ss.thinkingAccum += text
+        // Live preview: update or append __thinking__ entry in toolSteps
+        const steps = target.toolSteps || []
+        const last = steps[steps.length - 1]
+        if (last?.name === '__thinking__' && (last as any)._live) {
+          last.output = ss.thinkingAccum
+          target.toolSteps = [...steps]
+        } else {
+          target.toolSteps = [...steps, { name: '__thinking__', output: ss.thinkingAccum, _live: true } as any]
+        }
       } else {
-        streamingMsg.current.content += text
+        // Non-thinking token → finalize any pending thinking block
+        if (ss.thinkingAccum) {
+          const steps = target.toolSteps || []
+          const last = steps[steps.length - 1]
+          if (last?.name === '__thinking__' && (last as any)._live) delete (last as any)._live
+          ss.thinkingAccum = ''
+        }
+        target.content = (target.content || '') + text
       }
-      updateMessage(streamingMsg.current)
+      routeUpdate(sid, target)
     }
 
     const handleToolStep = (data: any) => {
-      if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
-      const target = delegateMsg.current || streamingMsg.current
-      if (!target) return
-      const step: ToolStep = { name: data.name || data.tool, input: data.input, output: String(data.output || '').slice(0, 120) }
-      target.toolSteps = [...(target.toolSteps || []), step]
-      if (!statusIsAiAuthored.current) {
-        setStreamingStatus(`${data.name || data.tool}...`)
+      const g = guard('tool-step', data)
+      if (!g) return
+      const { sid, ss } = g
+      const target = ss.delegateMsg || ss.streamingMsg
+      if (!target) {
+        dbg('tool-step skip (no target)')
+        return
       }
-      updateMessage(target)
-      if (currentSessionId) setActivity(currentSessionId, 'running')
+      ensureCardAdded(sid, ss)
+      // Flush pending thinking before adding tool step
+      if (ss.thinkingAccum) {
+        const steps = target.toolSteps || []
+        const last = steps[steps.length - 1]
+        if (last?.name === '__thinking__' && (last as any)._live) delete (last as any)._live
+        ss.thinkingAccum = ''
+      }
+      const step: ToolStep = { name: data.name || data.tool || 'unknown', input: data.input, output: String(data.output || '').slice(0, 500) }
+      dbg('tool', step.name, typeof data.input === 'object' ? JSON.stringify(data.input).slice(0, 80) : '')
+      target.toolSteps = [...(target.toolSteps || []), step]
+      if (!ss.statusIsAiAuthored) {
+        routeStatus(sid, `${data.name || data.tool}...`)
+      }
+      routeUpdate(sid, target)
+      storeRef.current.setActivity(sid, 'running')
     }
 
     const handleRoundInfo = (data: any) => {
-      if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
-      const target = delegateMsg.current || streamingMsg.current
+      const g = guard('round-info', data)
+      if (!g) return
+      const { sid, ss } = g
+      const target = ss.delegateMsg || ss.streamingMsg
       if (target && data.purpose) {
         target.roundPurpose = data.purpose
-        updateMessage(target)
+        routeUpdate(sid, target)
       }
     }
 
     const handleStatus = (data: any) => {
+      const sid = data.sessionId || currentSidRef.current
+      if (!sid) return
+      const ss = streamStates.current.get(sid)
+      dbg('status', { sid: sid.slice(0, 8), state: data.state, detail: data.detail, hasSS: !!ss })
+      if (!ss) return
       if (data.state === 'done' || data.state === 'error') {
-        setStreamingStatus('')
-        statusIsAiAuthored.current = false
-      } else if (!statusIsAiAuthored.current && data.detail) {
-        setStreamingStatus(data.detail)
+        routeStatus(sid, '')
+        ss.statusIsAiAuthored = false
+      } else if (!ss.statusIsAiAuthored && data.detail) {
+        routeStatus(sid, data.detail)
       }
     }
 
     const handleWatsonStatus = (data: any) => {
-      if (data.sessionId === currentSessionId && data.text) {
-        statusIsAiAuthored.current = true
-        setStreamingStatus(data.text)
-        if (currentSessionId) {
-          setStatus(currentSessionId, data.text)
-          api.updateSessionStatus?.(currentSessionId, 'running', data.text)
+      const sid = data.sessionId || currentSidRef.current
+      if (!sid) return
+      dbg('watson-status', { sid: sid.slice(0, 8), level: data.level, text: data.text?.slice(0, 30) })
+      // Idle/done status is for tray only — clear streaming status, don't display
+      if (data.level === 'idle' || data.level === 'done') {
+        const ss = streamStates.current.get(sid)
+        if (ss) {
+          ss.statusIsAiAuthored = false
+          routeStatus(sid, '')
         }
+        return
+      }
+      const ss = streamStates.current.get(sid)
+      if (ss && data.text) {
+        ss.statusIsAiAuthored = true
+        const target = ss.delegateMsg || ss.streamingMsg
+        routeStatus(sid, data.text)
+        storeRef.current.setStatus(sid, data.text)
+        apiRef.current.updateSessionStatus?.(sid, 'running', data.text)
       }
     }
 
     // --- F222/F242: Delegate events ---
     const handleDelegateStart = (data: any) => {
-      if (data.sessionId && data.sessionId !== currentSessionId) return
+      const sid = data.sessionId || currentSidRef.current
+      dbg('delegate-start', { sid: sid?.slice(0, 8), sender: data.sender, hasSS: !!streamStates.current.get(sid || '') })
+      if (!sid) return
+      const ss = streamStates.current.get(sid)
+      if (!ss) return
+      // Finalize orchestrator's pending thinking before switching to delegate
+      if (ss.thinkingAccum && ss.streamingMsg) {
+        const steps = ss.streamingMsg.toolSteps || []
+        const last = steps[steps.length - 1]
+        if (last?.name === '__thinking__' && (last as any)._live) delete (last as any)._live
+        ensureCardAdded(sid, ss)
+        routeUpdate(sid, ss.streamingMsg)
+      }
+      ss.thinkingAccum = ''
       // Capture orchestrator identity BEFORE creating delegate card
-      // (needed for post-delegate split — main parity: captures at delegate start time)
-      if (streamingMsg.current) {
-        pendingSplit.current = {
-          sender: streamingMsg.current.sender,
-          avatar: streamingMsg.current.avatar,
-          workspacePath: streamingMsg.current.workspacePath,
-          workspaceId: streamingMsg.current.workspaceId,
+      if (ss.streamingMsg) {
+        ss.pendingSplit = {
+          sender: ss.streamingMsg.sender,
+          avatar: ss.streamingMsg.avatar,
+          workspacePath: ss.streamingMsg.workspacePath,
+          workspaceId: ss.streamingMsg.workspaceId,
         }
-        streamingMsg.current = null
+        ss.streamingMsg = null
       }
       const wsPath = data.workspaceId
-        ? workspaces.find(w => w.id === data.workspaceId)?.path
+        ? workspacesRef.current.find(w => w.id === data.workspaceId)?.path
         : undefined
-      delegateMsg.current = {
+      ss.delegateMsg = {
         id: 'delegate-' + Date.now(),
         role: 'assistant',
         content: '',
@@ -241,52 +417,97 @@ export default function ChatView() {
         workspacePath: wsPath,
         workspaceId: data.workspaceId,
         toolSteps: [],
-        thinking: ''
       }
-      setMessages(prev => [...prev, delegateMsg.current!])
+      routeAdd(sid, ss.delegateMsg)
+      routeStatus(sid, 'Thinking...')
     }
 
     const handleDelegateToken = (data: any) => {
-      if (!delegateMsg.current) return
-      if (data.sessionId && data.sessionId !== currentSessionId) return
+      const sid = data.sessionId || currentSidRef.current
+      if (!sid) return
+      const ss = streamStates.current.get(sid)
+      if (!ss?.delegateMsg) return
+
+      // Tool step from delegate
+      if (data.toolStep) {
+        if (ss.thinkingAccum) {
+          const steps = ss.delegateMsg.toolSteps || []
+          const last = steps[steps.length - 1]
+          if (last?.name === '__thinking__' && (last as any)._live) delete (last as any)._live
+          ss.thinkingAccum = ''
+        }
+        const ts = data.toolStep
+        const step: ToolStep = { name: ts.name || ts.tool, input: ts.input, output: String(ts.output || '').slice(0, 500) }
+        dbg('delegate-tool', step.name)
+        ss.delegateMsg.toolSteps = [...(ss.delegateMsg.toolSteps || []), step]
+        routeUpdate(sid, ss.delegateMsg)
+        return
+      }
+
+      // Round info from delegate
+      if (data.roundInfo) {
+        if (data.roundInfo.purpose) {
+          ss.delegateMsg.roundPurpose = data.roundInfo.purpose
+          routeUpdate(sid, ss.delegateMsg)
+        }
+        return
+      }
+
+      // Text/thinking token
       const text = data.token || ''
       if (!text) return
+      dbg(data.thinking ? 'delegate-think' : 'delegate-text', text.slice(0, 80))
       if (data.thinking) {
-        delegateMsg.current.thinking = (delegateMsg.current.thinking || '') + text
+        ss.thinkingAccum += text
+        const steps = ss.delegateMsg.toolSteps || []
+        const last = steps[steps.length - 1]
+        if (last?.name === '__thinking__' && (last as any)._live) {
+          last.output = ss.thinkingAccum
+          ss.delegateMsg.toolSteps = [...steps]
+        } else {
+          ss.delegateMsg.toolSteps = [...steps, { name: '__thinking__', output: ss.thinkingAccum, _live: true } as any]
+        }
       } else {
-        delegateMsg.current.content += text
+        if (ss.thinkingAccum) {
+          const steps = ss.delegateMsg.toolSteps || []
+          const last = steps[steps.length - 1]
+          if (last?.name === '__thinking__' && (last as any)._live) delete (last as any)._live
+          ss.thinkingAccum = ''
+        }
+        ss.delegateMsg.content += text
       }
-      updateMessage(delegateMsg.current)
+      routeUpdate(sid, ss.delegateMsg)
+      // No longer need to track msgId — MessageList derives active card from message list
     }
 
     const handleDelegateEnd = (data: any) => {
-      if (!delegateMsg.current) return
-      if (data.fullText !== undefined) delegateMsg.current.content = data.fullText
-
-      const content = delegateMsg.current.content.trim()
-      const isNoReply = !content || content === 'NO_REPLY' || content === '(silent)'
-      const hasOnlyHiddenTools = (delegateMsg.current.toolSteps || []).every(s =>
-        s.name === 'stay_silent' || s.name === 'ui_status_set'
-      )
-
-      if (isNoReply && hasOnlyHiddenTools && !delegateMsg.current.thinking) {
-        setMessages(prev => prev.filter(m => m.id !== delegateMsg.current!.id))
-      } else {
-        updateMessage(delegateMsg.current)
+      const sid = data.sessionId || currentSidRef.current
+      dbg('delegate-end', { sid: sid?.slice(0, 8), sender: data.sender, textLen: (data.fullText || '').length })
+      if (!sid) return
+      const ss = streamStates.current.get(sid)
+      if (!ss?.delegateMsg) return
+      if (data.fullText !== undefined) ss.delegateMsg.content = data.fullText
+      // Finalize any live thinking block
+      if (ss.thinkingAccum) {
+        const steps = ss.delegateMsg.toolSteps || []
+        const last = steps[steps.length - 1]
+        if (last?.name === '__thinking__' && (last as any)._live) delete (last as any)._live
+        ss.thinkingAccum = ''
       }
-      delegateMsg.current = null
-      // pendingSplit was already set at delegate START time (handleDelegateStart)
-      // so orchestrator identity is preserved even for sequential delegates
+      routeUpdate(sid, ss.delegateMsg)
+      ss.delegateMsg = null
     }
 
     // --- F243: Claude Code events ---
     const handleCcStatus = (data: any) => {
       if (data.status === 'running') {
         setCcOutput({ task: data.task || '', lines: [], running: true })
-        setStreamingStatus(`Claude Code: ${data.task || 'working'}...`)
+        const sid = currentSidRef.current
+        if (sid) routeStatus(sid, `Claude Code: ${data.task || 'working'}...`)
       } else if (data.status === 'done' || data.status === 'error') {
         setCcOutput(prev => prev ? { ...prev, running: false } : null)
-        setStreamingStatus('')
+        const sid = currentSidRef.current
+        if (sid) routeStatus(sid, '')
       }
     }
 
@@ -297,82 +518,88 @@ export default function ChatView() {
         const newLines = [...prev.lines, ...chunk.split('\n')]
         return { ...prev, lines: newLines.slice(-50) }
       })
-      if (streamingMsg.current) {
-        streamingMsg.current.content += chunk
-        updateMessage(streamingMsg.current)
+      const sid = currentSidRef.current
+      if (sid) {
+        const ss = streamStates.current.get(sid)
+        if (ss?.streamingMsg) {
+          ss.streamingMsg.content += chunk
+          routeUpdate(sid, ss.streamingMsg)
+        }
       }
     }
 
     // --- F240: Auto-rotate ---
     const handleAutoRotate = (data: any) => {
-      if (data.sessionId && data.sessionId !== currentSessionId) return
-      if (currentSessionId) setActivity(currentSessionId, 'thinking')
+      const sid = data.sessionId
+      if (sid) storeRef.current.setActivity(sid, 'thinking')
     }
 
     // --- Done / Error ---
     const handleDone = async (data: any) => {
-      if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
-      const doneSessionId = currentSessionId
-      resetStreaming()
-      if (doneSessionId) {
-        setActivity(doneSessionId, 'idle')
-        try {
-          // Load authoritative messages from DB
-          const session = await api.loadSession(doneSessionId)
-          if (!session) {
-            console.warn('[ChatView] handleDone: loadSession returned null for', doneSessionId)
-            return  // Keep current messages as-is (streaming state is already captured)
-          }
-          const dbMessages = session.messages || []
-          // If chat-done carries an error:
-          // - If DB has no assistant reply after last user msg → "send failed" (mark user msg)
-          // - Otherwise → "reply error" (append as assistant msg with error flag)
-          if (data.error) {
-            const lastUserIdx = dbMessages.map((m: any) => m.role).lastIndexOf('user')
-            const hasAssistantAfter = lastUserIdx >= 0 && dbMessages.slice(lastUserIdx + 1).some((m: any) => m.role === 'assistant')
-            if (!hasAssistantAfter && lastUserIdx >= 0) {
-              // Never started — mark user message as send failure (persist to DB)
-              dbMessages[lastUserIdx] = { ...dbMessages[lastUserIdx], status: 'failed' }
-              api.updateMessageMeta?.(doneSessionId, dbMessages[lastUserIdx].id, { status: 'failed' })
-            } else {
-              // Reply failed mid-stream — show as assistant error
-              dbMessages.push({ id: 'error-' + Date.now(), role: 'assistant', content: data.error, timestamp: Date.now(), isError: true })
-            }
-          }
-          setMessages(dbMessages)
-          // F239: Auto-generate title from first user message
-          if (session.title === 'New Chat' || session.title === '新对话') {
-            const firstUser = dbMessages.find((m: any) => m.role === 'user')
-            if (firstUser) {
-              let title = (firstUser.content || '').split(/[。！？\n.!?]/)[0].trim()
-              if (title.length > 30) title = title.slice(0, 30) + '...'
-              if (!title) title = (firstUser.content || '').slice(0, 30).trim() || 'New Chat'
-              await api.renameSession(doneSessionId, title)
-            }
-          }
-          // Refresh sessions to pick up title changes
-          const updated = await api.listSessions()
-          setSessions(updated)
-        } catch (err) {
-          console.error('[ChatView] handleDone loadSession error:', err)
+      const g = guard('done', data)
+      if (!g) return
+      const { sid } = g
+
+      clearStreamState(sid)
+      storeRef.current.setActivity(sid, 'idle')
+
+      try {
+        // Load authoritative messages from DB
+        const session = await apiRef.current.loadSession(sid)
+        if (!session) {
+          console.warn('[ChatView] handleDone: loadSession returned null for', sid)
+          return
         }
+        const dbMessages = session.messages || []
+        dbg('done-db', { sid: sid.slice(0, 8), msgCount: dbMessages.length, msgs: dbMessages.map((m: any) => ({ role: m.role, sender: m.sender, textLen: (m.content || '').length, steps: (m.toolSteps || []).map((s: any) => s.name) })) })
+        // Error handling
+        if (data.error) {
+          const lastUserIdx = dbMessages.map((m: any) => m.role).lastIndexOf('user')
+          const hasAssistantAfter = lastUserIdx >= 0 && dbMessages.slice(lastUserIdx + 1).some((m: any) => m.role === 'assistant')
+          if (!hasAssistantAfter && lastUserIdx >= 0) {
+            dbMessages[lastUserIdx] = { ...dbMessages[lastUserIdx], status: 'failed' }
+            apiRef.current.updateMessageMeta?.(sid, dbMessages[lastUserIdx].id, { status: 'failed' })
+          } else {
+            dbMessages.push({ id: 'error-' + Date.now(), role: 'assistant', content: data.error, timestamp: Date.now(), isError: true })
+          }
+        }
+        routeSet(sid, dbMessages)
+
+        // Auto-generate title from first user message (only if still empty / never renamed)
+        if (!session.title) {
+          const firstUser = dbMessages.find((m: any) => m.role === 'user')
+          if (firstUser) {
+            let title = (firstUser.content || '').split(/[。！？\n.!?]/)[0].trim()
+            if (title.length > 30) title = title.slice(0, 30) + '...'
+            if (!title) title = (firstUser.content || '').slice(0, 30).trim()
+            if (title) await apiRef.current.renameSession(sid, title)
+          }
+        }
+        // Refresh sessions to pick up title changes
+        const updated = await apiRef.current.listSessions()
+        storeRef.current.setSessions(updated)
+      } catch (err) {
+        console.error('[ChatView] handleDone error:', err)
       }
     }
 
     const handleError = (data: any) => {
-      if (!currentRequestId.current || data.requestId !== currentRequestId.current) return
-      setMessages(prev => [...prev, {
+      const g = guard('error', data)
+      if (!g) return
+      const { sid } = g
+
+      routeAdd(sid, {
         id: 'error-' + Date.now(),
-        role: 'error',
+        role: 'error' as any,
         content: data.error || 'An error occurred',
         timestamp: Date.now(),
-        error: data.error
-      }])
-      resetStreaming()
-      if (currentSessionId) setActivity(currentSessionId, 'idle')
+        error: data.error,
+      })
+      clearStreamState(sid)
+      storeRef.current.setActivity(sid, 'idle')
     }
 
-    // Register all listeners and collect cleanup functions
+    // Register all listeners
     const cleanups = [
       api.onTextStart?.(handleTextStart),
       api.onToken?.(handleToken),
@@ -395,13 +622,12 @@ export default function ChatView() {
         if (typeof fn === 'function') fn()
       }
     }
-  }, [currentSessionId])
+  }, []) // Register once — handlers use refs for current values
 
-  const loadSession = async () => {
-    if (!currentSessionId) return
-    const session = await api.loadSession(currentSessionId)
+  const loadSessionMessages = async (sid: string) => {
+    const session = await api.loadSession(sid)
     if (session) {
-      setMessages(session.messages || [])
+      routeSet(sid, session.messages || [])
     }
   }
 
@@ -423,7 +649,6 @@ export default function ChatView() {
         setCurrentSessionId(result.id)
         const sessions = await api.listSessions()
         setSessions(sessions)
-        // Send arg text as first message if provided
         if (arg) {
           const reqId = await api.chatPrepare?.() || Date.now().toString()
           await api.chat({ sessionId: result.id, message: arg, requestId: reqId })
@@ -472,8 +697,10 @@ export default function ChatView() {
     if (cmd === '/stop') {
       await api.chatCancel?.()
       await api.ccStop?.()
-      resetStreaming()
-      if (currentSessionId) setActivity(currentSessionId, 'idle')
+      if (currentSessionId) {
+        clearStreamState(currentSessionId)
+        setActivity(currentSessionId, 'idle')
+      }
       return true
     }
     if (cmd === '/context' && currentSessionId) {
@@ -515,19 +742,39 @@ export default function ChatView() {
     setMessages(prev => [...prev, userMsg])
 
     const requestId = await api.chatPrepare?.() || Date.now().toString()
-    currentRequestId.current = requestId
+    // Initialize per-session stream state with requestId
+    const ss = getStreamState(currentSessionId)
+    ss.requestId = requestId
+
+    // Immediately create assistant streaming card so status appears on correct card from the start
+    const streamingId = 'streaming-' + Date.now()
+    ss.streamingMsg = {
+      id: streamingId,
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      toolSteps: [],
+      sender: ownerWs?.identity?.name,
+      avatar: ownerWs?.identity?.avatar,
+      workspacePath: ownerWs?.path,
+      workspaceId: ownerWs?.id,
+    }
+    setMessages(prev => [...prev, ss.streamingMsg!])
+    setStreamingStatus('Thinking...')
+    ss.status = 'Thinking...'
+    ss.statusIsAiAuthored = false
+
+    if (dbgEnabled()) console.log('[Paw🐾] send', { sid: currentSessionId.slice(0, 8), requestId: requestId.slice(0, 8), text: text.slice(0, 50), streamingId })
     setActivity(currentSessionId, 'thinking')
     try {
       await api.chat({ sessionId: currentSessionId, message: text, requestId, attachments: files })
     } catch (err: any) {
       console.error('[ChatView] chat error:', err)
-      resetStreaming()
+      clearStreamState(currentSessionId)
       setActivity(currentSessionId, 'idle')
-      // Mark the user message as failed (persist to DB)
       setMessages(prev => prev.map(m =>
         m.id === userMsg.id ? { ...m, status: 'failed' } : m
       ))
-      // Find and mark in DB (message was persisted by main process before streaming)
       const session = await api.loadSession(currentSessionId)
       const lastUser = session?.messages?.filter((m: any) => m.role === 'user').pop()
       if (lastUser) api.updateMessageMeta?.(currentSessionId, lastUser.id, { status: 'failed' })
@@ -542,10 +789,8 @@ export default function ChatView() {
     if (lastUserIdx < 0) return
     const lastUserMsg = messages[lastUserIdx]
     const retryContent = lastUserMsg.content
-    // Delete failed message from DB + remove from UI (and any trailing error messages)
     api.deleteMessage?.(currentSessionId, lastUserMsg.id)
     setMessages(prev => prev.slice(0, lastUserIdx))
-    // Resend as new message
     const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
@@ -555,19 +800,32 @@ export default function ChatView() {
     }
     setMessages(prev => [...prev, userMsg])
     const requestId = await api.chatPrepare?.() || Date.now().toString()
-    currentRequestId.current = requestId
+    const ss = getStreamState(currentSessionId)
+    ss.requestId = requestId
     setActivity(currentSessionId, 'thinking')
     try {
       await api.chat({ sessionId: currentSessionId, message: retryContent, requestId })
     } catch (err: any) {
       console.error('[ChatView] retry error:', err)
-      resetStreaming()
+      clearStreamState(currentSessionId)
       setActivity(currentSessionId, 'idle')
       setMessages(prev => prev.map(m =>
         m.id === userMsg.id ? { ...m, status: 'failed' } : m
       ))
     }
   }, [currentSessionId, messages])
+
+  // Derive active streaming card ID from StreamState ref at render time.
+  // Single source of truth: delegateMsg (if active) > streamingMsg (if active) > null.
+  // No handler competition — just read the ref each render.
+  const activeStreamingId = (() => {
+    if (!currentSessionId || !streamingStatus) return null
+    const ss = streamStates.current.get(currentSessionId)
+    if (!ss) return null
+    const target = ss.delegateMsg || ss.streamingMsg
+    // Only return ID if the card is actually in the message list (not deferred)
+    return (target && !(target as any)._deferred) ? target.id : null
+  })()
 
   return (
     <div className="chat-main">
@@ -614,8 +872,7 @@ export default function ChatView() {
         </div>
       </div>
 
-      {/* F243: CC Output Panel */}
-      {ccOutput && (
+      {/* F243: CC Output Panel */}      {ccOutput && (
         <div style={{
           borderBottom: '1px solid var(--border-muted)',
           padding: '8px 16px',
@@ -648,6 +905,7 @@ export default function ChatView() {
         messages={messages}
         sessionId={currentSessionId || ''}
         streamingStatus={streamingStatus}
+        activeStreamingId={activeStreamingId}
         ownerWorkspaceId={sessionParticipants[0]}
         onRetry={handleRetry}
       />

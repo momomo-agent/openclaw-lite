@@ -108,7 +108,7 @@ function createWorkspace(parentDir, name, opts = {}) {
 
   // Scaffold files from templates (write-if-missing, like OpenClaw's wx flag)
   const templatesDir = path.join(__dirname, '..', 'templates')
-  for (const tpl of ['SOUL.md', 'USER.md', 'IDENTITY.md', 'AGENTS.md', 'HEARTBEAT.md']) {
+  for (const tpl of ['SOUL.md', 'IDENTITY.md', 'HEARTBEAT.md']) {
     const src = path.join(templatesDir, tpl)
     const dst = path.join(wsPath, tpl)
     if (fs.existsSync(src) && !fs.existsSync(dst)) fs.copyFileSync(src, dst)

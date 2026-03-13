@@ -22,7 +22,7 @@ function ensureSchema(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
-      title TEXT NOT NULL DEFAULT 'New Chat',
+      title TEXT NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       mode TEXT DEFAULT 'chat',
@@ -121,7 +121,7 @@ function saveSession(clawDir, session) {
   const participants = JSON.stringify(session.participants || [])
   const mode = session.mode || 'chat'
   d.prepare('INSERT INTO sessions (id, title, mode, created_at, updated_at, participants) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET title=excluded.title, mode=excluded.mode, updated_at=excluded.updated_at, participants=excluded.participants')
-    .run(session.id, session.title || 'New Chat', mode, session.createdAt || now, now, participants)
+    .run(session.id, session.title || '', mode, session.createdAt || now, now, participants)
   // Replace all messages
   d.prepare('DELETE FROM messages WHERE session_id = ?').run(session.id)
   const insert = d.prepare('INSERT INTO messages (session_id, role, content, timestamp, metadata) VALUES (?, ?, ?, ?, ?)')
@@ -202,7 +202,7 @@ function createSession(clawDir, title, { participants, mode } = {}) {
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
   const now = Date.now()
   const wsIds = participants || []
-  const session = { id, title: title || 'New Chat', messages: [], createdAt: now, updatedAt: now, participants: wsIds, mode: mode || 'chat' }
+  const session = { id, title: title || '', messages: [], createdAt: now, updatedAt: now, participants: wsIds, mode: mode || 'chat' }
   saveSession(clawDir, session)
   // Create session directory for tool file storage
   const sessionDir = path.join(clawDir, '.paw', 'sessions', id)

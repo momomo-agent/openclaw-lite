@@ -45,7 +45,7 @@ const TOOL_ACTIONS: Record<string, ToolAction> = {
 
   // Agent / delegation
   send_message:  { verb: 'Sent message to', icon: '💬', argKey: 'target', extract: v => v?.slice(0, 30) },
-  delegate_to:   { verb: 'Delegated to', icon: '🤝', argKey: 'agent', extract: v => v?.slice(0, 30) },
+  delegate_to:   { verb: 'Delegated to', icon: '🤝', argKey: 'agent', extract: v => v?.slice(0, 30), hidden: true },
   create_agent:  { verb: 'Created agent', icon: '👤', argKey: 'name', extract: v => v?.slice(0, 30) },
   remove_agent:  { verb: 'Removed agent', icon: '🗑️', argKey: 'name', extract: v => v?.slice(0, 30) },
 
@@ -64,7 +64,7 @@ const TOOL_ACTIONS: Record<string, ToolAction> = {
 
   // Scheduling / notifications
   cron:          { verb: 'Scheduled', icon: '⏰', argKey: 'expression', extract: v => v?.slice(0, 30) },
-  notify:        { verb: 'Notified:', icon: '🔔', argKey: 'title', extract: v => v?.slice(0, 40) },
+  notify:        { verb: 'Notified:', icon: '🔔', argKey: 'title', extract: v => v?.slice(0, 40), hidden: true },
 
   // Config
   mcp_config:    { verb: 'Configured MCP', icon: '⚙️' },
@@ -75,6 +75,7 @@ const TOOL_ACTIONS: Record<string, ToolAction> = {
 }
 
 export function humanizeToolStep(name: string, input?: any): { text: string; icon: string; hidden?: boolean } {
+  if (!name) return { text: '操作', icon: '🔧' }
   const action = TOOL_ACTIONS[name]
   if (!action) return { text: name, icon: '🔧' }
 
@@ -114,6 +115,13 @@ export function extractArgPreview(name: string, input?: any, maxLen = 60): strin
     }
   }
   return null
+}
+
+/** Check if a tool step is visible (not hidden and not __thinking__) */
+export function isVisibleToolStep(step: ToolStep): boolean {
+  if (step.name === '__thinking__') return false
+  const h = humanizeToolStep(step.name, step.input)
+  return !h.hidden
 }
 
 export function summarizeToolSteps(steps: ToolStep[]): string | null {

@@ -32,7 +32,7 @@ const AVATAR_PRESETS = [0, 1, 2, 3, 4, 5]
 
 export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) {
   const api = useIPC()
-  const { setUserProfile } = useAppState()
+  const { setUserProfile, bumpAvatarVersion } = useAppState()
 
   // Config state
   const [config, setConfig] = useState<Config>({})
@@ -42,7 +42,8 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
   // Profile state
   const [userName, setUserName] = useState('')
   const [avatarSrc, setAvatarSrc] = useState<string | null>(null)
-  const [pendingAvatar, setPendingAvatar] = useState<{ presetIndex?: number; customPath?: string } | null>(null)
+  const [customAvatarSrc, setCustomAvatarSrc] = useState<string | null>(null) // persists custom image url even when preset selected
+  const [pendingAvatar, setPendingAvatar] = useState<{ presetIndex?: number; customPath?: string; useCustom?: boolean } | null>(null)
   const [selectedPreset, setSelectedPreset] = useState<number | null>(null)
 
   // MCP state
@@ -56,7 +57,6 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
   const [heartbeatInterval, setHeartbeatInterval] = useState(30)
 
   // Refs
-  const fileInputRef = useRef<HTMLInputElement>(null)
   const configRef = useRef(config)
   const codingAgentRef = useRef(codingAgent)
   const currentThemeRef = useRef(currentTheme)
@@ -100,11 +100,19 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
       // Profile
       setUserName(profile?.userName || '')
       setPendingAvatar(null)
-      setSelectedPreset(null)
-      if (profile?.userAvatar && avatarPath) {
-        setAvatarSrc(`file://${avatarPath}?t=${Date.now()}`)
+      // Check if custom user-avatar.png exists
+      const customSrc = avatarPath ? `file://${avatarPath}?t=${Date.now()}` : null
+      setCustomAvatarSrc(customSrc)
+      if (profile?.userAvatar?.startsWith('preset:')) {
+        const idx = parseInt(profile.userAvatar.replace('preset:', '')) || 0
+        setSelectedPreset(idx)
+        setAvatarSrc(`../avatars/${idx}.png`)
+      } else if (profile?.userAvatar && avatarPath) {
+        setSelectedPreset(null)
+        setAvatarSrc(customSrc)
       } else {
-        setAvatarSrc(null)
+        setSelectedPreset(0)
+        setAvatarSrc(`../avatars/0.png`)
       }
 
       // Heartbeat
@@ -170,6 +178,7 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
       }
       const updatedProfile = await api.setUserProfile(profileOpts)
       if (updatedProfile) setUserProfile(updatedProfile)
+      if (pendingAvatarRef.current) bumpAvatarVersion()
 
       // Reconnect MCP
       if (api.mcpReconnect) {
@@ -195,16 +204,15 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
     setPendingAvatar({ presetIndex: index })
   }
 
-  // Custom avatar upload
-  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const filePath = (file as any).path
-    if (filePath) {
-      setAvatarSrc(`file://${filePath}`)
-      setPendingAvatar({ customPath: filePath })
-      setSelectedPreset(null)
-    }
+  // Custom avatar upload via native dialog
+  const handleAvatarUpload = async () => {
+    const filePath = await api.pickImage?.()
+    if (!filePath) return
+    const src = `file://${filePath}?t=${Date.now()}`
+    setAvatarSrc(src)
+    setCustomAvatarSrc(src)
+    setPendingAvatar({ customPath: filePath })
+    setSelectedPreset(null)
   }
 
   // Workspace change
@@ -248,7 +256,7 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
                   background: 'var(--avatar-bg)', overflow: 'hidden', flexShrink: 0,
                   display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
                 }}
-                onClick={() => fileInputRef.current?.click()}
+                onClick={handleAvatarUpload}
               >
                 {avatarSrc ? (
                   <img src={avatarSrc} className="avatar-img" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -263,7 +271,7 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
                   value={userName}
                   onChange={(e) => setUserName(e.target.value)}
                 />
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
                   {AVATAR_PRESETS.map((i) => (
                     <img
                       key={i}
@@ -276,15 +284,39 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
                       onClick={() => handlePresetClick(i)}
                     />
                   ))}
+                  {/* Custom image (user-avatar.png) — always visible if exists, selected when no preset chosen */}
+                  {customAvatarSrc && (
+                    <img
+                      src={customAvatarSrc}
+                      style={{
+                        width: 28, height: 28, borderRadius: '50%', cursor: 'pointer',
+                        border: `2px solid ${selectedPreset === null ? 'var(--accent)' : 'transparent'}`,
+                        objectFit: 'cover', transition: 'border-color 0.15s',
+                      }}
+                      onClick={() => {
+                        setSelectedPreset(null)
+                        setAvatarSrc(customAvatarSrc)
+                        setPendingAvatar({ useCustom: true })
+                      }}
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleAvatarUpload}
+                    style={{
+                      width: 28, height: 28, borderRadius: '50%', cursor: 'pointer',
+                      border: '2px dashed var(--border-muted)',
+                      background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: 'var(--text-faint)', fontSize: 14, padding: 0,
+                    }}
+                    title="上传自定义头像"
+                  >
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                  </button>
                 </div>
               </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                style={{ display: 'none' }}
-                onChange={handleAvatarUpload}
-              />
             </div>
           </div>
 

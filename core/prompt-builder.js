@@ -131,11 +131,15 @@ The following project context files have been loaded:`);
     parts.push('If SOUL.md is present, embody its persona and tone. Avoid stiff, generic replies; follow its guidance unless higher-priority instructions override it.');
   }
 
-  // Core identity files
-  for (const f of ['SOUL.md', 'USER.md', 'NOW.md', 'AGENTS.md', 'IDENTITY.md', 'BOOTSTRAP.md']) {
+  // Core identity files (workspace-level)
+  for (const f of ['SOUL.md', 'NOW.md', 'IDENTITY.md', 'BOOTSTRAP.md']) {
     const p = path.join(wsDir, f);
     if (fs.existsSync(p)) injectFile(f, fs.readFileSync(p, 'utf8'));
   }
+
+  // USER.md — global (shared across all workspaces, lives in ~/.paw/)
+  const globalUserMd = path.join(os.homedir(), '.paw', 'USER.md');
+  if (fs.existsSync(globalUserMd)) injectFile('USER.md', fs.readFileSync(globalUserMd, 'utf8'));
 
   // Memory navigation + shared state
   const memDir = path.join(wsDir, 'memory');

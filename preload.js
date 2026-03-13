@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('api', {
   getUserProfile: () => ipcRenderer.invoke('get-user-profile'),
   setUserProfile: (opts) => ipcRenderer.invoke('set-user-profile', opts),
   getUserAvatarPath: () => ipcRenderer.invoke('get-user-avatar-path'),
+  pickImage: () => ipcRenderer.invoke('pick-image'),
   createClawDir: () => ipcRenderer.invoke('create-claw-dir'),
   selectClawDir: () => ipcRenderer.invoke('select-claw-dir'),
   getConfig: () => ipcRenderer.invoke('get-config'),
