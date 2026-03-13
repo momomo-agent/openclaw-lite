@@ -135,15 +135,17 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu, on
       <div className="session-body">
         <div className="session-row-top">
           {renaming ? (
-            <input
-              autoFocus
-              value={renameText}
-              onChange={(e) => onRenameChange?.(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') onRenameSubmit?.(); if (e.key === 'Escape') onRenameCancel?.() }}
-              onBlur={onRenameSubmit}
-              className="session-title"
-              style={{ background: 'transparent', border: 'none', outline: 'none', padding: 0, margin: 0, width: '100%', fontFamily: 'inherit', lineHeight: 'inherit', height: 'auto' }}
-            />
+            <span className="session-title" style={{ position: 'relative' }}>
+              <span style={{ visibility: 'hidden' }}>{renameText || '\u00A0'}</span>
+              <input
+                autoFocus
+                value={renameText}
+                onChange={(e) => onRenameChange?.(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') onRenameSubmit?.(); if (e.key === 'Escape') onRenameCancel?.() }}
+                onBlur={onRenameSubmit}
+                style={{ position: 'absolute', inset: 0, background: 'transparent', border: 'none', outline: 'none', padding: 0, margin: 0, fontFamily: 'inherit', fontSize: 'inherit', fontWeight: 'inherit', color: 'inherit', lineHeight: 'inherit' }}
+              />
+            </span>
           ) : (
             <span className="session-title">{session.title || (isGroup ? '群聊' : (ws?.identity?.name || ''))}</span>
           )}
