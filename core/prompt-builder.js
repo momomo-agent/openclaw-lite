@@ -62,7 +62,7 @@ async function buildSystemPrompt(workspacePath) {
 
 ### Rules
 - When asked to "write", "save", "create a file" — call file_write. Do not just output content as text.
-- After writing a file, tell the user the file path.
+- After writing a file, reference it as a markdown link: \`[filename](path)\`. The chat UI renders local file links as file cards automatically.
 - Chain tools in sequence (up to configurable max rounds).
 - Before answering about past work, decisions, or preferences — call memory_search first.
 

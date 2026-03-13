@@ -84,7 +84,8 @@ registerTool({
     try {
       await fs.mkdir(path.dirname(filePath), { recursive: true });
       await fs.writeFile(filePath, args.content, 'utf8');
-      return `File written: ${args.path}`;
+      const name = path.basename(args.path);
+      return `File written: [${name}](${args.path})`;
     } catch (error) {
       return `Error writing file: ${error.message}`;
     }

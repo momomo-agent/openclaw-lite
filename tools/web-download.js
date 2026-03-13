@@ -110,8 +110,9 @@ registerTool({
 
       const sizeKB = (buffer.length / 1024).toFixed(1);
       const relPath = `downloads/${name}`;
+      const isImage = /\.(png|jpe?g|gif|webp|svg|avif)$/i.test(name);
 
-      return `Downloaded: ${relPath} (${sizeKB} KB)\nUse in reply: ![${name}](${relPath}) or [${name}](${relPath})`;
+      return `Downloaded: [${name}](${relPath}) (${sizeKB} KB)\nEmbed in reply: ${isImage ? `![${name}](${relPath})` : `[${name}](${relPath})`}`;
     } catch (error) {
       return `Error downloading ${url}: ${error.message}`;
     }
