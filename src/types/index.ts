@@ -60,6 +60,7 @@ export interface Config {
   heartbeat?: boolean | { enabled: boolean; intervalMinutes?: number }
   heartbeatInterval?: number
   mcpServers?: any
+  showTools?: boolean
 }
 
 export interface UserProfile {

@@ -1,5 +1,6 @@
 // tools/index.js — Load all tools
 require('./web-fetch');
+require('./web-download');
 require('./file-ops');
 require('./edit');
 require('./exec');

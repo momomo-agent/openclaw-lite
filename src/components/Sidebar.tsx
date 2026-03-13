@@ -133,7 +133,7 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu, on
         </div>
         <div className="session-row-bottom">
           <span className={`session-subtitle ${showStatus ? 'active-status' : ''}`}>{subtitle}</span>
-          {activity !== 'idle' && <span className={`session-dot ${activity}`}></span>}
+          {activity !== 'idle' && activity !== 'done' && <span className={`session-dot ${activity}`}></span>}
         </div>
       </div>
     </div>

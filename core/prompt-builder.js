@@ -52,7 +52,7 @@ async function buildSystemPrompt(workspacePath) {
 **Built-in tools:**
 - **notify**: Send a desktop notification
 - **ui_status_set**: Update the sidebar status line (4-20 Chinese chars). **Always call this** at start, before/after tool use, and when done. Write like first-person inner monologue. Examples: '让我想想…', '找到线索了', '写完了，挺满意的'. This is the primary way the user sees your personality.
-- **session_title_set**: Update the conversation title. Call this when you notice the topic has drifted significantly from the current title. Title should be ≤15 Chinese chars, concise and descriptive.
+- **session_title_set**: Update the conversation title (≤15 Chinese chars). **Always call this** when the title is empty or when the topic has drifted from the current title.
 - **memory_search**: Search MEMORY.md + memory/*.md by keywords. Use BEFORE answering questions about prior work, decisions, dates, people, preferences, or todos.
 - **memory_get**: Read a snippet from MEMORY.md or memory/*.md with optional line range. Use AFTER memory_search to pull only the needed lines.
 - **task**: Manage shared tasks (action: create/update/list)
@@ -64,7 +64,15 @@ async function buildSystemPrompt(workspacePath) {
 - When asked to "write", "save", "create a file" — call file_write. Do not just output content as text.
 - After writing a file, tell the user the file path.
 - Chain tools in sequence (up to configurable max rounds).
-- Before answering about past work, decisions, or preferences — call memory_search first.`;
+- Before answering about past work, decisions, or preferences — call memory_search first.
+
+### Media in replies
+When the user asks to see images, hear audio, or view files — **download them with web_download and embed them directly in your reply using markdown**. The chat UI renders rich components automatically:
+- **Images**: \`![caption](downloads/photo.jpg)\` → inline image
+- **Audio**: \`[song.mp3](downloads/song.mp3)\` → audio player
+- **Video**: \`[demo.mp4](downloads/demo.mp4)\` → video player
+- **Files**: \`[report.pdf](downloads/report.pdf)\` → file card with open button
+Paths are relative to the workspace directory. Always prefer inline markdown over generating wrapper files.`;
 
   parts.push('## Tooling\nTool names are case-sensitive. Call tools exactly as listed.');
   parts.push(toolsPrompt + '\n' + builtInTools);
@@ -186,9 +194,15 @@ host=${os.hostname()} | os=${os.type()} ${os.release()} (${os.arch()}) | node=${
   if (state.currentSessionId && wsDir) {
     try {
       const title = sessionStore.getSessionTitle(wsDir, state.currentSessionId) || '';
-      parts.push(`## Current Session
-title: ${title || '(untitled)'}
-If the conversation topic drifts significantly from this title, call session_title_set to update it.${!title ? ' This is a new conversation — set a title after the first exchange.' : ''}`);
+      if (title) {
+        parts.push(`## Current Session
+title: ${title}
+If the conversation topic drifts significantly from this title, call session_title_set to update it.`);
+      } else {
+        parts.push(`## Current Session
+title: (untitled)
+**IMPORTANT**: This conversation has no title yet. Call session_title_set to set a concise title based on the topic.`);
+      }
     } catch {}
   }
 

@@ -1123,7 +1123,8 @@ ${roster}
 2. **User talks to you or sends a general message** → respond yourself.
 3. **After delegate_to** → call \`delegate_to\` again, add genuine context, or call \`stay_silent\`.
 4. **Never restate or summarize** what a delegate just said.
-5. **Removed members are gone.** Do NOT delegate to or mention them as active.`
+5. **Removed members are gone.** Do NOT delegate to or mention them as active.
+6. **Untitled session** → call \`session_title_set\` to set a title.`
         chatTools = [...chatTools, DELEGATE_TO_TOOL, STAY_SILENT_TOOL]
       } else if (participants.length === 1) {
         systemPrompt += `\n\n---\n\nYou are **${myName}**. This is a private conversation between you and the user. No other participants are present.`
@@ -2066,7 +2067,7 @@ function pushWatsonStatus(level, text, requestId, sessionId) {
     updateTrayMenu()
   }
   if (level === 'done') setTimeout(() => {
-    pushWatsonStatus('idle', '空闲待命中', null)
+    pushWatsonStatus('idle', '空闲待命中', null, sid)
   }, 2000)
 }
 

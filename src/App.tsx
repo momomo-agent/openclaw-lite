@@ -9,7 +9,7 @@ import SetupScreen from './components/SetupScreen'
 import './styles/global.css'
 
 function AppContent() {
-  const { setSessions, setWorkspaces, setActivity, setStatus, setUserProfile, setCurrentSessionId, setClawDir, setFeatureFlags } = useAppState()
+  const { setSessions, setWorkspaces, setActivity, setStatus, setUserProfile, setCurrentSessionId, setClawDir, setFeatureFlags, setShowTools } = useAppState()
   const api = useIPC()
   const { setTheme } = useTheme()
   const [ready, setReady] = useState(false)
@@ -44,6 +44,7 @@ function AppContent() {
     ])
 
     setTheme(config?.theme || 'light')
+    setShowTools(config?.showTools === true)
     if (profile) setUserProfile(profile)
     setWorkspaces(ws)
 

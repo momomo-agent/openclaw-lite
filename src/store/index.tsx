@@ -12,6 +12,7 @@ interface AppState {
   featureFlags: Record<string, boolean>
   sidebarVisible: boolean
   avatarVersion: number
+  showTools: boolean
 }
 
 interface AppContextType extends AppState {
@@ -25,6 +26,7 @@ interface AppContextType extends AppState {
   setFeatureFlags: (flags: Record<string, boolean>) => void
   setSidebarVisible: (v: boolean) => void
   bumpAvatarVersion: () => void
+  setShowTools: (v: boolean) => void
 }
 
 const AppContext = createContext<AppContextType | null>(null)
@@ -40,6 +42,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({})
   const [sidebarVisible, setSidebarVisible] = useState(true)
   const [avatarVersion, setAvatarVersion] = useState(0)
+  const [showTools, setShowTools] = useState(false)
   const bumpAvatarVersion = () => setAvatarVersion(v => v + 1)
 
   const setActivity = (sessionId: string, level: ActivityLevel) => {
@@ -61,6 +64,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       featureFlags, setFeatureFlags,
       sidebarVisible, setSidebarVisible,
       avatarVersion, bumpAvatarVersion,
+      showTools, setShowTools,
       setActivity, setStatus
     }}>
       {children}

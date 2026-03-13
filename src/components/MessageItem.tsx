@@ -15,7 +15,7 @@ interface MessageItemProps {
 }
 
 export default function MessageItem({ message, isStreaming, statusText, ownerWorkspaceId, onRetry }: MessageItemProps) {
-  const { workspaces, userProfile } = useAppState()
+  const { workspaces, userProfile, showTools } = useAppState()
   const isUser = message.role === 'user'
   const isError = message.isError === true  // assistant message that errored
   const isA2A = message.role === 'agent-to-agent'
@@ -72,10 +72,10 @@ export default function MessageItem({ message, isStreaming, statusText, ownerWor
             const segments: React.ReactNode[] = []
             let toolBatch: ToolStep[] = []
             const flushTools = () => {
-              if (toolBatch.length) {
+              if (toolBatch.length && showTools) {
                 segments.push(<ToolGroup key={`tg-${segments.length}`} steps={toolBatch} isStreaming={isStreaming} roundPurpose={message.roundPurpose} />)
-                toolBatch = []
               }
+              toolBatch = []
             }
             for (const step of message.toolSteps) {
               if (step.name === '__thinking__') {

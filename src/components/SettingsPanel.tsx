@@ -32,7 +32,7 @@ const AVATAR_PRESETS = [0, 1, 2, 3, 4, 5]
 
 export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) {
   const api = useIPC()
-  const { setUserProfile, bumpAvatarVersion } = useAppState()
+  const { setUserProfile, bumpAvatarVersion, showTools, setShowTools } = useAppState()
 
   // Config state
   const [config, setConfig] = useState<Config>({})
@@ -96,6 +96,7 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
       setConfig(c)
       setCodingAgent(agent || 'claude')
       setCurrentTheme(c.theme || 'default')
+      setShowTools(c.showTools === true)
 
       // Profile
       setUserName(profile?.userName || '')
@@ -143,6 +144,7 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
     try {
       const cfg = { ...configRef.current }
       cfg.theme = currentThemeRef.current || 'light'
+      cfg.showTools = showTools
       cfg.heartbeat = {
         enabled: heartbeatEnabledRef.current,
         intervalMinutes: heartbeatIntervalRef.current || 30,
@@ -386,6 +388,16 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
                   </div>
                 ))}
               </div>
+            </div>
+            <div className="settings-field">
+              <label className="toggle-label" style={{ justifyContent: 'space-between' }}>
+                <span style={{ flex: 1 }}>Show tool calls in chat</span>
+                <input
+                  type="checkbox"
+                  checked={showTools}
+                  onChange={(e) => setShowTools(e.target.checked)}
+                />
+              </label>
             </div>
           </div>
 
