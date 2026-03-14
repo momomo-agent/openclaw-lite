@@ -19,6 +19,7 @@ const { FailoverManager } = require('./core/failover')
 const { fetchWithRetry } = require('./core/api-retry')
 const { enforceContextBudget } = require('./core/context-guard')
 const { sanitizeTranscript } = require('./core/transcript-repair')
+const { ChatQueue } = require('./core/chat-queue')
 const workspaceRegistry = require('./core/workspace-registry')
 
 // ── Feature flags ──
@@ -26,6 +27,7 @@ const workspaceRegistry = require('./core/workspace-registry')
 // ── Helper functions (must be defined early) ──
 let _activeRequestId = null
 let _activeAbortController = null
+const chatQueue = new ChatQueue()
 let _activeCodingProcess = null
 // Per-request delegate message accumulator — saved in correct order by finishChat
 const _pendingDelegateMessages = new Map() // requestId → [{sender, content, toolSteps, senderWorkspaceId, timestamp}]
@@ -526,7 +528,7 @@ async function createWindow() {
 // ── EventBus → BrowserWindow bridge ──
 const EVENT_CHANNELS = [
   'chat-token', 'chat-tool-step', 'chat-round-info', 'chat-text-start',
-  'chat-done', 'chat-error', 'chat-status',
+  'chat-done', 'chat-error', 'chat-status', 'chat-queued',
   'chat-delegate-start', 'chat-delegate-token', 'chat-delegate-end',
   'agent-status', 'watson-status',
   'session-agents-changed', 'session-expired', 'tasks-changed',
@@ -1167,6 +1169,17 @@ function finishChat(sessionId, requestId, assistantText, wsIdentity, toolSteps, 
     _unreadCount++
     updateTrayTitle()
   }
+
+  // ── Queue drain: process next queued message for this session ──
+  if (sessionId) {
+    chatQueue.markIdle(sessionId)
+    const next = chatQueue.shift(sessionId)
+    if (next) {
+      console.log(`[Paw] Draining queued message for session ${sessionId.slice(0, 8)} (remaining: ${chatQueue.depth(sessionId)})`)
+      // Run async — don't block finishChat
+      _runChat(next).catch(err => console.error('[Paw] Queue drain error:', err))
+    }
+  }
 }
 
 ipcMain.handle('chat', async (_, { prompt, message, history, rawMessages, agentId, files, attachments, sessionId, requestId: paramRequestId, focus, targetWorkspaceId }) => {
@@ -1176,6 +1189,31 @@ ipcMain.handle('chat', async (_, { prompt, message, history, rawMessages, agentI
   const requestId = paramRequestId || Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
   // Sync sessionId from renderer
   if (sessionId) { currentSessionId = sessionId; syncState() }
+
+  // ── Queue: if this session already has an active reply, queue the message ──
+  if (sessionId && chatQueue.isActive(sessionId)) {
+    const queued = chatQueue.enqueue(sessionId, { prompt, files, agentId, sessionId, requestId, focus, targetWorkspaceId })
+    if (queued) {
+      console.log(`[Paw] Queued message for session ${sessionId.slice(0, 8)} (depth: ${chatQueue.depth(sessionId)})`)
+      // Save user message to DB immediately so it appears in UI
+      const wsPath = getSessionWorkspace(sessionId) || clawDir
+      if (wsPath) {
+        sessionStore.appendMessage(wsPath, sessionId, {
+          role: 'user', content: prompt, timestamp: Date.now(),
+          ...(files?.length ? { attachments: files.map(f => ({ name: f.name || f.originalName, type: f.type || f.mimeType })) } : {}),
+        })
+      }
+      eventBus.dispatch('chat-queued', { requestId, sessionId, depth: chatQueue.depth(sessionId) })
+      return { queued: true, depth: chatQueue.depth(sessionId) }
+    }
+  }
+
+  return _runChat({ prompt, files, agentId, sessionId, requestId, focus, targetWorkspaceId })
+})
+
+async function _runChat({ prompt, files, agentId, sessionId, requestId, focus, targetWorkspaceId }) {
+  if (sessionId) { chatQueue.markActive(sessionId) }
+
   const config = (() => {
     const p = configPath()
     if (!p) return {}
@@ -1479,7 +1517,7 @@ ${roster}
       }
     }
   }
-})
+}
 
 // ── IPC: Route message to determine respondents (legacy, gated) ──
 ipcMain.handle('chat-route', async (_, { prompt, history, sessionId }) => {
