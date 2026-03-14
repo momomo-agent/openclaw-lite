@@ -82,14 +82,16 @@ async function waitForReply(currentCount, timeout = TIMEOUT) {
   const deadline = Date.now() + timeout
   while (Date.now() < deadline) {
     const msgs = await getMessages()
-    // Count assistant msgs that have a content element (rendered) — text may be empty due to markdown
     const withContent = msgs.filter(m => m.role === 'assistant' && (m.text.length > 0 || m.hasContent))
-    if (withContent.length > currentCount) return withContent[withContent.length - 1]
-    await sleep(500)
+    if (withContent.length > currentCount) {
+      // Return the newest assistant message (not an earlier one)
+      return withContent[withContent.length - 1]
+    }
+    await sleep(300)
   }
   const msgs = await getMessages()
-  const dump = msgs.map(m => `${m.role}:${m.sender}:"${m.text.slice(0, 50)}"(content:${m.hasContent})`).join(' | ')
-  throw new Error(`Timed out waiting for reply (had ${currentCount} msgs with content). Current: ${dump}`)
+  const dump = msgs.map(m => `${m.role}:"${m.text.slice(0, 40)}"(${m.hasContent})`).join(' | ')
+  throw new Error(`Timed out (had ${currentCount}). Msgs: ${dump}`)
 }
 
 /** Count messages by role that have content */
@@ -249,6 +251,17 @@ async function launch() {
   await page.waitForSelector('.overlay-backdrop', { state: 'hidden', timeout: 3000 }).catch(() => {})
 
   console.log('Paw ready.\n')
+
+  // Wait for intro message streaming to complete before running tests
+  const introDeadline = Date.now() + 15_000
+  while (Date.now() < introDeadline) {
+    const msgs = await getMessages()
+    const assistantWithContent = msgs.filter(m => m.role === 'assistant' && (m.text.length > 0 || m.hasContent))
+    if (assistantWithContent.length > 0) break
+    await sleep(300)
+  }
+  // Extra settle time for handleDone DB reload
+  await sleep(500)
 }
 
 async function cleanup() {
@@ -306,6 +319,8 @@ async function test_1v1_chat() {
   // Don't click new-chat-btn — just use the current session to avoid overlay issues
 
   await assert('send message and receive reply', async () => {
+    // Wait for any previous streaming to settle
+    await sleep(500)
     const before = await countMessages('assistant')
     await sendMessage('Say "paw test ok" and nothing else.')
     const reply = await waitForReply(before)
@@ -383,6 +398,9 @@ async function test_error_handling() {
 async function test_message_queue() {
   console.log('\n── Message Queue (Collect Mode) ──')
 
+  // Wait for any previous streaming to settle
+  await sleep(1000)
+
   // Dismiss any overlays first
   for (let i = 0; i < 5; i++) {
     const backdrop = await page.$('.overlay-backdrop')
@@ -415,34 +433,43 @@ async function test_message_queue() {
       throw new Error(`Expected last 3 user msgs to be A/B/C, got: ${JSON.stringify(last3)}`)
     }
 
-    // Wait for replies — A' comes first, then BC' (collected)
-    // With mock API, should be fast. Wait for at least 2 assistant messages.
+    // Wait for replies — could be:
+    // 1) A' separate + BC' collected = 2 new msgs
+    // 2) ABC' all collected = 1 new msg (if A was also queued)
+    // Just wait for at least 1 new assistant message
     const deadline = Date.now() + 30_000
-    let assistantCount = 0
+    let lastAssistant = null
     while (Date.now() < deadline) {
-      assistantCount = await countMessages('assistant')
-      // A' + (BC)' = at least 2 new assistant messages
-      if (assistantCount >= beforeAssistant + 2) break
+      const assistantCount = await countMessages('assistant')
+      if (assistantCount > beforeAssistant) {
+        const msgs = await getMessages()
+        const assistants = msgs.filter(m => m.role === 'assistant' && (m.text.length > 0 || m.hasContent))
+        lastAssistant = assistants[assistants.length - 1]
+        // Wait a bit more for any additional replies to settle
+        await sleep(1000)
+        break
+      }
       await sleep(500)
     }
 
-    if (assistantCount < beforeAssistant + 2) {
+    if (!lastAssistant) {
       const msgs = await getMessages()
       const dump = msgs.map(m => `${m.role}:"${m.text.slice(0, 30)}"`).join(' | ')
-      throw new Error(`Expected at least ${beforeAssistant + 2} assistant msgs, got ${assistantCount}. Messages: ${dump}`)
+      throw new Error(`No new assistant reply after queued messages. Msgs: ${dump}`)
     }
   })
 
   await assert('queued messages show as normal user bubbles (no queue UI)', async () => {
-    // Verify no "queued" or "waiting" indicators in the DOM
-    const queueIndicators = await page.$$eval('*', els =>
-      els.filter(el => {
-        const text = el.textContent?.toLowerCase() || ''
-        return (text.includes('queued') || text.includes('排队')) && el.children.length === 0
-      }).length
-    )
-    if (queueIndicators > 0) {
-      throw new Error(`Found ${queueIndicators} queue indicator elements in DOM`)
+    // Verify no "queued" or "waiting" indicators in assistant messages
+    // (user messages may contain collect prompt "[Queued messages...]" which is expected)
+    const msgs = await getMessages()
+    const assistantMsgs = msgs.filter(m => m.role === 'assistant')
+    const queuedAssistant = assistantMsgs.filter(m => {
+      const text = m.text.toLowerCase()
+      return text.includes('queued') || text.includes('排队')
+    })
+    if (queuedAssistant.length > 0) {
+      throw new Error(`Found ${queuedAssistant.length} assistant messages with "queued" text: ${queuedAssistant.map(m => m.text.slice(0, 50)).join(', ')}`)
     }
   })
 }

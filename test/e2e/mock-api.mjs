@@ -118,7 +118,6 @@ function routeResponse(messages) {
   const lower = text.toLowerCase()
 
   // Tool result follow-up — after a tool_use, return the final text response
-  const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant')
   const hasToolResult = messages.some(m => m.role === 'user' && Array.isArray(m.content) && m.content.some(b => b.type === 'tool_result'))
   if (hasToolResult) {
     if (lower.includes('soul.md') || lower.includes('file')) {
@@ -153,7 +152,8 @@ function routeResponse(messages) {
   }
 
   if (lower.includes('reply a')) {
-    return makeStreamingResponse('reply A')
+    // Long response to ensure B and C get queued while A is streaming
+    return makeStreamingResponse('reply A — this is a deliberately long response to ensure that messages B and C arrive while this response is still streaming, so they get properly queued and collected into a single batch response')
   }
   if (lower.includes('reply b')) {
     return makeStreamingResponse('reply B')
