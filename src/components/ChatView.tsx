@@ -590,6 +590,21 @@ export default function ChatView() {
       storeRef.current.setStatus(sid, '')
     }
 
+    // --- Chat queued (message sent while AI busy) ---
+    const handleChatQueued = (data: any) => {
+      const sid = data.sessionId || currentSidRef.current
+      if (!sid) return
+      const ss = streamStates.current.get(sid)
+      if (!ss || data.requestId !== ss.requestId) return
+      
+      // Remove streaming placeholder — message was queued, will drain later
+      if (ss.streamingMsg) {
+        dbg('chat-queued', { sid: sid.slice(0, 8), reqId: data.requestId?.slice(0, 8), depth: data.depth })
+        routeSet(sid, (prev: Message[]) => prev.filter(m => m.id !== ss.streamingMsg!.id))
+        clearStreamState(sid)
+      }
+    }
+
     // --- Session title updated by AI tool ---
     const handleTitleUpdated = async () => {
       const updated = await apiRef.current.listSessions()
@@ -605,6 +620,7 @@ export default function ChatView() {
       api.onStatus?.(handleStatus),
       api.onWatsonStatus?.(handleWatsonStatus),
       api.onSessionTitleUpdated?.(handleTitleUpdated),
+      api.onChatQueued?.(handleChatQueued),
       api.onDelegateStart?.(handleDelegateStart),
       api.onDelegateToken?.(handleDelegateToken),
       api.onDelegateEnd?.(handleDelegateEnd),
@@ -739,35 +755,7 @@ export default function ChatView() {
 
     const requestId = await api.chatPrepare?.() || Date.now().toString()
 
-    try {
-      const result = await api.chat({ sessionId: currentSessionId, message: text, requestId, attachments: files })
-      // If queued (AI is busy replying to a previous message), just show the user message — no streaming placeholder.
-      // The queue will drain automatically and stream events will arrive when it's this message's turn.
-      if (result?.queued) {
-        if (dbgEnabled()) console.log('[Paw🐾] queued', { sid: currentSessionId.slice(0, 8), requestId: requestId.slice(0, 8), depth: result.depth })
-        return
-      }
-    } catch (err: any) {
-      console.error('[ChatView] chat error:', err)
-      setActivity(currentSessionId, 'idle')
-
-      // Sanitize error message
-      let errMsg = err?.message || 'Something went wrong'
-      errMsg = errMsg.replace(/^Error invoking remote method '[^']+': Error: /i, '')
-      errMsg = errMsg.replace(/^Error: /i, '')
-
-      // Add error card (user message stays normal — it was "sent")
-      setMessages(prev => prev.concat({
-        id: 'error-' + Date.now(),
-        role: 'assistant',
-        content: errMsg,
-        timestamp: Date.now(),
-        isError: true,
-      }))
-      return
-    }
-
-    // Not queued — set up streaming state for immediate reply
+    // Set up streaming state immediately (before api.chat call)
     const ss = getStreamState(currentSessionId)
     ss.requestId = requestId
 
@@ -791,6 +779,31 @@ export default function ChatView() {
     if (dbgEnabled()) console.log('[Paw🐾] send', { sid: currentSessionId.slice(0, 8), requestId: requestId.slice(0, 8), text: text.slice(0, 50), streamingId })
     setActivity(currentSessionId, 'thinking')
     setStatus(currentSessionId, '')
+
+    try {
+      await api.chat({ sessionId: currentSessionId, message: text, requestId, attachments: files })
+    } catch (err: any) {
+      console.error('[ChatView] chat error:', err)
+      clearStreamState(currentSessionId)
+      setActivity(currentSessionId, 'idle')
+
+      // Sanitize error message
+      let errMsg = err?.message || 'Something went wrong'
+      errMsg = errMsg.replace(/^Error invoking remote method '[^']+': Error: /i, '')
+      errMsg = errMsg.replace(/^Error: /i, '')
+
+      // Remove streaming placeholder + add error card
+      setMessages(prev => {
+        const cleaned = prev.filter(m => m.id !== streamingId)
+        return cleaned.concat({
+          id: 'error-' + Date.now(),
+          role: 'assistant',
+          content: errMsg,
+          timestamp: Date.now(),
+          isError: true,
+        })
+      })
+    }
   }
 
   // Retry — remove error card, show streaming placeholder, re-send last user message

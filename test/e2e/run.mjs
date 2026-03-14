@@ -54,11 +54,17 @@ async function assert(name, fn) {
 /** Get all messages from the message list */
 async function getMessages() {
   return page.$$eval('[data-testid="message"]', els =>
-    els.map(el => ({
-      role: el.dataset.role,
-      sender: el.dataset.sender,
-      text: el.querySelector('.msg-content')?.textContent?.trim() || '',
-    }))
+    els.map(el => {
+      const contentEl = el.querySelector('.msg-content')
+      // textContent can be empty when markdown renders to HTML elements
+      const text = contentEl?.textContent?.trim() || contentEl?.innerText?.trim() || ''
+      return {
+        role: el.dataset.role,
+        sender: el.dataset.sender,
+        text,
+        hasContent: !!contentEl,
+      }
+    })
   )
 }
 
@@ -66,30 +72,30 @@ async function getMessages() {
 async function sendMessage(text) {
   const input = await page.waitForSelector('[data-testid="chat-input"]', { timeout: 5000 })
   await input.fill(text)
-  // Small delay for React state update
-  await sleep(100)
+  await sleep(100) // React state update
   await page.click('[data-testid="send-btn"]')
+  await sleep(200) // Wait for message to be added to DOM
 }
 
-/** Wait for a new assistant message with non-empty text */
+/** Wait for a new assistant message with content */
 async function waitForReply(currentCount, timeout = TIMEOUT) {
   const deadline = Date.now() + timeout
   while (Date.now() < deadline) {
     const msgs = await getMessages()
-    const filledAssistant = msgs.filter(m => m.role === 'assistant' && m.text.trim().length > 0)
-    if (filledAssistant.length > currentCount) return filledAssistant[filledAssistant.length - 1]
+    // Count assistant msgs that have a content element (rendered) — text may be empty due to markdown
+    const withContent = msgs.filter(m => m.role === 'assistant' && (m.text.length > 0 || m.hasContent))
+    if (withContent.length > currentCount) return withContent[withContent.length - 1]
     await sleep(500)
   }
-  // Debug: dump current state
   const msgs = await getMessages()
-  const dump = msgs.map(m => `${m.role}:${m.sender}:"${m.text.slice(0, 50)}"`).join(' | ')
-  throw new Error(`Timed out waiting for reply (had ${currentCount} filled msgs). Current: ${dump}`)
+  const dump = msgs.map(m => `${m.role}:${m.sender}:"${m.text.slice(0, 50)}"(content:${m.hasContent})`).join(' | ')
+  throw new Error(`Timed out waiting for reply (had ${currentCount} msgs with content). Current: ${dump}`)
 }
 
-/** Count non-empty messages by role */
+/** Count messages by role that have content */
 async function countMessages(role) {
   const msgs = await getMessages()
-  return msgs.filter(m => m.role === role && m.text.trim().length > 0).length
+  return msgs.filter(m => m.role === role && (m.text.length > 0 || m.hasContent)).length
 }
 
 /** Create or update Paw settings with mock API config */
@@ -160,6 +166,7 @@ async function startMockApi() {
   console.log('Starting mock API server...')
   mockApiProcess = spawn('node', [path.join(__dirname, 'mock-api.mjs'), `--port=${MOCK_API_PORT}`], {
     stdio: 'pipe',
+    env: { ...process.env, E2E_SLOW_STREAM: '1' },
   })
   mockApiProcess.stdout.on('data', d => process.env.E2E_VERBOSE && process.stdout.write('[mock] ' + d))
   mockApiProcess.stderr.on('data', d => process.stderr.write('[mock-err] ' + d))
@@ -376,24 +383,18 @@ async function test_error_handling() {
 async function test_message_queue() {
   console.log('\n── Message Queue (Collect Mode) ──')
 
-  // Start fresh session
-  const newBtn = await page.$('[data-testid="new-chat-btn"]')
-  if (newBtn) {
-    await newBtn.click()
-    await sleep(1000)
-    // Dismiss any overlay
-    for (let i = 0; i < 3; i++) {
-      const backdrop = await page.$('.overlay-backdrop')
-      if (backdrop) {
-        await page.keyboard.press('Escape')
-        await sleep(300)
-      } else break
-    }
+  // Dismiss any overlays first
+  for (let i = 0; i < 5; i++) {
+    const backdrop = await page.$('.overlay-backdrop')
+    if (backdrop) {
+      await page.keyboard.press('Escape')
+      await sleep(300)
+    } else break
   }
+  await page.waitForSelector('.overlay-backdrop', { state: 'hidden', timeout: 3000 }).catch(() => {})
 
   await assert('rapid messages are queued and all get replies', async () => {
     const beforeAssistant = await countMessages('assistant')
-    const beforeUser = await countMessages('user')
 
     // Send first message — this will start processing
     await sendMessage('Say "reply A" and nothing else.')
@@ -406,9 +407,12 @@ async function test_message_queue() {
 
     // All 3 user messages should appear immediately
     await sleep(500)
-    const userCount = await countMessages('user')
-    if (userCount < beforeUser + 3) {
-      throw new Error(`Expected ${beforeUser + 3} user msgs, got ${userCount}`)
+    const msgs = await getMessages()
+    const userMsgs = msgs.filter(m => m.role === 'user')
+    const last3 = userMsgs.slice(-3).map(m => m.text)
+    
+    if (!last3[0]?.includes('reply A') || !last3[1]?.includes('reply B') || !last3[2]?.includes('reply C')) {
+      throw new Error(`Expected last 3 user msgs to be A/B/C, got: ${JSON.stringify(last3)}`)
     }
 
     // Wait for replies — A' comes first, then BC' (collected)

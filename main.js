@@ -1215,10 +1215,13 @@ ipcMain.handle('chat', async (_, { prompt, message, history, rawMessages, agentI
     }
   }
 
-  return _runChat({ prompt, files, agentId, sessionId, requestId, focus, targetWorkspaceId, rawMessages })
+  // Start _runChat async — don't await (streaming events go via eventBus, not IPC return)
+  _runChat({ prompt, files, agentId, sessionId, requestId, focus, targetWorkspaceId, rawMessages, history })
+    .catch(err => console.error('[Paw] _runChat error:', err))
+  return { started: true }
 })
 
-async function _runChat({ prompt, files, agentId, sessionId, requestId, focus, targetWorkspaceId, userMessageSaved, rawMessages }) {
+async function _runChat({ prompt, files, agentId, sessionId, requestId, focus, targetWorkspaceId, userMessageSaved, rawMessages, history }) {
   if (sessionId) { chatQueue.markActive(sessionId) }
 
   const config = (() => {

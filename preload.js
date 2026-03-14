@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('api', {
   onTextStart: (cb) => onIpc('chat-text-start', cb),
   onChatDone: (cb) => onIpc('chat-done', cb),
   onChatError: (cb) => onIpc('chat-error', cb),
+  onChatQueued: (cb) => onIpc('chat-queued', cb),
   // Sessions
   listSessions: (opts) => ipcRenderer.invoke('sessions-list', opts),
   loadSession: (id) => ipcRenderer.invoke('session-load', id),

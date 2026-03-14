@@ -146,10 +146,20 @@ function routeResponse(messages) {
     return makeStreamingResponse('paw test ok')
   }
 
-  // Queued messages (collect mode) — respond acknowledging all
+  // Queued messages (collect mode) — respond acknowledging all (avoid "queued" in response text for E2E test)
   if (lower.includes('queued messages while agent was busy') || lower.includes('queued #')) {
     const matches = text.match(/Queued #\d+/g) || []
-    return makeStreamingResponse(`I received ${matches.length} queued messages and processed them all together.`)
+    return makeStreamingResponse(`Received ${matches.length} messages in batch. Processing them together.`)
+  }
+
+  if (lower.includes('reply a')) {
+    return makeStreamingResponse('reply A')
+  }
+  if (lower.includes('reply b')) {
+    return makeStreamingResponse('reply B')
+  }
+  if (lower.includes('reply c')) {
+    return makeStreamingResponse('reply C')
   }
 
   if (lower.includes('hello') || lower.includes('hi')) {
@@ -213,7 +223,7 @@ const server = http.createServer((req, res) => {
 
           const responseSSE = routeResponse(messages)
 
-          // Stream with small delays to simulate real API
+          // Stream with delays to simulate real API
           const events = responseSSE.split('\n\n').filter(Boolean)
           let i = 0
           const sendNext = () => {
@@ -223,7 +233,9 @@ const server = http.createServer((req, res) => {
             }
             res.write(events[i] + '\n\n')
             i++
-            setTimeout(sendNext, 10 + Math.random() * 20)
+            // Slower for E2E queue testing — ensure messages can queue
+            const delay = process.env.E2E_SLOW_STREAM ? 100 + Math.random() * 100 : 10 + Math.random() * 20
+            setTimeout(sendNext, delay)
           }
           sendNext()
         } else {
