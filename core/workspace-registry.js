@@ -154,7 +154,17 @@ function addWorkspace(wsPath) {
 
   const hasSoul = fs.existsSync(path.join(resolved, 'SOUL.md'))
   const hasConfig = fs.existsSync(path.join(resolved, '.paw', 'config.json'))
-  if (!hasSoul && !hasConfig) return { ok: false, error: 'not_a_workspace' }
+  if (!hasSoul && !hasConfig) {
+    // Auto-bootstrap: create .paw/config.json so any folder can become a workspace
+    const pawDir = path.join(resolved, '.paw')
+    fs.mkdirSync(pawDir, { recursive: true })
+    const folderName = path.basename(resolved)
+    fs.writeFileSync(path.join(pawDir, 'config.json'), JSON.stringify({
+      id: folderName.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+      name: folderName,
+      avatar: `preset:${Math.floor(Math.random() * 6)}`,
+    }, null, 2) + '\n', 'utf8')
+  }
 
   if (getWorkspaceByPath(resolved)) return { ok: false, error: 'already_registered' }
 

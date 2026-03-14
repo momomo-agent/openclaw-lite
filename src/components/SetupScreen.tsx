@@ -24,6 +24,17 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
   const [userName, setUserName] = useState('')
   const [userAvatar, setUserAvatar] = useState(0)
 
+  // Check if user profile already exists (skip user step on re-entry)
+  useEffect(() => {
+    api.getUserProfile?.().then((profile: any) => {
+      if (profile?.userName) {
+        setUserName(profile.userName)
+        setUserAvatar(profile.presetIndex ?? 0)
+        setStep('assistant')
+      }
+    }).catch(() => {})
+  }, [])
+
   // Assistant
   const [assistantName, setAssistantName] = useState('')
   const [assistantAvatar, setAssistantAvatar] = useState(Math.floor(Math.random() * AVATAR_COUNT))
