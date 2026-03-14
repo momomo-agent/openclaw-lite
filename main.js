@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, shell, Notification, Tray, nativeImage, desktopCapturer } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell, Notification, Tray, nativeImage } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const vm = require('vm')
@@ -17,6 +17,7 @@ if (app.isPackaged) {
 const memoryIndex = require('./memory-index')
 const { getTool, getAnthropicTools, getToolsPrompt } = require('./tools')
 const { loadAllSkills } = require('./skills/frontmatter')
+const { gatherContext } = require('./core/context-sensing')
 
 // ── Core modules (M18 refactor) ──
 const state = require('./core/state')
@@ -530,56 +531,10 @@ async function createWindow() {
     mainWindow = null
     syncState()
   })
-  // ── Screen awareness: on-demand, not polling ──
-  // Philosophy: Paw captures context WHEN THE USER ASKS, not continuously.
-  // blur/focus tracking only records WHAT app was in front, not screenshots.
-  // Screenshot is taken lazily — only when LLM needs visual context.
-  let _lastScreenCapture = null
-  let _lastForegroundApp = null  // { name, timestamp }
-
-  mainWindow.on('blur', () => {
-    // Remember what app the user switched to (lightweight, no screenshot)
-    // macOS: NSWorkspace.frontmostApplication — but we can approximate from focus
-    _lastForegroundApp = { timestamp: Date.now() }
-  })
-
   mainWindow.on('focus', () => {
     _unreadCount = 0
     updateTrayTitle()
   })
-
-  // Capture function: called on-demand by tools, not on a timer
-  global._pawCaptureScreen = () => {
-    return new Promise((resolve) => {
-      const tmpFile = path.join(require('os').tmpdir(), `paw-capture-${Date.now()}.png`)
-      const { execFile } = require('child_process')
-      // Hide Paw briefly to capture what's behind it
-      const wasVisible = mainWindow?.isVisible()
-      if (wasVisible) mainWindow.hide()
-      setTimeout(() => {
-        execFile('/usr/sbin/screencapture', ['-x', '-C', tmpFile], (err) => {
-          if (wasVisible) mainWindow.show()
-          if (err) return resolve(null)
-          try {
-            const buf = fs.readFileSync(tmpFile)
-            _lastScreenCapture = {
-              data: buf.toString('base64'),
-              windowName: '桌面全屏',
-              width: 1920,
-              height: 1080,
-              timestamp: Date.now(),
-            }
-            fs.unlinkSync(tmpFile)
-            resolve(_lastScreenCapture)
-          } catch { resolve(null) }
-        })
-      }, 300) // brief delay for Paw to fully hide
-    })
-  }
-
-  // Expose last screen capture to tools
-  global._pawGetLastCapture = () => _lastScreenCapture
-  global._pawClearLastCapture = () => { _lastScreenCapture = null }
 }
 
 // ── EventBus → BrowserWindow bridge ──
@@ -1553,6 +1508,40 @@ ${roster}
     eventBus.dispatch('chat-status', { text: '压缩历史对话...', requestId })
     finalMessages = await compactHistory(prunedMessages, { apiKey, baseUrl, model, provider })
     compacted = true
+  }
+
+  // ── Ambient context sensing (silent, user-invisible) ──
+  try {
+    const ctx_sensing = await gatherContext(mainWindow)
+    if (ctx_sensing) {
+      // Append ambient text to system prompt
+      if (ctx_sensing.text) {
+        systemPrompt += ctx_sensing.text
+      }
+      // Inject screenshot into the last user message as image content
+      if (ctx_sensing.images?.length > 0 && finalMessages.length > 0) {
+        // Find last user message
+        for (let i = finalMessages.length - 1; i >= 0; i--) {
+          if (finalMessages[i].role === 'user') {
+            const msg = { ...finalMessages[i] }
+            // Convert string content to content array if needed
+            const textContent = typeof msg.content === 'string'
+              ? [{ type: 'text', text: msg.content }]
+              : Array.isArray(msg.content) ? [...msg.content] : [{ type: 'text', text: String(msg.content) }]
+            // Add images
+            const imageBlocks = ctx_sensing.images.map(img => ({
+              type: 'image',
+              source: { type: img.type, media_type: img.media_type, data: img.data },
+            }))
+            msg.content = [...imageBlocks, ...textContent]
+            finalMessages = [...finalMessages.slice(0, i), msg, ...finalMessages.slice(i + 1)]
+            break
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[context-sensing] failed:', err.message)
   }
 
   // Model fallback list with cooldown management
