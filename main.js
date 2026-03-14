@@ -530,44 +530,52 @@ async function createWindow() {
     mainWindow = null
     syncState()
   })
-  // Track window focus transitions for auto screen capture
-  let _pawWasBlurred = false
-  let _lastScreenCapture = null  // base64 PNG of full screen
-  let _captureInterval = null
-
-  function _doCapture() {
-    const tmpFile = path.join(require('os').tmpdir(), `paw-capture-${Date.now()}.png`)
-    const { execFile } = require('child_process')
-    execFile('/usr/sbin/screencapture', ['-x', '-C', tmpFile], (err) => {
-      if (err) return
-      try {
-        const buf = fs.readFileSync(tmpFile)
-        _lastScreenCapture = {
-          data: buf.toString('base64'),
-          windowName: '桌面全屏',
-          width: 1920,
-          height: 1080,
-          timestamp: Date.now(),
-        }
-        fs.unlinkSync(tmpFile)
-      } catch {}
-    })
-  }
+  // ── Screen awareness: on-demand, not polling ──
+  // Philosophy: Paw captures context WHEN THE USER ASKS, not continuously.
+  // blur/focus tracking only records WHAT app was in front, not screenshots.
+  // Screenshot is taken lazily — only when LLM needs visual context.
+  let _lastScreenCapture = null
+  let _lastForegroundApp = null  // { name, timestamp }
 
   mainWindow.on('blur', () => {
-    _pawWasBlurred = true
-    // Capture immediately on blur, then refresh every 10s
-    _doCapture()
-    if (_captureInterval) clearInterval(_captureInterval)
-    _captureInterval = setInterval(_doCapture, 10000)
+    // Remember what app the user switched to (lightweight, no screenshot)
+    // macOS: NSWorkspace.frontmostApplication — but we can approximate from focus
+    _lastForegroundApp = { timestamp: Date.now() }
   })
 
   mainWindow.on('focus', () => {
     _unreadCount = 0
     updateTrayTitle()
-    _pawWasBlurred = false
-    if (_captureInterval) { clearInterval(_captureInterval); _captureInterval = null }
   })
+
+  // Capture function: called on-demand by tools, not on a timer
+  global._pawCaptureScreen = () => {
+    return new Promise((resolve) => {
+      const tmpFile = path.join(require('os').tmpdir(), `paw-capture-${Date.now()}.png`)
+      const { execFile } = require('child_process')
+      // Hide Paw briefly to capture what's behind it
+      const wasVisible = mainWindow?.isVisible()
+      if (wasVisible) mainWindow.hide()
+      setTimeout(() => {
+        execFile('/usr/sbin/screencapture', ['-x', '-C', tmpFile], (err) => {
+          if (wasVisible) mainWindow.show()
+          if (err) return resolve(null)
+          try {
+            const buf = fs.readFileSync(tmpFile)
+            _lastScreenCapture = {
+              data: buf.toString('base64'),
+              windowName: '桌面全屏',
+              width: 1920,
+              height: 1080,
+              timestamp: Date.now(),
+            }
+            fs.unlinkSync(tmpFile)
+            resolve(_lastScreenCapture)
+          } catch { resolve(null) }
+        })
+      }, 300) // brief delay for Paw to fully hide
+    })
+  }
 
   // Expose last screen capture to tools
   global._pawGetLastCapture = () => _lastScreenCapture
