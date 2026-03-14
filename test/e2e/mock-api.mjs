@@ -183,7 +183,7 @@ const server = http.createServer((req, res) => {
 
         // Error modes
         if (ERROR_MODE === 'rate-limit') {
-          res.writeHead(429, { 'Content-Type': 'application/json', 'retry-after': '30' })
+          res.writeHead(429, { 'Content-Type': 'application/json', 'retry-after': '1' })
           res.end(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: 'Rate limit exceeded. Please retry after 30 seconds.' } }))
           return
         }

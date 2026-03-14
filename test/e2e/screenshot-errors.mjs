@@ -123,7 +123,7 @@ async function main() {
     console.log('4. Mid-stream error (rate limit)')
     if (mockProcess) mockProcess.kill()
     await startMock('rate-limit')
-    await sendAndWait('Tell me a story', 5000)
+    await sendAndWait('Tell me a story', 15000)
     await screenshot('error-rate-limit')
 
     await browser.close().catch(() => {})
