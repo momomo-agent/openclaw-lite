@@ -108,51 +108,80 @@ describe('ChatQueue', () => {
   })
 })
 
-// ── Collect prompt integration ──
+// ── Collect prompt integration (drainAndMerge) ──
 
-describe('Collect prompt building (mirrors main.js drain logic)', () => {
-  function buildCollectPrompt(items) {
-    if (items.length === 1) return items[0].prompt
-    return [
-      '[Queued messages while agent was busy]',
-      ...items.map((item, i) => `---\nQueued #${i + 1}\n${item.prompt}`),
-    ].join('\n\n')
-  }
+describe('drainAndMerge', () => {
+  let q
+
+  beforeEach(() => {
+    q = new ChatQueue()
+  })
+
+  it('returns null when nothing queued', () => {
+    q.markActive('s1')
+    q.markIdle('s1')
+    expect(q.drainAndMerge('s1')).toBeNull()
+  })
 
   it('single message passes through unchanged', () => {
-    const result = buildCollectPrompt([{ prompt: 'hello' }])
-    expect(result).toBe('hello')
+    q.markActive('s1')
+    q.enqueue('s1', { prompt: 'hello', sessionId: 's1', requestId: 'r1' })
+    const result = q.drainAndMerge('s1')
+    expect(result.prompt).toBe('hello')
+    expect(result.sessionId).toBe('s1')
+    expect(result.userMessageSaved).toBeUndefined() // not wrapped
   })
 
   it('two messages produce collect format', () => {
-    const result = buildCollectPrompt([
-      { prompt: '你好' },
-      { prompt: '帮我查天气' },
-    ])
-    expect(result).toContain('[Queued messages while agent was busy]')
-    expect(result).toContain('Queued #1\n你好')
-    expect(result).toContain('Queued #2\n帮我查天气')
-    expect(result.match(/---/g)).toHaveLength(2)
+    q.markActive('s1')
+    q.enqueue('s1', { prompt: '你好', sessionId: 's1', requestId: 'r1' })
+    q.enqueue('s1', { prompt: '帮我查天气', sessionId: 's1', requestId: 'r2' })
+    const result = q.drainAndMerge('s1')
+    expect(result.prompt).toContain('[Queued messages while agent was busy]')
+    expect(result.prompt).toContain('Queued #1\n你好')
+    expect(result.prompt).toContain('Queued #2\n帮我查天气')
+    expect(result.prompt.match(/---/g)).toHaveLength(2)
+    expect(result.userMessageSaved).toBe(true)
   })
 
   it('three messages are numbered correctly', () => {
-    const result = buildCollectPrompt([
-      { prompt: 'A' },
-      { prompt: 'B' },
-      { prompt: 'C' },
-    ])
-    expect(result).toContain('Queued #1\nA')
-    expect(result).toContain('Queued #2\nB')
-    expect(result).toContain('Queued #3\nC')
+    q.markActive('s1')
+    q.enqueue('s1', { prompt: 'A' })
+    q.enqueue('s1', { prompt: 'B' })
+    q.enqueue('s1', { prompt: 'C' })
+    const result = q.drainAndMerge('s1')
+    expect(result.prompt).toContain('Queued #1\nA')
+    expect(result.prompt).toContain('Queued #2\nB')
+    expect(result.prompt).toContain('Queued #3\nC')
   })
 
   it('preserves multiline message content', () => {
-    const result = buildCollectPrompt([
-      { prompt: 'line 1\nline 2\nline 3' },
-      { prompt: 'short' },
-    ])
-    expect(result).toContain('Queued #1\nline 1\nline 2\nline 3')
-    expect(result).toContain('Queued #2\nshort')
+    q.markActive('s1')
+    q.enqueue('s1', { prompt: 'line 1\nline 2\nline 3' })
+    q.enqueue('s1', { prompt: 'short' })
+    const result = q.drainAndMerge('s1')
+    expect(result.prompt).toContain('Queued #1\nline 1\nline 2\nline 3')
+    expect(result.prompt).toContain('Queued #2\nshort')
+  })
+
+  it('inherits metadata from last queued item', () => {
+    q.markActive('s1')
+    q.enqueue('s1', { prompt: 'B', sessionId: 's1', requestId: 'r2', agentId: 'agent1' })
+    q.enqueue('s1', { prompt: 'C', sessionId: 's1', requestId: 'r3', agentId: 'agent2' })
+    const result = q.drainAndMerge('s1')
+    expect(result.sessionId).toBe('s1')
+    expect(result.requestId).toBe('r3')
+    expect(result.agentId).toBe('agent2')
+    expect(result.userMessageSaved).toBe(true)
+  })
+
+  it('empties queue after drain', () => {
+    q.markActive('s1')
+    q.enqueue('s1', { prompt: 'A' })
+    q.enqueue('s1', { prompt: 'B' })
+    q.drainAndMerge('s1')
+    expect(q.depth('s1')).toBe(0)
+    expect(q.drainAndMerge('s1')).toBeNull()
   })
 })
 
@@ -165,24 +194,6 @@ describe('Drain simulation (queue → collect → run)', () => {
 
     function runChat(item) {
       runs.push(item.prompt)
-    }
-
-    function drainQueue(sessionId) {
-      q.markIdle(sessionId)
-      const items = q.shiftAll(sessionId)
-      if (items.length > 0) {
-        const merged = items.length === 1
-          ? items[0]
-          : {
-              ...items[items.length - 1],
-              userMessageSaved: true,
-              prompt: [
-                '[Queued messages while agent was busy]',
-                ...items.map((item, i) => `---\nQueued #${i + 1}\n${item.prompt}`),
-              ].join('\n\n'),
-            }
-        runChat(merged)
-      }
     }
 
     // 1. User sends A — not queued (idle)
@@ -199,7 +210,10 @@ describe('Drain simulation (queue → collect → run)', () => {
     expect(q.depth('s1')).toBe(2)
 
     // 4. A finishes — drain B+C as one collect
-    drainQueue('s1')
+    q.markIdle('s1')
+    const merged = q.drainAndMerge('s1')
+    expect(merged).not.toBeNull()
+    runChat(merged)
 
     expect(runs).toHaveLength(2) // A (direct) + BC (collected)
     expect(runs[0]).toBe('A')
@@ -216,28 +230,8 @@ describe('Drain simulation (queue → collect → run)', () => {
     q.enqueue('s1', { prompt: 'only B' })
 
     q.markIdle('s1')
-    const items = q.shiftAll('s1')
-    const merged = items.length === 1 ? items[0] : null
+    const merged = q.drainAndMerge('s1')
 
     expect(merged?.prompt).toBe('only B')
-  })
-
-  it('merged item inherits metadata from last queued item', () => {
-    const q = new ChatQueue()
-    q.markActive('s1')
-    q.enqueue('s1', { prompt: 'B', sessionId: 's1', requestId: 'r2', agentId: 'agent1' })
-    q.enqueue('s1', { prompt: 'C', sessionId: 's1', requestId: 'r3', agentId: 'agent2' })
-
-    const items = q.shiftAll('s1')
-    const merged = {
-      ...items[items.length - 1],
-      userMessageSaved: true,
-      prompt: '[collected]',
-    }
-
-    expect(merged.sessionId).toBe('s1')
-    expect(merged.requestId).toBe('r3')
-    expect(merged.agentId).toBe('agent2')
-    expect(merged.userMessageSaved).toBe(true)
   })
 })

@@ -67,6 +67,27 @@ class ChatQueue {
     const s = this._getSession(sessionId)
     return { active: s.active, queued: s.queue.length }
   }
+
+  /**
+   * Drain all queued messages and merge into a single collect item.
+   * Returns null if nothing queued.
+   * Single message passes through unchanged; multiple get OpenClaw-style collect format.
+   */
+  drainAndMerge(sessionId) {
+    const items = this.shiftAll(sessionId)
+    if (items.length === 0) return null
+    if (items.length === 1) return items[0]
+    return {
+      ...items[items.length - 1],  // inherit sessionId, requestId, etc. from latest
+      userMessageSaved: true,       // all items were already persisted individually
+      prompt: [
+        '[Queued messages while agent was busy]',
+        ...items.map((item, i) =>
+          `---\nQueued #${i + 1}\n${item.prompt}`
+        ),
+      ].join('\n\n'),
+    }
+  }
 }
 
 module.exports = { ChatQueue }

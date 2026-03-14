@@ -1173,23 +1173,9 @@ function finishChat(sessionId, requestId, assistantText, wsIdentity, toolSteps, 
   // ── Queue drain: collect all queued messages and process as one ──
   if (sessionId) {
     chatQueue.markIdle(sessionId)
-    const items = chatQueue.shiftAll(sessionId)
-    if (items.length > 0) {
-      console.log(`[Paw] Draining ${items.length} queued message(s) for session ${sessionId.slice(0, 8)}`)
-      // Build collect prompt (OpenClaw-style: each message clearly separated)
-      const merged = items.length === 1
-        ? items[0]
-        : {
-            ...items[items.length - 1],  // inherit sessionId, requestId etc. from last item
-            userMessageSaved: true,       // all items were already persisted
-            prompt: [
-              '[Queued messages while agent was busy]',
-              ...items.map((item, i) =>
-                `---\nQueued #${i + 1}\n${item.prompt}`
-              ),
-            ].join('\n\n'),
-          }
-      // Run async — don't block finishChat
+    const merged = chatQueue.drainAndMerge(sessionId)
+    if (merged) {
+      console.log(`[Paw] Draining queued message(s) for session ${sessionId.slice(0, 8)}`)
       _runChat(merged).catch(err => console.error('[Paw] Queue drain error:', err))
     }
   }

@@ -199,43 +199,38 @@ export default function ChatView() {
   useEffect(() => {
     const dbg = (...args: any[]) => { if (dbgEnabled()) console.log('[Paw🐾]', ...args) }
 
-    // Guard helper: resolves session, checks requestId, logs rejection reason
-    const guard = (event: string, data: any): { sid: string; ss: StreamState } | null => {
+    // Guard helper: resolves session, checks requestId, logs rejection reason.
+    // allowAdopt: if true and session has no active streaming, adopt the incoming
+    // requestId (queue drain scenario — main.js starts processing collected messages,
+    // renderer needs to pick up the new stream). Only text-start should use this;
+    // all other events must match an already-established requestId.
+    const guard = (event: string, data: any, opts?: { allowAdopt?: boolean }): { sid: string; ss: StreamState } | null => {
       const sid = data.sessionId || currentSidRef.current
-      let ss = sid ? streamStates.current.get(sid) : undefined
+      if (!sid) return null
+
+      const ss = sid ? streamStates.current.get(sid) : undefined
       const match = ss?.requestId && data.requestId === ss.requestId
       dbg(event, {
-        sid: sid?.slice(0, 8) || '(none)',
+        sid: sid.slice(0, 8),
         reqId: data.requestId?.slice(0, 8),
         match,
       })
-      if (!sid) return null
-      if (!ss || !match) return null
-      return { sid, ss }
-    }
 
-    /** Adopt a new requestId for a session (queue drain: main.js starts processing a queued message) */
-    const adoptRequestId = (sid: string, requestId: string): StreamState => {
-      const ss = getStreamState(sid)
-      ss.requestId = requestId
-      return ss
+      if (match) return { sid, ss: ss! }
+
+      // Adopt: session idle (no requestId), caller explicitly allows adoption
+      if (opts?.allowAdopt && data.requestId && (!ss || !ss.requestId)) {
+        dbg(`${event} (adopt-drain)`, { sid: sid.slice(0, 8), reqId: data.requestId.slice(0, 8) })
+        const adopted = getStreamState(sid)
+        adopted.requestId = data.requestId
+        return { sid, ss: adopted }
+      }
+
+      return null
     }
 
     const handleTextStart = (data: any) => {
-      let g = guard('text-start', data)
-      
-      // Queue drain scenario: no active streaming for this session, adopt the new requestId
-      if (!g && data.requestId) {
-        const sid = data.sessionId || currentSidRef.current
-        if (sid) {
-          const existing = streamStates.current.get(sid)
-          if (!existing || !existing.requestId) {
-            dbg('text-start (adopt-drain)', { sid: sid.slice(0, 8), reqId: data.requestId.slice(0, 8) })
-            const ss = adoptRequestId(sid, data.requestId)
-            g = { sid, ss }
-          }
-        }
-      }
+      const g = guard('text-start', data, { allowAdopt: true })
       if (!g) return
       const { sid, ss } = g
 
@@ -604,6 +599,12 @@ export default function ChatView() {
     }
 
     // --- Chat queued (message sent while AI busy) ---
+    // Timing contract (Electron IPC is ordered within a single webContents):
+    //   1. handleSend creates placeholder + sets streamState.requestId
+    //   2. main.js enqueues → dispatches 'chat-queued' → arrives here
+    //   3. We clear placeholder + streamState (session becomes idle)
+    //   4. Later: finishChat drains queue → _runChat → 'text-start' arrives
+    //   5. handleTextStart adopts new requestId via guard({allowAdopt: true})
     const handleChatQueued = (data: any) => {
       const sid = data.sessionId || currentSidRef.current
       if (!sid) return
