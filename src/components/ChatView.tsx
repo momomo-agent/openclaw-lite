@@ -566,17 +566,16 @@ export default function ChatView() {
       if (!g) return
       const { sid } = g
 
-      // Sanitize error message: strip IPC wrappers, show friendly text
       let errMsg = data.error || 'Something went wrong'
       errMsg = errMsg.replace(/^Error invoking remote method '[^']+': Error: /i, '')
       errMsg = errMsg.replace(/^Error: /i, '')
 
       routeAdd(sid, {
         id: 'error-' + Date.now(),
-        role: 'error' as any,
+        role: 'assistant' as any,
         content: errMsg,
         timestamp: Date.now(),
-        error: errMsg,
+        isError: true,
       })
       clearStreamState(sid)
       storeRef.current.setActivity(sid, 'idle')
@@ -727,7 +726,8 @@ export default function ChatView() {
       }))
     }
 
-    setMessages(prev => [...prev, userMsg])
+    // Clear any previous error cards before adding new user message
+    setMessages(prev => [...prev.filter(m => !m.isError), userMsg])
 
     const requestId = await api.chatPrepare?.() || Date.now().toString()
     // Initialize per-session stream state with requestId
