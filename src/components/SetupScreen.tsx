@@ -87,7 +87,11 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
       await api.setUserProfile({ userName: userName.trim(), presetIndex: userAvatar })
     }
     const result = await api.addWorkspace()
-    if (result?.ok) onEnterChat()
+    if (result?.ok) {
+      onEnterChat()
+    } else if (result?.error === 'not_a_workspace') {
+      alert('该文件夹不是 Paw workspace。\n\n请选择包含 SOUL.md 或 .paw/config.json 的文件夹。')
+    }
   }
 
   return (
