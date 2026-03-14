@@ -111,11 +111,21 @@ export default function InputBar({ sessionId, onSend, isGroup = false }: InputBa
     const pos = e.target.selectionStart
     setText(val)
 
-    // Update pill positions based on text changes
-    setPills(prev => prev.filter(pill => {
-      const pillText = `@${pill.name}`
-      return val.slice(pill.start, pill.end) === pillText
-    }).map(pill => ({ ...pill })))
+    // Revalidate pill positions: find actual @Name positions in new text
+    setPills(prev => {
+      const updated: typeof prev = []
+      for (const pill of prev) {
+        const pillText = `@${pill.name}`
+        // Search for this pill text near its last known position, then anywhere
+        let idx = val.indexOf(pillText, Math.max(0, pill.start - 20))
+        if (idx === -1) idx = val.indexOf(pillText)
+        if (idx !== -1) {
+          updated.push({ ...pill, start: idx, end: idx + pillText.length })
+        }
+        // If not found at all, pill is removed (user deleted it)
+      }
+      return updated
+    })
 
     // Check for @ trigger (only in group chats)
     if (isGroup) {
@@ -277,33 +287,6 @@ export default function InputBar({ sessionId, onSend, isGroup = false }: InputBa
                   />
                   <span>@{name}</span>
                 </div>
-              )
-            })}
-          </div>
-        )}
-        {/* F203: Pill overlays */}
-        {pills.length > 0 && (
-          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none', padding: '10px 48px 10px 48px' }}>
-            {pills.map(pill => {
-              const ws = workspaces.find(w => (w.identity?.name || w.id) === pill.name)
-              return (
-                <span key={pill.id} style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                  background: 'var(--accent-dim)', color: 'var(--accent)',
-                  borderRadius: 4, padding: '2px 6px', fontSize: 13,
-                  position: 'absolute', whiteSpace: 'nowrap'
-                }}>
-                  <img
-                    src={ws?.identity?.avatar?.startsWith('preset:')
-                      ? `../avatars/${ws.identity.avatar.replace('preset:', '')}.png`
-                      : ws?.identity?.avatar?.startsWith('../')
-                      ? ws.identity.avatar
-                      : '../avatars/1.png'}
-                    style={{ width: 16, height: 16, borderRadius: '50%' }}
-                    onError={(e) => { e.currentTarget.src = '../avatars/1.png' }}
-                  />
-                  <span>@{pill.name}</span>
-                </span>
               )
             })}
           </div>
