@@ -146,6 +146,12 @@ function routeResponse(messages) {
     return makeStreamingResponse('paw test ok')
   }
 
+  // Queued messages (collect mode) — respond acknowledging all
+  if (lower.includes('queued messages while agent was busy') || lower.includes('queued #')) {
+    const matches = text.match(/Queued #\d+/g) || []
+    return makeStreamingResponse(`I received ${matches.length} queued messages and processed them all together.`)
+  }
+
   if (lower.includes('hello') || lower.includes('hi')) {
     return makeStreamingResponse('Hello! I\'m your Paw assistant. How can I help you today?')
   }

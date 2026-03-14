@@ -94,42 +94,63 @@ async function countMessages(role) {
 
 /** Create or update Paw settings with mock API config */
 function setupMockConfig() {
-  const pawDir = path.join(os.homedir(), '.paw')
-  const settingsPath = path.join(pawDir, 'settings.json')
-  const backupPath = path.join(pawDir, 'settings.json.e2e-backup')
-
-  // Backup existing settings
-  if (fs.existsSync(settingsPath)) {
-    fs.copyFileSync(settingsPath, backupPath)
-    console.log('Backed up existing settings.json')
-  }
-
-  // Write mock config
-  const config = {
+  const mockConfig = {
     provider: 'anthropic',
     apiKey: 'sk-e2e-test-mock-key',
     baseUrl: `http://127.0.0.1:${MOCK_API_PORT}`,
     model: 'claude-sonnet-4-20250514',
     _e2e: true
   }
+
+  // Write to global settings (~/.paw/settings.json)
+  const pawDir = path.join(os.homedir(), '.paw')
+  const settingsPath = path.join(pawDir, 'settings.json')
+  const backupPath = path.join(pawDir, 'settings.json.e2e-backup')
+  if (fs.existsSync(settingsPath)) {
+    fs.copyFileSync(settingsPath, backupPath)
+    console.log('Backed up global settings.json')
+  }
   fs.mkdirSync(pawDir, { recursive: true })
-  fs.writeFileSync(settingsPath, JSON.stringify(config, null, 2))
+  fs.writeFileSync(settingsPath, JSON.stringify(mockConfig, null, 2))
+
+  // Also write to workspace config (Paw reads apiKey/baseUrl from workspace config too)
+  const wsConfigDir = path.join(os.homedir(), 'Documents', '.paw')
+  const wsConfigPath = path.join(wsConfigDir, 'config.json')
+  const wsBackupPath = path.join(wsConfigDir, 'config.json.e2e-backup')
+  if (fs.existsSync(wsConfigPath)) {
+    fs.copyFileSync(wsConfigPath, wsBackupPath)
+    console.log('Backed up workspace config.json')
+  }
+  fs.mkdirSync(wsConfigDir, { recursive: true })
+  fs.writeFileSync(wsConfigPath, JSON.stringify(mockConfig, null, 2))
+
   console.log(`Settings: baseUrl → mock API (port ${MOCK_API_PORT})`)
 }
 
 /** Restore original settings */
 function restoreConfig() {
+  // Restore global settings
   const pawDir = path.join(os.homedir(), '.paw')
   const settingsPath = path.join(pawDir, 'settings.json')
   const backupPath = path.join(pawDir, 'settings.json.e2e-backup')
-
   if (fs.existsSync(backupPath)) {
     fs.copyFileSync(backupPath, settingsPath)
     fs.unlinkSync(backupPath)
-    console.log('Restored original settings.json')
+    console.log('Restored global settings.json')
   } else {
-    // No original — remove the mock config
     try { fs.unlinkSync(settingsPath) } catch {}
+  }
+
+  // Restore workspace config
+  const wsConfigDir = path.join(os.homedir(), 'Documents', '.paw')
+  const wsConfigPath = path.join(wsConfigDir, 'config.json')
+  const wsBackupPath = path.join(wsConfigDir, 'config.json.e2e-backup')
+  if (fs.existsSync(wsBackupPath)) {
+    fs.copyFileSync(wsBackupPath, wsConfigPath)
+    fs.unlinkSync(wsBackupPath)
+    console.log('Restored workspace config.json')
+  } else {
+    try { fs.unlinkSync(wsConfigPath) } catch {}
   }
 }
 
@@ -352,6 +373,76 @@ async function test_error_handling() {
   })
 }
 
+async function test_message_queue() {
+  console.log('\n── Message Queue (Collect Mode) ──')
+
+  // Start fresh session
+  const newBtn = await page.$('[data-testid="new-chat-btn"]')
+  if (newBtn) {
+    await newBtn.click()
+    await sleep(1000)
+    // Dismiss any overlay
+    for (let i = 0; i < 3; i++) {
+      const backdrop = await page.$('.overlay-backdrop')
+      if (backdrop) {
+        await page.keyboard.press('Escape')
+        await sleep(300)
+      } else break
+    }
+  }
+
+  await assert('rapid messages are queued and all get replies', async () => {
+    const beforeAssistant = await countMessages('assistant')
+    const beforeUser = await countMessages('user')
+
+    // Send first message — this will start processing
+    await sendMessage('Say "reply A" and nothing else.')
+    await sleep(300) // Let it start streaming
+
+    // While AI is replying, send two more messages rapidly
+    await sendMessage('Say "reply B" and nothing else.')
+    await sleep(100)
+    await sendMessage('Say "reply C" and nothing else.')
+
+    // All 3 user messages should appear immediately
+    await sleep(500)
+    const userCount = await countMessages('user')
+    if (userCount < beforeUser + 3) {
+      throw new Error(`Expected ${beforeUser + 3} user msgs, got ${userCount}`)
+    }
+
+    // Wait for replies — A' comes first, then BC' (collected)
+    // With mock API, should be fast. Wait for at least 2 assistant messages.
+    const deadline = Date.now() + 30_000
+    let assistantCount = 0
+    while (Date.now() < deadline) {
+      assistantCount = await countMessages('assistant')
+      // A' + (BC)' = at least 2 new assistant messages
+      if (assistantCount >= beforeAssistant + 2) break
+      await sleep(500)
+    }
+
+    if (assistantCount < beforeAssistant + 2) {
+      const msgs = await getMessages()
+      const dump = msgs.map(m => `${m.role}:"${m.text.slice(0, 30)}"`).join(' | ')
+      throw new Error(`Expected at least ${beforeAssistant + 2} assistant msgs, got ${assistantCount}. Messages: ${dump}`)
+    }
+  })
+
+  await assert('queued messages show as normal user bubbles (no queue UI)', async () => {
+    // Verify no "queued" or "waiting" indicators in the DOM
+    const queueIndicators = await page.$$eval('*', els =>
+      els.filter(el => {
+        const text = el.textContent?.toLowerCase() || ''
+        return (text.includes('queued') || text.includes('排队')) && el.children.length === 0
+      }).length
+    )
+    if (queueIndicators > 0) {
+      throw new Error(`Found ${queueIndicators} queue indicator elements in DOM`)
+    }
+  })
+}
+
 // ── Main ──
 
 async function main() {
@@ -366,6 +457,7 @@ async function main() {
     await test_1v1_chat()
     await test_tool_use()
     await test_error_handling()
+    await test_message_queue()
 
     console.log(`\n${'═'.repeat(40)}`)
     console.log(`  Results: ${passed} passed, ${failed} failed`)

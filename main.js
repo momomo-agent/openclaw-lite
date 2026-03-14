@@ -1215,10 +1215,10 @@ ipcMain.handle('chat', async (_, { prompt, message, history, rawMessages, agentI
     }
   }
 
-  return _runChat({ prompt, files, agentId, sessionId, requestId, focus, targetWorkspaceId })
+  return _runChat({ prompt, files, agentId, sessionId, requestId, focus, targetWorkspaceId, rawMessages })
 })
 
-async function _runChat({ prompt, files, agentId, sessionId, requestId, focus, targetWorkspaceId, userMessageSaved }) {
+async function _runChat({ prompt, files, agentId, sessionId, requestId, focus, targetWorkspaceId, userMessageSaved, rawMessages }) {
   if (sessionId) { chatQueue.markActive(sessionId) }
 
   const config = (() => {
