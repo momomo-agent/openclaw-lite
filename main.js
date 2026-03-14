@@ -532,12 +532,10 @@ async function createWindow() {
   })
   // Track window focus transitions for auto screen capture
   let _pawWasBlurred = false
-  let _lastScreenCapture = null  // base64 PNG of previous window when switching to Paw
+  let _lastScreenCapture = null  // base64 PNG of full screen
+  let _captureInterval = null
 
-  mainWindow.on('blur', () => {
-    _pawWasBlurred = true
-    // Auto-capture full screen when leaving Paw (before another app covers it)
-    // This captures the desktop WITHOUT Paw in front
+  function _doCapture() {
     const tmpFile = path.join(require('os').tmpdir(), `paw-capture-${Date.now()}.png`)
     const { execFile } = require('child_process')
     execFile('/usr/sbin/screencapture', ['-x', '-C', tmpFile], (err) => {
@@ -554,12 +552,21 @@ async function createWindow() {
         fs.unlinkSync(tmpFile)
       } catch {}
     })
+  }
+
+  mainWindow.on('blur', () => {
+    _pawWasBlurred = true
+    // Capture immediately on blur, then refresh every 10s
+    _doCapture()
+    if (_captureInterval) clearInterval(_captureInterval)
+    _captureInterval = setInterval(_doCapture, 10000)
   })
 
   mainWindow.on('focus', () => {
     _unreadCount = 0
     updateTrayTitle()
     _pawWasBlurred = false
+    if (_captureInterval) { clearInterval(_captureInterval); _captureInterval = null }
   })
 
   // Expose last screen capture to tools
