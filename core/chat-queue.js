@@ -1,23 +1,22 @@
-// core/chat-queue.js — Per-session message queue (OpenClaw-aligned)
+// core/chat-queue.js — Per-session message queue (OpenClaw-aligned collect mode)
 //
-// When the AI is replying, new user messages are queued and drained
-// sequentially after the current reply finishes. This prevents:
+// When the AI is replying, new user messages are queued. When the current
+// reply finishes, ALL queued messages are drained at once and merged into
+// a single "collect" prompt (OpenClaw-style numbered format). This prevents:
 // - Concurrent API calls for the same session
 // - Race conditions in streaming state
 // - Lost messages when typing faster than the AI
-//
-// Design: "collect" mode — queue messages while busy,
-// drain them one-by-one when the current reply completes.
+// - Redundant per-message API calls (N queued → 1 merged request)
 
 class ChatQueue {
   constructor() {
-    // sessionId → { active: bool, queue: Array<{message, requestId, ...}>, draining: bool }
+    // sessionId → { active: bool, queue: Array<{prompt, requestId, ...}> }
     this._sessions = new Map()
   }
 
   _getSession(sessionId) {
     if (!this._sessions.has(sessionId)) {
-      this._sessions.set(sessionId, { active: false, queue: [], draining: false })
+      this._sessions.set(sessionId, { active: false, queue: [] })
     }
     return this._sessions.get(sessionId)
   }
@@ -29,8 +28,7 @@ class ChatQueue {
 
   /** Mark session as idle (AI finished replying) */
   markIdle(sessionId) {
-    const s = this._getSession(sessionId)
-    s.active = false
+    this._getSession(sessionId).active = false
   }
 
   /** Check if session has an active reply in progress */
@@ -51,12 +49,6 @@ class ChatQueue {
     return this._getSession(sessionId).queue.length
   }
 
-  /** Drain: pop the next queued message. Returns null if empty. */
-  shift(sessionId) {
-    const s = this._getSession(sessionId)
-    return s.queue.shift() || null
-  }
-
   /** Drain all queued messages at once. Returns [] if empty. */
   shiftAll(sessionId) {
     const s = this._getSession(sessionId)
@@ -67,30 +59,13 @@ class ChatQueue {
 
   /** Clear all queued messages for a session */
   clear(sessionId) {
-    const s = this._getSession(sessionId)
-    s.queue = []
-  }
-
-  /** Start draining — returns false if already draining */
-  startDrain(sessionId) {
-    const s = this._getSession(sessionId)
-    if (s.draining) return false
-    s.draining = true
-    return true
-  }
-
-  stopDrain(sessionId) {
-    this._getSession(sessionId).draining = false
-  }
-
-  isDraining(sessionId) {
-    return this._getSession(sessionId).draining
+    this._getSession(sessionId).queue = []
   }
 
   /** Get status summary */
   status(sessionId) {
     const s = this._getSession(sessionId)
-    return { active: s.active, queued: s.queue.length, draining: s.draining }
+    return { active: s.active, queued: s.queue.length }
   }
 }
 

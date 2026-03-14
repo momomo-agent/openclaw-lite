@@ -34,18 +34,7 @@ describe('ChatQueue', () => {
     expect(q.depth('s1')).toBe(3)
   })
 
-  // ── shift (single) ──
-
-  it('shift returns items in FIFO order', () => {
-    q.markActive('s1')
-    q.enqueue('s1', { prompt: 'A' })
-    q.enqueue('s1', { prompt: 'B' })
-    expect(q.shift('s1').prompt).toBe('A')
-    expect(q.shift('s1').prompt).toBe('B')
-    expect(q.shift('s1')).toBeNull()
-  })
-
-  // ── shiftAll (collect) ──
+  // ── shiftAll (collect drain) ──
 
   it('shiftAll returns all items and empties queue', () => {
     q.markActive('s1')
@@ -87,7 +76,6 @@ describe('ChatQueue', () => {
     q.enqueue('s1', { prompt: 'B' })
     q.clear('s1')
     expect(q.depth('s1')).toBe(0)
-    expect(q.shift('s1')).toBeNull()
     expect(q.shiftAll('s1')).toEqual([])
   })
 
@@ -113,21 +101,10 @@ describe('ChatQueue', () => {
     expect(q.depth('s2')).toBe(1) // untouched
   })
 
-  // ── Drain tracking ──
-
-  it('drain tracking works', () => {
-    expect(q.isDraining('s1')).toBe(false)
-    expect(q.startDrain('s1')).toBe(true)
-    expect(q.isDraining('s1')).toBe(true)
-    expect(q.startDrain('s1')).toBe(false) // can't start twice
-    q.stopDrain('s1')
-    expect(q.isDraining('s1')).toBe(false)
-  })
-
   it('status returns summary', () => {
     q.markActive('s1')
     q.enqueue('s1', { prompt: 'A' })
-    expect(q.status('s1')).toEqual({ active: true, queued: 1, draining: false })
+    expect(q.status('s1')).toEqual({ active: true, queued: 1 })
   })
 })
 
@@ -155,7 +132,6 @@ describe('Collect prompt building (mirrors main.js drain logic)', () => {
     expect(result).toContain('[Queued messages while agent was busy]')
     expect(result).toContain('Queued #1\n你好')
     expect(result).toContain('Queued #2\n帮我查天气')
-    // Two separators
     expect(result.match(/---/g)).toHaveLength(2)
   })
 
@@ -187,12 +163,10 @@ describe('Drain simulation (queue → collect → run)', () => {
     const q = new ChatQueue()
     const runs = []
 
-    // Simulate _runChat
     function runChat(item) {
       runs.push(item.prompt)
     }
 
-    // Simulate drain logic from main.js
     function drainQueue(sessionId) {
       q.markIdle(sessionId)
       const items = q.shiftAll(sessionId)
@@ -213,7 +187,7 @@ describe('Drain simulation (queue → collect → run)', () => {
 
     // 1. User sends A — not queued (idle)
     expect(q.enqueue('s1', { prompt: 'A' })).toBe(false)
-    q.markActive('s1') // A starts processing
+    q.markActive('s1')
     runChat({ prompt: 'A' })
 
     // 2. User sends B while A is processing — queued
@@ -237,7 +211,6 @@ describe('Drain simulation (queue → collect → run)', () => {
 
   it('single queued message is not wrapped in collect format', () => {
     const q = new ChatQueue()
-    let drainedPrompt = null
 
     q.markActive('s1')
     q.enqueue('s1', { prompt: 'only B' })
@@ -245,9 +218,8 @@ describe('Drain simulation (queue → collect → run)', () => {
     q.markIdle('s1')
     const items = q.shiftAll('s1')
     const merged = items.length === 1 ? items[0] : null
-    drainedPrompt = merged?.prompt
 
-    expect(drainedPrompt).toBe('only B') // no collect wrapper
+    expect(merged?.prompt).toBe('only B')
   })
 
   it('merged item inherits metadata from last queued item', () => {
@@ -264,8 +236,8 @@ describe('Drain simulation (queue → collect → run)', () => {
     }
 
     expect(merged.sessionId).toBe('s1')
-    expect(merged.requestId).toBe('r3')    // last item's requestId
-    expect(merged.agentId).toBe('agent2')  // last item's agentId
+    expect(merged.requestId).toBe('r3')
+    expect(merged.agentId).toBe('agent2')
     expect(merged.userMessageSaved).toBe(true)
   })
 })
