@@ -38,7 +38,7 @@ export default function MessageItem({ message, isStreaming, statusText, ownerWor
   const attachments = message.attachments
 
   return (
-    <div className={`msg-card ${message.role}${isError ? ' msg-error' : ''}`}>
+    <div className={`msg-card ${message.role}${isError ? ' msg-error' : ''}`} data-testid="message" data-role={message.role} data-sender={resolvedName || (isUser ? 'user' : 'assistant')}>
       <div className="msg-avatar">
         {isA2A ? (
           <span className="ic">

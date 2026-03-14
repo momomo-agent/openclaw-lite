@@ -127,6 +127,8 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu, on
   return (
     <div
       className={`session-item ${isActive ? 'active' : ''}`}
+      data-testid="session-item"
+      data-session-id={session.id}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
@@ -314,7 +316,7 @@ export default function Sidebar() {
       style={{ width: sidebarVisible ? sidebarWidth : 0, minWidth: sidebarVisible ? sidebarWidth : 0 }}
     >
       <div className="sidebar-header">
-        <button className="icon-btn" onClick={handleNewSession}>+</button>
+        <button className="icon-btn" data-testid="new-chat-btn" onClick={handleNewSession}>+</button>
         <button className="icon-btn" onClick={() => setSidebarVisible(!sidebarVisible)}>
           <span className="ic">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

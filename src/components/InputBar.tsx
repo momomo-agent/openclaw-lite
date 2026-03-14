@@ -222,7 +222,7 @@ export default function InputBar({ sessionId, onSend }: InputBarProps) {
             ))}
           </div>
         )}
-        <div className="input-bar">
+        <div className="input-bar" data-testid="input-bar">
           <button className="icon-btn attach-btn" onClick={() => document.getElementById('fileInput')?.click()}>
             <span className="ic">
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -233,6 +233,7 @@ export default function InputBar({ sessionId, onSend }: InputBarProps) {
           <input type="file" id="fileInput" style={{ display: 'none' }} multiple onChange={(e) => e.target.files && setFiles(prev => [...prev, ...Array.from(e.target.files!)])} />
           <textarea
             ref={textareaRef}
+            data-testid="chat-input"
             value={text}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
@@ -246,7 +247,7 @@ export default function InputBar({ sessionId, onSend }: InputBarProps) {
             placeholder="Ask anything... (@name to target)"
             rows={1}
           />
-          <button id="sendBtn" className={text.trim() || files.length ? 'active' : ''} onClick={handleSend}>
+          <button id="sendBtn" data-testid="send-btn" className={text.trim() || files.length ? 'active' : ''} onClick={handleSend}>
             <span className="ic">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 19V5"/>

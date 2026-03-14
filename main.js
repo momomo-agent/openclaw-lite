@@ -504,6 +504,16 @@ function bridgeEventBus(win) {
   })
 }
 
+// ── E2E test mode: enable CDP ──
+const E2E_PORT = (() => {
+  const arg = process.argv.find(a => a.startsWith('--e2e-port='))
+  return arg ? parseInt(arg.split('=')[1], 10) : null
+})()
+if (E2E_PORT) {
+  app.commandLine.appendSwitch('remote-debugging-port', String(E2E_PORT))
+  console.log(`[e2e] CDP enabled on port ${E2E_PORT}`)
+}
+
 app.whenReady().then(() => {
   // Initialize acpx + coding agents
   acpx.init()

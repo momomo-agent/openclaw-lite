@@ -32,7 +32,7 @@ export default function MessageList({ messages, sessionId, streamingStatus, acti
   const visibleMessages = useMemo(() => messages.filter(m => !isEmptyAssistantMsg(m)), [messages])
 
   return (
-    <div className="messages">
+    <div className="messages" data-testid="message-list">
       <Virtuoso
         key={sessionId}
         data={visibleMessages}
