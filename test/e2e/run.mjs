@@ -156,6 +156,12 @@ async function startMockApi() {
 
 async function launch() {
   if (!NO_LAUNCH) {
+    // Clean session data for fresh start
+    const sessionsDb = path.join(os.homedir(), 'Documents', '.paw', 'sessions.db')
+    for (const f of [sessionsDb, sessionsDb + '-wal', sessionsDb + '-shm']) {
+      try { fs.unlinkSync(f) } catch {}
+    }
+
     // Start mock API first
     await startMockApi()
 
@@ -294,8 +300,8 @@ async function test_1v1_chat() {
 
   await assert('user message appears in message list', async () => {
     const msgs = await getMessages()
-    const u = msgs.find(m => m.role === 'user')
-    if (!u?.text.includes('paw test ok')) throw new Error(`User msg wrong: "${u?.text}"`)
+    const u = msgs.find(m => m.role === 'user' && m.text.includes('paw test ok'))
+    if (!u) throw new Error(`No user msg with "paw test ok". Got: ${msgs.filter(m => m.role === 'user').map(m => `"${m.text.slice(0, 50)}"`).join(', ')}`)
   })
 
   await assert('multiple messages in sequence', async () => {
