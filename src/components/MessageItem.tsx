@@ -117,14 +117,10 @@ export default function MessageItem({ message, isStreaming, statusText, ownerWor
           ) : (
             message.content?.trim() ? (
               <div
-                className={`msg-content md-content${isA2A ? ' a2a-content' : ''}${isUser && message.status === 'failed' ? ' msg-send-failed' : ''}`}
+                className={`msg-content md-content${isA2A ? ' a2a-content' : ''}`}
                 dangerouslySetInnerHTML={{ __html: renderContent(message.content) }}
               />
             ) : null
-          )}
-          {/* Send failure: small retry icon beside message */}
-          {isUser && message.status === 'failed' && onRetry && (
-            <button className="retry-icon-btn" onClick={onRetry} title="Retry">↻</button>
           )}
           {/* Typing indicator: three bouncing dots while streaming */}
           {isStreaming && (

@@ -543,17 +543,12 @@ export default function ChatView() {
           console.warn('[ChatView] handleDone: DB returned 0 messages — keeping existing UI messages')
           return
         }
-        // Error handling — mark user message as failed AND show error card
+        // Error handling — show error card (user message stays normal, it was "sent" successfully)
         if (data.error) {
           let errMsg = data.error
           errMsg = errMsg.replace(/^Error invoking remote method '[^']+': Error: /i, '')
           errMsg = errMsg.replace(/^Error: /i, '')
 
-          const lastUserIdx = dbMessages.map((m: any) => m.role).lastIndexOf('user')
-          if (lastUserIdx >= 0) {
-            dbMessages[lastUserIdx] = { ...dbMessages[lastUserIdx], status: 'failed' }
-            apiRef.current.updateMessageMeta?.(sid, dbMessages[lastUserIdx].id, { status: 'failed' })
-          }
           dbMessages.push({ id: 'error-' + Date.now(), role: 'assistant', content: errMsg, timestamp: Date.now(), isError: true })
         }
         routeSet(sid, dbMessages)
@@ -772,12 +767,10 @@ export default function ChatView() {
       errMsg = errMsg.replace(/^Error invoking remote method '[^']+': Error: /i, '')
       errMsg = errMsg.replace(/^Error: /i, '')
 
-      // Remove streaming placeholder + mark user message as failed + add error card
+      // Remove streaming placeholder + add error card (user message stays normal — it was "sent")
       setMessages(prev => {
         const cleaned = prev.filter(m => m.id !== streamingId)
-        return cleaned.map(m =>
-          m.id === userMsg.id ? { ...m, status: 'failed' } : m
-        ).concat({
+        return cleaned.concat({
           id: 'error-' + Date.now(),
           role: 'assistant',
           content: errMsg,
@@ -785,31 +778,22 @@ export default function ChatView() {
           isError: true,
         })
       })
-
-      const session = await api.loadSession(currentSessionId)
-      const lastUser = session?.messages?.filter((m: any) => m.role === 'user').pop()
-      if (lastUser) api.updateMessageMeta?.(currentSessionId, lastUser.id, { status: 'failed' })
     }
   }
 
-  // F228: Retry — delete failed message from DB, remove from UI, resend
+  // Retry — remove error card, re-send last user message (message stays, only the AI response is retried)
   const handleRetry = useCallback(async () => {
     if (!currentSessionId) return
+    // Find last user message
     let lastUserIdx = -1
     for (let i = messages.length - 1; i >= 0; i--) { if (messages[i].role === 'user') { lastUserIdx = i; break } }
     if (lastUserIdx < 0) return
     const lastUserMsg = messages[lastUserIdx]
     const retryContent = lastUserMsg.content
-    api.deleteMessage?.(currentSessionId, lastUserMsg.id)
-    setMessages(prev => prev.slice(0, lastUserIdx))
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: retryContent,
-      timestamp: Date.now(),
-      sender: userProfile?.userName || 'You',
-    }
-    setMessages(prev => [...prev, userMsg])
+
+    // Remove all error cards after the last user message (don't delete user message)
+    setMessages(prev => prev.filter((m, i) => i <= lastUserIdx || !m.isError))
+
     const requestId = await api.chatPrepare?.() || Date.now().toString()
     const ss = getStreamState(currentSessionId)
     ss.requestId = requestId
@@ -820,9 +804,18 @@ export default function ChatView() {
       console.error('[ChatView] retry error:', err)
       clearStreamState(currentSessionId)
       setActivity(currentSessionId, 'idle')
-      setMessages(prev => prev.map(m =>
-        m.id === userMsg.id ? { ...m, status: 'failed' } : m
-      ))
+
+      let errMsg = err?.message || 'Something went wrong'
+      errMsg = errMsg.replace(/^Error invoking remote method '[^']+': Error: /i, '')
+      errMsg = errMsg.replace(/^Error: /i, '')
+
+      setMessages(prev => prev.concat({
+        id: 'error-' + Date.now(),
+        role: 'assistant',
+        content: errMsg,
+        timestamp: Date.now(),
+        isError: true,
+      }))
     }
   }, [currentSessionId, messages])
 

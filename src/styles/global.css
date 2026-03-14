@@ -330,14 +330,6 @@ button:hover { background: var(--border-muted); }
 }
 .retry-btn:hover { background: var(--accent); color: #000; border-color: var(--accent); }
 /* Send failure — user msg turns red + small retry icon */
-.msg-send-failed { color: var(--status-error) !important; }
-.retry-icon-btn {
-  display: inline-flex; align-items: center; gap: 2px;
-  margin-top: 4px; padding: 2px 8px;
-  border: none; background: transparent; border-radius: 4px;
-  cursor: pointer; font-size: 12px; color: var(--status-error); transition: all 0.15s;
-}
-.retry-icon-btn:hover { opacity: 0.7; background: var(--bg-elevated); }
 
 /* Tool steps — collapsible */
 .tool-group { border-left: 2px solid var(--border-default); margin-left: 40px; padding-left: 12px; }

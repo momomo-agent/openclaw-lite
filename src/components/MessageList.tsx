@@ -49,7 +49,7 @@ export default function MessageList({ messages, sessionId, streamingStatus, acti
               isStreaming={isActive}
               statusText={isActive ? streamingStatus : undefined}
               ownerWorkspaceId={ownerWorkspaceId}
-              onRetry={(message.isError || message.status === 'failed') ? onRetry : undefined}
+              onRetry={message.isError ? onRetry : undefined}
             />
           )
         }}
