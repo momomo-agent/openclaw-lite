@@ -253,6 +253,14 @@ button:hover { background: var(--border-muted); }
   -webkit-user-select: text; user-select: text;
 }
 
+.empty-chat {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 12px;
+  opacity: 0.4; user-select: none;
+}
+.empty-chat-icon { font-size: 36px; }
+.empty-chat-text { font-size: 14px; color: var(--text-faint); }
+
 .msg-card {
   display: flex; gap: 12px; padding: 8px 24px 8px 24px;
   padding-right: 64px; /* 24px + 28px avatar + 12px gap → 视觉居中 */

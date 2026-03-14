@@ -67,15 +67,6 @@ function AppContent() {
         setCurrentSessionId(result.id)
         const updated = await api.listSessions()
         setSessions(updated)
-        // Bootstrap: auto-send intro prompt
-        const cfg = await api.getConfig()
-        if (cfg?.apiKey) {
-          const session = await api.loadSession(result.id)
-          if (!session?.messages?.length) {
-            const reqId = await api.chatPrepare?.() || Date.now().toString()
-            await api.chat({ sessionId: result.id, message: '你好，请读取 SOUL.md 和 USER.md，介绍一下你自己。', requestId: reqId })
-          }
-        }
       }
     }
 

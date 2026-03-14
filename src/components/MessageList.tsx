@@ -33,6 +33,12 @@ export default function MessageList({ messages, sessionId, streamingStatus, acti
 
   return (
     <div className="messages" data-testid="message-list">
+      {visibleMessages.length === 0 ? (
+        <div className="empty-chat">
+          <div className="empty-chat-icon">💬</div>
+          <div className="empty-chat-text">说点什么开始对话</div>
+        </div>
+      ) : (
       <Virtuoso
         key={sessionId}
         data={visibleMessages}
@@ -56,6 +62,7 @@ export default function MessageList({ messages, sessionId, streamingStatus, acti
         followOutput="smooth"
         style={{ height: '100%' }}
       />
+      )}
     </div>
   )
 }
