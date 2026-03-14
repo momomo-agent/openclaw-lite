@@ -235,7 +235,7 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
         onAnimationEnd={() => { if (closing) { setClosing(false); onClose() } }}
       >
         <div className="settings-header">
-          <span>Settings</span>
+          <span>设置</span>
           <button className="icon-btn" onClick={saveAndClose}>
             <span className="ic">
               <svg viewBox="0 0 24 24" width="14" height="14">
@@ -250,7 +250,7 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
 
           {/* ── Profile ── */}
           <div className="settings-section">
-            <div className="settings-section-title">Profile</div>
+            <div className="settings-section-title">个人信息</div>
             <div className="settings-field" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <div
                 style={{
@@ -269,7 +269,7 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <input
                   type="text"
-                  placeholder="Your name"
+                  placeholder="你的名字"
                   value={userName}
                   onChange={(e) => setUserName(e.target.value)}
                 />
@@ -324,9 +324,9 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
 
           {/* ── Provider ── */}
           <div className="settings-section">
-            <div className="settings-section-title">Provider</div>
+            <div className="settings-section-title">服务商</div>
             <div className="settings-field">
-              <label>Provider</label>
+              <label>服务商</label>
               <select
                 value={config.provider || 'anthropic'}
                 onChange={(e) => setConfig({ ...config, provider: e.target.value })}
@@ -336,7 +336,7 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
               </select>
             </div>
             <div className="settings-field">
-              <label>API Key</label>
+              <label>API 密钥</label>
               <input
                 type="password"
                 placeholder="sk-..."
@@ -345,7 +345,7 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
               />
             </div>
             <div className="settings-field">
-              <label>Base URL <span className="hint">(optional)</span></label>
+              <label>自定义地址 <span className="hint">（可选）</span></label>
               <input
                 type="text"
                 placeholder="https://api.anthropic.com"
@@ -357,24 +357,24 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
 
           {/* ── Model ── */}
           <div className="settings-section">
-            <div className="settings-section-title">Model</div>
+            <div className="settings-section-title">模型</div>
             <div className="settings-field">
-              <label>Model</label>
+              <label>模型</label>
               <input
                 type="text"
                 placeholder="claude-sonnet-4-20250514"
                 value={config.model || ''}
                 onChange={(e) => setConfig({ ...config, model: e.target.value })}
               />
-              <p className="hint" style={{ marginTop: 4 }}>Leave empty to use provider default.</p>
+              <p className="hint" style={{ marginTop: 4 }}>留空使用服务商默认模型。</p>
             </div>
           </div>
 
           {/* ── Appearance ── */}
           <div className="settings-section">
-            <div className="settings-section-title">Appearance</div>
+            <div className="settings-section-title">外观</div>
             <div className="settings-field">
-              <label>Theme</label>
+              <label>主题</label>
               <div className="theme-picker">
                 {THEMES.map((t) => (
                   <div key={t.value} className="theme-option" onClick={() => applyTheme(t.value)}>
@@ -391,7 +391,7 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
             </div>
             <div className="settings-field">
               <label className="toggle-label" style={{ justifyContent: 'space-between' }}>
-                <span style={{ flex: 1 }}>Show tool calls in chat</span>
+                <span style={{ flex: 1 }}>在对话中显示工具调用</span>
                 <input
                   type="checkbox"
                   checked={showTools}
@@ -403,9 +403,9 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
 
           {/* ── Tools ── */}
           <div className="settings-section">
-            <div className="settings-section-title">Tools</div>
+            <div className="settings-section-title">工具</div>
             <div className="settings-field">
-              <label>Default Coding Agent</label>
+              <label>默认编码助手</label>
               <select
                 value={codingAgent}
                 onChange={(e) => setCodingAgent(e.target.value)}
@@ -416,7 +416,7 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
               </select>
             </div>
             <div className="settings-field">
-              <label>Tavily API Key <span className="hint">(for web search)</span></label>
+              <label>Tavily API 密钥 <span className="hint">（网页搜索）</span></label>
               <input
                 type="password"
                 placeholder="tvly-..."
@@ -428,10 +428,10 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
 
           {/* ── Permission ── */}
           <div className="settings-section">
-            <div className="settings-section-title">Permission</div>
+            <div className="settings-section-title">权限</div>
             <div className="settings-field">
               <label className="toggle-label" style={{ justifyContent: 'space-between' }}>
-                <span style={{ flex: 1 }}>Require approval for dangerous commands</span>
+                <span style={{ flex: 1 }}>执行危险命令前需要确认</span>
                 <input
                   type="checkbox"
                   checked={config.execApproval !== false}
@@ -444,13 +444,13 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
           {/* ── MCP Servers (status only) ── */}
           {mcpStatus && Object.keys(mcpStatus).length > 0 && (
             <div className="settings-section">
-              <div className="settings-section-title">MCP Servers</div>
+              <div className="settings-section-title">MCP 服务器</div>
               <div className="settings-field">
                 {Object.entries(mcpStatus).map(([name, info]) => (
                   <div key={name} style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0' }}>
                     <span style={{ color: info.status === 'connected' ? '#22c55e' : '#ef4444' }}>&#9679;</span>
                     {' '}<strong>{name}</strong> &mdash;{' '}
-                    {info.status === 'connected' ? `${info.toolCount} tools` : (info.error || 'disconnected')}
+                    {info.status === 'connected' ? `${info.toolCount} 个工具` : (info.error || '未连接')}
                   </div>
                 ))}
               </div>
@@ -462,7 +462,7 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
           <div className="settings-section" style={{ textAlign: 'center', borderBottom: 'none', paddingBottom: 0 }}>
             <div style={{ fontSize: 24, marginBottom: 4 }}>&#128062;</div>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>Paw</div>
-            <div style={{ fontSize: 12, color: 'var(--text-faint)', marginTop: 2 }}>v0.21.0</div>
+            <div style={{ fontSize: 12, color: 'var(--text-faint)', marginTop: 2 }}>v0.22.0</div>
             <div style={{ marginTop: 8, display: 'flex', justifyContent: 'center', gap: 12 }}>
               <a
                 href="#"
@@ -476,7 +476,7 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
                 style={{ color: 'var(--accent-link)', fontSize: 12, textDecoration: 'none' }}
                 onClick={(e) => { e.preventDefault(); handleOpenExternal('https://momomo-agent.github.io/paw/') }}
               >
-                Website
+                官网
               </a>
             </div>
           </div>
