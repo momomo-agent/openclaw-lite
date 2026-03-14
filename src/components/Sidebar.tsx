@@ -228,17 +228,27 @@ export default function Sidebar() {
     document.body.style.userSelect = 'none'
   }
 
-  // F232: Cmd+Shift+S toggle sidebar
+  // F232: Cmd+Shift+S toggle sidebar, Cmd+Opt+Up/Down switch sessions
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey && e.shiftKey && e.key.toLowerCase() === 's') || (e.metaKey && e.key === '.')) {
         e.preventDefault()
         setSidebarVisible(!sidebarVisible)
       }
+      // Cmd+Opt+Up/Down: switch to previous/next session
+      if (e.metaKey && e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        e.preventDefault()
+        if (sessions.length < 2) return
+        const idx = sessions.findIndex(s => s.id === currentSessionId)
+        const next = e.key === 'ArrowUp'
+          ? (idx <= 0 ? sessions.length - 1 : idx - 1)
+          : (idx < 0 || idx >= sessions.length - 1 ? 0 : idx + 1)
+        setCurrentSessionId(sessions[next].id)
+      }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [sidebarVisible])
+  }, [sidebarVisible, sessions, currentSessionId])
 
   // Restore persisted AI status from session data (once on mount)
   const statusRestored = useRef(false)
