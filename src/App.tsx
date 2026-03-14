@@ -43,7 +43,8 @@ function AppContent() {
       api.listSessions(),
     ])
 
-    setTheme(config?.theme || 'light')
+    const t = config?.theme
+    setTheme(!t || t === 'default' ? 'light' : t)
     setShowTools(config?.showTools === true)
     if (profile) setUserProfile(profile)
     setWorkspaces(ws)
