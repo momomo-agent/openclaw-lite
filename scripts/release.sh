@@ -52,6 +52,12 @@ echo "🔏 Signing native binaries in app.asar.unpacked..."
 find "$APP/Contents/Resources/app.asar.unpacked" -type f \( -name "*.node" -o -name "*.dylib" -o -name "*.so" \) -exec \
   codesign --force --options runtime --timestamp --entitlements "$ENTC" --sign "$IDENTITY" {} \;
 
+echo "🔏 Signing vendored executables (ripgrep, etc)..."
+find "$APP/Contents/Resources/app.asar.unpacked" -type f -perm +111 \
+  ! -name "*.js" ! -name "*.json" ! -name "*.md" ! -name "*.txt" ! -name "*.ts" ! -name "*.mjs" ! -name "*.cjs" \
+  ! -name "*.node" ! -name "*.dylib" ! -name "*.so" -exec \
+  codesign --force --options runtime --timestamp --entitlements "$ENTC" --sign "$IDENTITY" {} \;
+
 echo "🔏 Signing Electron Framework Libraries..."
 find "$APP/Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries" -type f -name "*.dylib" -exec \
   codesign --force --options runtime --timestamp --entitlements "$ENTC" --sign "$IDENTITY" {} \;
