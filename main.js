@@ -1512,33 +1512,9 @@ ${roster}
 
   // ── Ambient context sensing (silent, user-invisible) ──
   try {
-    const ctx_sensing = await gatherContext(mainWindow)
-    if (ctx_sensing) {
-      // Append ambient text to system prompt
-      if (ctx_sensing.text) {
-        systemPrompt += ctx_sensing.text
-      }
-      // Inject screenshot into the last user message as image content
-      if (ctx_sensing.images?.length > 0 && finalMessages.length > 0) {
-        // Find last user message
-        for (let i = finalMessages.length - 1; i >= 0; i--) {
-          if (finalMessages[i].role === 'user') {
-            const msg = { ...finalMessages[i] }
-            // Convert string content to content array if needed
-            const textContent = typeof msg.content === 'string'
-              ? [{ type: 'text', text: msg.content }]
-              : Array.isArray(msg.content) ? [...msg.content] : [{ type: 'text', text: String(msg.content) }]
-            // Add images
-            const imageBlocks = ctx_sensing.images.map(img => ({
-              type: 'image',
-              source: { type: img.type, media_type: img.media_type, data: img.data },
-            }))
-            msg.content = [...imageBlocks, ...textContent]
-            finalMessages = [...finalMessages.slice(0, i), msg, ...finalMessages.slice(i + 1)]
-            break
-          }
-        }
-      }
+    const ctx_sensing = await gatherContext()
+    if (ctx_sensing?.text) {
+      systemPrompt += ctx_sensing.text
     }
   } catch (err) {
     console.warn('[context-sensing] failed:', err.message)

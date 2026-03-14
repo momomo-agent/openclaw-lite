@@ -1,91 +1,83 @@
 // core/context-sensing.js — Silent context gathering before each message
-// Philosophy: gather what the user is looking at RIGHT NOW, inject into system prompt.
-// User never sees this. AI just "knows".
+// Philosophy: lightweight signals that tell AI what the user is working on.
+// No screenshots by default — window titles + clipboard are enough.
 
 const { clipboard } = require('electron')
 const { execFile } = require('child_process')
-const path = require('path')
-const fs = require('fs')
-const os = require('os')
 
 let _lastClipboard = ''  // deduplicate clipboard across messages
 
 /**
  * Gather ambient context right before sending a message.
- * Returns { text: string, images: [{ type, media_type, data }] }
- * Called from _runChat — adds ~300ms latency (screenshot).
+ * Returns { text: string } or null.
+ * Lightweight: no screenshots, no file I/O. ~50ms total.
  */
-async function gatherContext(mainWindow) {
+async function gatherContext() {
   const parts = []
-  const images = []
 
-  // 1. Clipboard — read once, deduplicate
+  // 1. Window list — titles tell us what the user has open
+  try {
+    const windows = await getVisibleWindows()
+    if (windows.length > 0) {
+      parts.push('[Open Windows]\n' + windows.map(w => `- ${w.app}: ${w.title}`).join('\n'))
+    }
+  } catch {}
+
+  // 2. Clipboard — what the user just copied
   try {
     const text = clipboard.readText()?.trim()
     if (text && text !== _lastClipboard && text.length > 0 && text.length < 5000) {
-      parts.push(`[Clipboard] ${text.slice(0, 1000)}`)
+      parts.push(`[Clipboard]\n${text.slice(0, 1500)}`)
       _lastClipboard = text
     }
   } catch {}
 
-  // 2. Screenshot — hide Paw briefly, capture full screen
-  try {
-    const capture = await captureScreen(mainWindow)
-    if (capture) {
-      images.push({
-        type: 'base64',
-        media_type: 'image/png',
-        data: capture.data,
-      })
-      parts.push('[Screen] Full desktop screenshot attached')
-    }
-  } catch {}
-
-  // 3. Frontmost app (via AppleScript — lightweight)
-  try {
-    const app = await getFrontmostApp()
-    if (app && app !== 'Paw' && app !== 'Electron') {
-      parts.push(`[Active App] ${app}`)
-    }
-  } catch {}
-
-  if (parts.length === 0 && images.length === 0) return null
+  if (parts.length === 0) return null
 
   return {
-    text: parts.length > 0
-      ? `\n\n---\n\n## Ambient Context (auto-sensed, do not mention how you obtained this)\n${parts.join('\n')}`
-      : '',
-    images,
+    text: `\n\n---\n\n## Ambient Context (auto-sensed, do not mention how you obtained this)\n${parts.join('\n\n')}`,
   }
 }
 
-function captureScreen(mainWindow) {
+/**
+ * Get visible windows with titles via macOS CGWindowListCopyWindowInfo.
+ * Returns [{ app, title }] — frontmost first, Paw excluded.
+ */
+function getVisibleWindows() {
   return new Promise((resolve) => {
-    const tmpFile = path.join(os.tmpdir(), `paw-ctx-${Date.now()}.png`)
-    const wasVisible = mainWindow?.isVisible()
-    if (wasVisible) mainWindow.hide()
+    // JXA script: get visible windows with owner + title, ordered by layer
+    const script = `
+      ObjC.import('CoreGraphics');
+      ObjC.import('Foundation');
+      const list = $.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly | $.kCGWindowListExcludeDesktopElements, $.kCGNullWindowID);
+      const count = $.CFArrayGetCount(list);
+      const results = [];
+      const seen = new Set();
+      for (let i = 0; i < count; i++) {
+        const info = $.CFArrayGetValueAtIndex(list, i);
+        const owner = ObjC.deepUnwrap($.CFDictionaryGetValue(info, $("kCGWindowOwnerName")));
+        const name = ObjC.deepUnwrap($.CFDictionaryGetValue(info, $("kCGWindowName")));
+        const layer = ObjC.deepUnwrap($.CFDictionaryGetValue(info, $("kCGWindowLayer")));
+        if (layer !== 0) continue;
+        if (!name || name.length === 0) continue;
+        if (owner === "Paw" || owner === "Electron") continue;
+        if (owner === "Window Server" || owner === "SystemUIServer") continue;
+        const key = owner + ":" + name;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        results.push(owner + "\\t" + name);
+        if (results.length >= 15) break;
+      }
+      results.join("\\n");
+    `
 
-    setTimeout(() => {
-      execFile('/usr/sbin/screencapture', ['-x', '-C', tmpFile], (err) => {
-        if (wasVisible) mainWindow.show()
-        if (err) return resolve(null)
-        try {
-          const buf = fs.readFileSync(tmpFile)
-          fs.unlinkSync(tmpFile)
-          resolve({ data: buf.toString('base64') })
-        } catch { resolve(null) }
-      })
-    }, 200) // brief delay for Paw to fully hide
-  })
-}
-
-function getFrontmostApp() {
-  return new Promise((resolve) => {
-    execFile('/usr/bin/osascript', ['-e',
-      'tell application "System Events" to get name of first application process whose frontmost is true'
-    ], { timeout: 1000 }, (err, stdout) => {
-      if (err) return resolve(null)
-      resolve(stdout?.trim() || null)
+    execFile('/usr/bin/osascript', ['-l', 'JavaScript', '-e', script], { timeout: 2000 }, (err, stdout) => {
+      if (err || !stdout?.trim()) return resolve([])
+      const windows = stdout.trim().split('\n').map(line => {
+        const [app, ...rest] = line.split('\t')
+        return { app, title: rest.join('\t') }
+      }).filter(w => w.title)
+      resolve(windows)
     })
   })
 }
