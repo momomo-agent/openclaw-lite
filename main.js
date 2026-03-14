@@ -3,6 +3,17 @@ const path = require('path')
 const fs = require('fs')
 const vm = require('vm')
 const { spawn } = require('child_process')
+
+// Fix PATH for packaged app (Electron strips user shell PATH)
+if (app.isPackaged) {
+  const extraPaths = [
+    '/usr/local/bin', '/opt/homebrew/bin',
+    path.join(require('os').homedir(), '.npm-global/bin'),
+    path.join(require('os').homedir(), '.local/bin'),
+    path.join(require('os').homedir(), 'Library/pnpm'),
+  ]
+  process.env.PATH = [...extraPaths, process.env.PATH].join(':')
+}
 const memoryIndex = require('./memory-index')
 const { getTool, getAnthropicTools, getToolsPrompt } = require('./tools')
 const { loadAllSkills } = require('./skills/frontmatter')
