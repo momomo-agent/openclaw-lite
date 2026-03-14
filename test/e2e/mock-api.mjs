@@ -4,11 +4,12 @@
  * Returns deterministic streaming responses so tests don't need real API keys.
  * Supports: messages (streaming SSE), basic tool_use responses.
  *
- * Usage: node test/e2e/mock-api.mjs [--port 8765]
+ * Usage: node test/e2e/mock-api.mjs [--port 8765] [--error-mode normal|rate-limit|auth-fail|overloaded]
  */
 import http from 'http'
 
 const PORT = parseInt(process.argv.find(a => a.startsWith('--port='))?.split('=')[1] || '8765')
+const ERROR_MODE = process.argv.find(a => a.startsWith('--error-mode='))?.split('=')[1] || 'normal'
 
 // ── Response generators ──
 
@@ -178,7 +179,24 @@ const server = http.createServer((req, res) => {
         const parsed = JSON.parse(body)
         const messages = parsed.messages || []
 
-        console.log(`[mock-api] #${requestCount} | ${messages.length} messages | stream=${parsed.stream}`)
+        console.log(`[mock-api] #${requestCount} | ${messages.length} messages | stream=${parsed.stream} | mode=${ERROR_MODE}`)
+
+        // Error modes
+        if (ERROR_MODE === 'rate-limit') {
+          res.writeHead(429, { 'Content-Type': 'application/json', 'retry-after': '30' })
+          res.end(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: 'Rate limit exceeded. Please retry after 30 seconds.' } }))
+          return
+        }
+        if (ERROR_MODE === 'auth-fail') {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'Invalid API key provided.' } }))
+          return
+        }
+        if (ERROR_MODE === 'overloaded') {
+          res.writeHead(529, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ type: 'error', error: { type: 'overloaded_error', message: 'Anthropic API is temporarily overloaded.' } }))
+          return
+        }
 
         if (parsed.stream) {
           res.writeHead(200, {

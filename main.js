@@ -1101,9 +1101,8 @@ function persistUserMessage(sessionId, content) {
   if (wsPath) sessionStore.appendMessage(wsPath, sessionId, { role: 'user', content: content || '', timestamp: Date.now() })
 }
 
-function finishChat(sessionId, requestId, assistantText, wsIdentity, toolSteps) {
+function finishChat(sessionId, requestId, assistantText, wsIdentity, toolSteps, isError) {
   const wsPath = sessionId ? (getSessionWorkspace(sessionId) || clawDir) : null
-  const isError = assistantText && assistantText.startsWith('❌')
   // Strip NO_REPLY from orchestrator text (delegate already responded directly)
   const saveText = (assistantText || '').replace(/\n?NO_REPLY\s*$/i, '').trim()
   // Gather accumulated delegate messages (always clean up, even on error)
@@ -1475,8 +1474,8 @@ ${roster}
         console.error('[Paw] all models failed:', err.message)
         const fe = friendlyError(err)
         pushStatus('error', fe.short)
-        finishChat(sessionId, requestId, `${fe.short}\n\n${fe.detail}`, null)
-        return { error: fe.detail }
+        finishChat(sessionId, requestId, `${fe.short}\n\n${fe.detail}`, null, null, true)
+        return { error: `${fe.short}\n\n${fe.detail}` }
       }
     }
   }

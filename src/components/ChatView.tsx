@@ -543,16 +543,18 @@ export default function ChatView() {
           console.warn('[ChatView] handleDone: DB returned 0 messages — keeping existing UI messages')
           return
         }
-        // Error handling
+        // Error handling — mark user message as failed AND show error card
         if (data.error) {
+          let errMsg = data.error
+          errMsg = errMsg.replace(/^Error invoking remote method '[^']+': Error: /i, '')
+          errMsg = errMsg.replace(/^Error: /i, '')
+
           const lastUserIdx = dbMessages.map((m: any) => m.role).lastIndexOf('user')
-          const hasAssistantAfter = lastUserIdx >= 0 && dbMessages.slice(lastUserIdx + 1).some((m: any) => m.role === 'assistant')
-          if (!hasAssistantAfter && lastUserIdx >= 0) {
+          if (lastUserIdx >= 0) {
             dbMessages[lastUserIdx] = { ...dbMessages[lastUserIdx], status: 'failed' }
             apiRef.current.updateMessageMeta?.(sid, dbMessages[lastUserIdx].id, { status: 'failed' })
-          } else {
-            dbMessages.push({ id: 'error-' + Date.now(), role: 'assistant', content: data.error, timestamp: Date.now(), isError: true })
           }
+          dbMessages.push({ id: 'error-' + Date.now(), role: 'assistant', content: errMsg, timestamp: Date.now(), isError: true })
         }
         routeSet(sid, dbMessages)
 
@@ -764,9 +766,26 @@ export default function ChatView() {
       console.error('[ChatView] chat error:', err)
       clearStreamState(currentSessionId)
       setActivity(currentSessionId, 'idle')
-      setMessages(prev => prev.map(m =>
-        m.id === userMsg.id ? { ...m, status: 'failed' } : m
-      ))
+
+      // Sanitize error message
+      let errMsg = err?.message || 'Something went wrong'
+      errMsg = errMsg.replace(/^Error invoking remote method '[^']+': Error: /i, '')
+      errMsg = errMsg.replace(/^Error: /i, '')
+
+      // Remove streaming placeholder + mark user message as failed + add error card
+      setMessages(prev => {
+        const cleaned = prev.filter(m => m.id !== streamingId)
+        return cleaned.map(m =>
+          m.id === userMsg.id ? { ...m, status: 'failed' } : m
+        ).concat({
+          id: 'error-' + Date.now(),
+          role: 'assistant',
+          content: errMsg,
+          timestamp: Date.now(),
+          isError: true,
+        })
+      })
+
       const session = await api.loadSession(currentSessionId)
       const lastUser = session?.messages?.filter((m: any) => m.role === 'user').pop()
       if (lastUser) api.updateMessageMeta?.(currentSessionId, lastUser.id, { status: 'failed' })
