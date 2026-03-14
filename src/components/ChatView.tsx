@@ -781,7 +781,7 @@ export default function ChatView() {
     }
   }
 
-  // Retry — remove error card, re-send last user message (message stays, only the AI response is retried)
+  // Retry — remove error card, show streaming placeholder, re-send last user message
   const handleRetry = useCallback(async () => {
     if (!currentSessionId) return
     // Find last user message
@@ -791,13 +791,36 @@ export default function ChatView() {
     const lastUserMsg = messages[lastUserIdx]
     const retryContent = lastUserMsg.content
 
-    // Remove all error cards after the last user message (don't delete user message)
-    setMessages(prev => prev.filter((m, i) => i <= lastUserIdx || !m.isError))
-
     const requestId = await api.chatPrepare?.() || Date.now().toString()
     const ss = getStreamState(currentSessionId)
     ss.requestId = requestId
+
+    // Create streaming placeholder (same as handleSend)
+    const streamingId = 'streaming-' + Date.now()
+    const ownerWs = sessionParticipants[0] ? workspaces.find((w: any) => w.id === sessionParticipants[0]) : undefined
+    ss.streamingMsg = {
+      id: streamingId,
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      toolSteps: [],
+      sender: ownerWs?.identity?.name,
+      avatar: ownerWs?.identity?.avatar,
+      workspacePath: ownerWs?.path,
+      workspaceId: ownerWs?.id,
+    }
+
+    // Remove error cards + add streaming placeholder
+    setMessages(prev => {
+      const cleaned = prev.filter((m, i) => i <= lastUserIdx || !m.isError)
+      return [...cleaned, ss.streamingMsg!]
+    })
+    setStreamingStatus('Thinking...')
+    ss.status = 'Thinking...'
+    ss.statusIsAiAuthored = false
     setActivity(currentSessionId, 'thinking')
+    setStatus(currentSessionId, '')
+
     try {
       await api.chat({ sessionId: currentSessionId, message: retryContent, requestId })
     } catch (err: any) {
@@ -809,15 +832,19 @@ export default function ChatView() {
       errMsg = errMsg.replace(/^Error invoking remote method '[^']+': Error: /i, '')
       errMsg = errMsg.replace(/^Error: /i, '')
 
-      setMessages(prev => prev.concat({
-        id: 'error-' + Date.now(),
-        role: 'assistant',
-        content: errMsg,
-        timestamp: Date.now(),
-        isError: true,
-      }))
+      // Remove streaming placeholder + add error card
+      setMessages(prev => {
+        const cleaned = prev.filter(m => m.id !== streamingId)
+        return cleaned.concat({
+          id: 'error-' + Date.now(),
+          role: 'assistant',
+          content: errMsg,
+          timestamp: Date.now(),
+          isError: true,
+        })
+      })
     }
-  }, [currentSessionId, messages])
+  }, [currentSessionId, messages, sessionParticipants, workspaces])
 
   // Derive active streaming card ID from StreamState ref at render time.
   // Single source of truth: delegateMsg (if active) > streamingMsg (if active) > null.
