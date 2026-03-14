@@ -17,6 +17,7 @@ require('./claude-code');
 require('./cron');
 require('./mcp-config');
 require('./session-title');
+require('./screen-capture');
 
 const { getAllTools, getTool, getAnthropicTools, getToolsPrompt } = require('./registry');
 

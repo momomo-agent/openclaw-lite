@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, shell, Notification, Tray, nativeImage } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell, Notification, Tray, nativeImage, desktopCapturer } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const vm = require('vm')
@@ -519,10 +519,48 @@ async function createWindow() {
     mainWindow = null
     syncState()
   })
+  // Track window focus transitions for auto screen capture
+  let _pawWasBlurred = false
+  let _lastScreenCapture = null  // base64 PNG of previous window when switching to Paw
+
+  mainWindow.on('blur', () => {
+    _pawWasBlurred = true
+  })
+
   mainWindow.on('focus', () => {
     _unreadCount = 0
     updateTrayTitle()
+
+    // Auto-capture: when switching FROM another app TO Paw, snapshot what was behind
+    if (_pawWasBlurred) {
+      _pawWasBlurred = false
+      desktopCapturer.getSources({
+        types: ['window'],
+        thumbnailSize: { width: 1920, height: 1080 },
+      }).then(sources => {
+        const pawTitles = BrowserWindow.getAllWindows().map(w => w.getTitle())
+        const prev = sources.find(s =>
+          !pawTitles.some(t => s.name.includes(t)) &&
+          s.name !== 'Paw' &&
+          s.name.trim().length > 0
+        )
+        if (prev && !prev.thumbnail.isEmpty()) {
+          _lastScreenCapture = {
+            data: prev.thumbnail.toPNG().toString('base64'),
+            windowName: prev.name,
+            width: prev.thumbnail.getSize().width,
+            height: prev.thumbnail.getSize().height,
+            timestamp: Date.now(),
+          }
+          console.log(`[Paw] Auto-captured: ${prev.name} (${_lastScreenCapture.width}×${_lastScreenCapture.height})`)
+        }
+      }).catch(() => {})
+    }
   })
+
+  // Expose last screen capture to tools
+  global._pawGetLastCapture = () => _lastScreenCapture
+  global._pawClearLastCapture = () => { _lastScreenCapture = null }
 }
 
 // ── EventBus → BrowserWindow bridge ──
@@ -1051,13 +1089,14 @@ ipcMain.handle('open-file', (_, filePath) => {
   shell.openPath(p)
 })
 
-// Open image/video/markdown in a new Electron window
+// Open image/video/audio/markdown in a new Electron window
 ipcMain.handle('open-file-preview', (_, filePath) => {
   const p = path.resolve(clawDir || '', filePath)
   if (!fs.existsSync(p)) return
   const ext = path.extname(p).toLowerCase().slice(1)
   const imgExts = ['png','jpg','jpeg','gif','webp','svg']
   const vidExts = ['mp4','mov','webm','mkv','avi']
+  const audExts = ['mp3','wav','ogg','m4a','flac','aac']
   const mdExts = ['md','markdown']
 
   const win = new BrowserWindow({
@@ -1070,9 +1109,29 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
     win.loadURL(`data:text/html,<html><body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;height:100vh"><img src="file://${encodeURI(p)}" style="max-width:100%;max-height:100%;object-fit:contain"></body></html>`)
   } else if (vidExts.includes(ext)) {
     win.loadURL(`data:text/html,<html><body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;height:100vh"><video src="file://${encodeURI(p)}" controls autoplay style="max-width:100%;max-height:100%"></video></body></html>`)
+  } else if (audExts.includes(ext)) {
+    const name = path.basename(p)
+    win.setSize(400, 160)
+    win.loadURL(`data:text/html,<html><body style="margin:0;background:#1a1a1a;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:system-ui;color:#e0e0e0"><p style="margin:0 0 16px;font-size:14px;opacity:.7">${name}</p><audio src="file://${encodeURI(p)}" controls autoplay style="width:320px"></audio></body></html>`)
   } else if (mdExts.includes(ext)) {
-    const content = fs.readFileSync(p, 'utf8').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    win.loadURL(`data:text/html,<html><head><style>body{margin:20px;background:#1a1a1a;color:#e0e0e0;font-family:system-ui;line-height:1.6;max-width:800px;margin:20px auto}pre{background:#111;padding:12px;border-radius:6px;overflow-x:auto}code{background:#222;padding:2px 4px;border-radius:3px}</style></head><body><pre>${content}</pre></body></html>`)
+    const raw = fs.readFileSync(p, 'utf8')
+    // Render markdown with a simple built-in stylesheet
+    const escaped = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    // Basic markdown → HTML (headers, bold, italic, code blocks, inline code, lists, links)
+    const rendered = escaped
+      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+      .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="lang-$1">$2</code></pre>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/^\- (.+)$/gm, '<li>$1</li>')
+      .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+      .replace(/\n\n/g, '<br><br>')
+    const css = `body{margin:40px auto;max-width:720px;background:#1a1a1a;color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif;line-height:1.7;font-size:15px}h1,h2,h3{color:#fff;margin:1.2em 0 .4em}h1{font-size:1.8em;border-bottom:1px solid #333;padding-bottom:.3em}h2{font-size:1.4em}h3{font-size:1.15em}pre{background:#111;padding:16px;border-radius:8px;overflow-x:auto;font-size:13px}code{background:#222;padding:2px 6px;border-radius:4px;font-size:13px}pre code{background:none;padding:0}a{color:#7aa2f7;text-decoration:none}a:hover{text-decoration:underline}li{margin:4px 0}strong{color:#fff}`
+    win.loadURL(`data:text/html,<html><head><style>${css}</style></head><body>${rendered}</body></html>`)
   }
 })
 
@@ -1424,20 +1483,80 @@ ${roster}
       }
     }
   }
-  // Build user content (text + image attachments)
+  // Build user content (text + file attachments)
   const userContent = []
+  let fileContext = ''  // text content from non-image files, injected into prompt
+
   if (files?.length) {
     for (const f of files) {
-      if (f.type.startsWith('image/')) {
-        const base64 = f.data.replace(/^data:[^;]+;base64,/, '')
+      // Read file data: from path (desktop drag) or data (paste/upload)
+      let fileBuffer = null
+      let base64 = null
+      let isDirectory = false
+      if (f.path && fs.existsSync(f.path)) {
+        const stat = fs.statSync(f.path)
+        if (stat.isDirectory()) {
+          isDirectory = true
+        } else {
+          fileBuffer = fs.readFileSync(f.path)
+          base64 = fileBuffer.toString('base64')
+        }
+      } else if (f.data) {
+        base64 = f.data.replace(/^data:[^;]+;base64,/, '')
+        fileBuffer = Buffer.from(base64, 'base64')
+      }
+
+      if (isDirectory) {
+        // Directory → generate tree (max 3 levels, skip node_modules/.git)
+        const tree = []
+        const skipDirs = new Set(['node_modules', '.git', '.paw', '__pycache__', '.next', 'dist', 'build'])
+        function walkDir(dir, prefix, depth) {
+          if (depth > 3) return
+          try {
+            const entries = fs.readdirSync(dir, { withFileTypes: true })
+              .filter(e => !skipDirs.has(e.name) && !e.name.startsWith('.'))
+              .sort((a, b) => (a.isDirectory() === b.isDirectory() ? a.name.localeCompare(b.name) : a.isDirectory() ? -1 : 1))
+            for (let i = 0; i < entries.length && tree.length < 100; i++) {
+              const e = entries[i]
+              const isLast = i === entries.length - 1
+              const connector = isLast ? '└── ' : '├── '
+              tree.push(`${prefix}${connector}${e.name}${e.isDirectory() ? '/' : ''}`)
+              if (e.isDirectory()) {
+                walkDir(path.join(dir, e.name), prefix + (isLast ? '    ' : '│   '), depth + 1)
+              }
+            }
+          } catch {}
+        }
+        walkDir(f.path, '', 0)
+        const dirName = path.basename(f.path)
+        fileContext += `\n\n---\n📁 ${dirName}/\n\`\`\`\n${tree.join('\n')}\n\`\`\``
+      } else if (f.type?.startsWith('image/') && base64) {
+        // Image → vision API
         userContent.push({ type: 'image', source: { type: 'base64', media_type: f.type, data: base64 } })
+      } else if (fileBuffer) {
+        // Text/code file → inject content into prompt context
+        const textExts = ['.txt','.md','.markdown','.js','.ts','.tsx','.jsx','.py','.json','.yaml','.yml','.toml','.css','.html','.xml','.sh','.bash','.zsh','.fish','.rb','.go','.rs','.java','.c','.cpp','.h','.hpp','.swift','.kt','.sql','.env','.gitignore','.conf','.cfg','.ini','.csv','.log']
+        const ext = path.extname(f.name || '').toLowerCase()
+        if (textExts.includes(ext) || !f.type || f.type.startsWith('text/')) {
+          try {
+            const content = fileBuffer.toString('utf8')
+            // Limit to ~50KB to avoid context explosion
+            const truncated = content.length > 50000 ? content.slice(0, 50000) + '\n... (truncated)' : content
+            fileContext += `\n\n---\n📄 ${f.name} (${(f.size / 1024).toFixed(1)}KB)\n\`\`\`${ext.slice(1)}\n${truncated}\n\`\`\``
+          } catch { /* binary file, skip */ }
+        } else {
+          // Unknown binary file — just mention it
+          fileContext += `\n\n---\n📎 ${f.name} (${(f.size / 1024).toFixed(1)}KB, ${f.type || 'unknown type'})`
+        }
       }
     }
   }
+
   // Link understanding - async fetch link summaries (non-blocking)
   let linkContext = ''
   try { linkContext = await extractLinkContext(prompt) } catch {}
-  const textWithContext = linkContext ? `${prompt}\n\n---\n[Auto-fetched link context]\n${linkContext}` : prompt
+  const contextSuffix = [fileContext, linkContext ? `\n\n---\n[Auto-fetched link context]\n${linkContext}` : ''].filter(Boolean).join('')
+  const textWithContext = contextSuffix ? `${prompt}${contextSuffix}` : prompt
   userContent.push({ type: 'text', text: textWithContext || '(attached files)' })
   messages.push({ role: 'user', content: userContent })
 

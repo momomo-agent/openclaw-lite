@@ -1,138 +1,245 @@
-# Vision — Paw
+# Paw — 产品愿景
 
 ## 一句话
-你的 AI 团队的操作系统。每个文件夹是一个 assistant，带着他的记忆、技能和所有工作产出，随时可以拷走继续工作。
 
-## 核心理念
+**本地 AI 工作台：感知你的环境，而不是等你描述它。**
 
-### 从工具到关系
-- **AI 不是工具，是角色** — 每个 workspace 是一个有身份的 assistant，有自己的性格（SOUL.md）、记忆（MEMORY.md）、技能（skills/）
-- **记忆 = 关系的本质** — 对话历史不是日志，是你和 assistant 的共同经历
-- **Local-first = 关系的主权** — 你的 assistant、你的记忆、你的关系，全在你硬盘上，不在别人服务器
+## 核心洞察
 
-### U盘隐喻
-- **一个文件夹 = 一个人的工作包** — config、skills、memory、sessions、所有产出，全在一个目录
-- **物理可携带** — 拷到 U盘，带到另一台机器，立刻继续工作。不是"云端同步"，是"物理资产"
-- **可以送人** — 训练好的 assistant 可以直接把文件夹给同事，他立刻获得所有 context
-- **版本控制友好** — `git init` 在 workspace 里，assistant 的成长过程可以 commit，甚至可以 checkout 回到"三个月前的他"
+云端 AI 的根本限制：用户必须用语言描述上下文。
 
-### IM 体验
-- **多 workspace 并行加载** — 一个窗口，多个 assistant，像 IM 一样切换对话
-- **按身份分组** — 左侧 session 列表按 workspace 分组，每个 assistant 有自己的对话历史
-- **新建对话选身份** — 点"新对话"时选择要跟谁说话，而不是"打开哪个窗口"
-- **全部预加载** — 所有 workspace 启动时加载到内存，切换瞬间完成，没有等待
+"帮我看看 src/App.tsx 里的那个 bug" —— 云端 AI 不知道你在说哪个文件、什么 bug、项目用的什么框架。你得先解释半天。
 
-## 目标用户
-- 想要本地 AI 助手但觉得 OpenClaw 太重的用户
-- 需要管理多个专精 AI 的用户（设计师 Alice、代码助手 Bob、研究员 Carol）
-- 想要"AI 团队"而不是"一个万能 AI"的用户
-- 重视数据主权和隐私的用户
+本地 AI 的终极优势不是"数据在本地"（那只是存储），而是**感知在本地**。文件系统、进程、剪贴板、终端输出、git 状态——这些全是免费的上下文，云端永远拿不到。
 
-## 成功标准
-- 启动后看到所有 workspace（assistant）列表，像 IM 联系人
-- 点一个 assistant，立刻开始对话，没有加载等待
-- 每个 assistant 记得之前所有对话，context 完整
-- 可以把整个 workspace 文件夹拷到 U盘，换台机器继续用
-- 支持工具调用（搜索/代码/文件/skills）
-- 数据格式与 OpenClaw 兼容（可选）
-- macOS 原生体验（后续可扩展 Windows/Linux）
+## 产品定位
 
-## 对话模式
+Paw 不是聊天工具。Paw 是**本地 AI 运行时**。
 
-### 两种对话对象
+对比：
 
-**Assistant（Workspace）** — 有人格和记忆的全能助手
-- 选择一个 workspace（Momo / Alice / Bob）
-- 自动加载 SOUL.md / MEMORY.md / skills
-- 可以调用所有工具，包括 coding agent
-- 适合：复杂任务、需要决策和协调的工作
+| | ChatGPT/Claude | Cursor/Windsurf | Paw |
+|---|---|---|---|
+| 形态 | 网页聊天 | 代码编辑器 | 系统级工作台 |
+| 上下文 | 用户粘贴 | 打开的文件 | 整个工作环境 |
+| 输出 | 文本 | 代码 | 文本 + 代码 + 预览 + 操作 |
+| 本地能力 | 无 | 文件读写 | 文件 + 进程 + 系统 + 预览 |
+| 场景 | 问答 | 编码 | 一切本地工作 |
 
-**Coding Agent（项目文件夹）** — 专注写代码的执行器
-- 选择 coding agent 类型（Claude Code / Codex / Pi / OpenCode）+ 项目文件夹
-- 可选：注入某个 workspace 的人格和记忆
-- 直接对话，指令直达，省掉中间层
-- 适合：纯代码任务、快速迭代、"别废话直接干活"的场景
+Paw 的竞争对手不是 ChatGPT，是**操作系统本身**。
 
-### Context 注入选项
+## 设计原则
 
-Coding agent 对话时可以选择：
-- **纯净模式** — 零干扰，只写代码，省 token
-- **注入模式** — 使用某个 workspace 的 SOUL.md + MEMORY.md，"懂你的代码助手"
+### 1. 零描述交互
 
-### 实现
+用户不应该需要描述上下文。Paw 应该已经知道：
+- 你在哪个项目里工作
+- 最近改了什么文件
+- 终端里跑了什么、是否报错
+- 剪贴板里复制了什么
 
-新建对话流程：
-1. 选择对话对象
-   - 📁 Workspace（列出所有 workspace）
-   - 💻 Coding Agent（Claude Code / Codex / Pi / OpenCode）
-2. 如果选了 Coding Agent：
-   - 选择项目文件夹
-   - 可选：注入哪个 workspace 的 context（或"无"）
+用户只需要说意图：
+- "这个怎么改" —— Paw 知道"这个"是什么
+- "跑一下" —— Paw 知道跑的是什么
+- "部署" —— Paw 知道部署流程
 
-所有对话都在一个窗口，统一的 session 列表，统一的体验。
+### 2. 渐进信任
 
----
+感知能力分三层，用户逐步解锁：
 
-## 群聊 = Multi-Agent
+| 层级 | 行为 | 用户控制 |
+|---|---|---|
+| **被动感知** | 知道但不做 | 自动开启，可关闭 |
+| **主动上下文** | 自动注入相关信息 | 显示注入了什么，可编辑 |
+| **环境反应** | 检测到事件主动响应 | 需用户配置规则 |
 
-不做传统的 multi-agent 编排（coordinator、task 分配、auto-rotation）。
+绝不偷偷做事。每一层都有可见性——用户随时能看到 Paw 知道什么、注入了什么。
 
-**群聊就是 multi-agent**：把多个 workspace（人）拉到同一个 session 里。
+### 3. 输出即操作
 
-- 就像微信群：@Alice → Alice 用自己的 context 回复，@Bob → Bob 回复
-- 每个 workspace 保持独立性 — 各自的 SOUL.md、MEMORY.md、skills
-- 不需要 coordinator — 用户决定问谁，或者不 @ 时按规则选默认回复者
-- Session 有 `participants` 字段，记录哪些 workspace 在群里
+AI 的输出不应该只是文本。本地 AI 的输出是**可执行的**：
+
+- 生成代码 → 直接写入文件 + 实时预览
+- 生成命令 → 一键执行 + 实时输出
+- 生成设计 → 内嵌渲染 + 实时调整
+- 生成修复 → 一键应用 + diff 预览
+
+文本是中间产物，不是最终产物。
+
+### 4. 工作台而非聊天框
+
+IM 形态只是入口。核心是**面板系统**：
 
 ```
-Session（群聊）
-├── Workspace A（Alice）— 有自己的人格、记忆、技能
-├── Workspace B（Bob）— 有自己的人格、记忆、技能
-├── 💻 Coding Agent（可选参与者）
-└── 人
+┌──────────────────────────────────────────────┐
+│ Sidebar │       Chat        │    Preview     │
+│         │                   │                │
+│ Sessions│  对话区           │  文件浏览器    │
+│         │  (消息 + 工具)    │  实时预览      │
+│ Context │                   │  终端输出      │
+│ Panel   │                   │  Diff 视图     │
+│         │                   │                │
+│         │  ┌─────────────┐  │                │
+│         │  │  Input Bar  │  │                │
+│         │  └─────────────┘  │                │
+└──────────────────────────────────────────────┘
 ```
 
-**为什么这样做**：
-- 比传统 multi-agent 简单得多：没有编排层，没有 task 系统
-- 完全符合 IM 隐喻：群聊就是把人拉到一起
-- 每个 workspace 作为"独立的人"参与，保持 U盘隐喻的一致性
-- 未来扩展自然：workspace 可以是本地的，也可以是远程的（网络上另一台机器的 workspace）
+右侧面板不是固定的——它是 AI 输出的画布。生成 HTML → 渲染 HTML。生成 diff → 显示 diff。跑命令 → 显示终端。
 
----
+## 功能路线图
 
-## Roadmap
+### Phase 1: 文件与预览 (v0.13)
 
-### Phase 1：MCP 支持 ✅ 已完成（M33）
-- ✅ MCP native client（@modelcontextprotocol/sdk + stdio JSON-RPC）
-- ✅ MCP 工具自动注册（mcp__{server}__{tool} 命名）
-- ✅ Workspace config 声明 MCP server 连接信息
-- ✅ mcp_config 对话工具（agent 可管理 MCP server）
+**主题：让 AI 的输出活起来**
 
-### Phase 2：Tool 体系对齐 ✅ 大部分完成
-- ✅ `skill_create` — 创建 skill 脚手架
-- ✅ `web_fetch` + `web_download` — 网页抓取和下载
-- ✅ `session_title_set` — AI 驱动 session 标题
-- ✅ `edit` — 文件编辑工具
-- ⬜ 补齐 OpenClaw 常用工具：browser、image、pdf、tts
-- ⬜ Tool 安全模型完善（allowlist、approval chain）
+#### 1.1 文件拖拽增强
+- 拖入文件 → 自动读取内容注入 prompt（文本文件）
+- 拖入图片 → vision API 直接分析
+- 拖入文件夹 → 生成目录树 + 关键文件摘要
+- 拖拽时显示文件类型预览（不只是文件名 chip）
 
-### Phase 3：Coding Agent 作为参与者 ✅ 已完成（M38）
-- ✅ Claude Code SDK 集成（real-time streaming）
-- ✅ Coding Agent 从工具面板升级为对话参与者
-- ✅ 1v1 对话 + 群聊 @mention 路由
-- ✅ Unified workspace architecture
-- ✅ CC session persistence（.paw/cc-sessions.json，app restart 后可续接）
-- ✅ workspace-changed 全局事件（UI 响应式更新）
+#### 1.2 预览面板
+- AI 生成 HTML/CSS/JS → 右侧实时渲染（Electron webview）
+- AI 生成 Markdown → 渲染预览
+- AI 生成 SVG/图表 → 内嵌显示
+- 代码块 → 语法高亮 + 一键复制 + "应用到文件" 按钮
 
-### Phase 4：存储统一（下一步，M35）
-- 全局配置迁移到 ~/.paw/
-- 每个 workspace 各自 sessions.db
-- 启动自动迁移旧数据
+#### 1.3 文件操作可视化
+- file_write 工具调用 → 显示 diff 视图（不只是"已写入"）
+- file_read → 显示文件内容（带行号高亮）
+- shell_exec → 内嵌终端输出（不只是纯文本）
 
-### Phase 5：IM 接入（远期）
-内置轻量 IM provider，Paw 开着时 workspace 可以通过外部 IM 对话：
-- **Discord** — discord.js，开发者/社区场景
-- **Telegram** — node-telegram-bot-api，个人/国际用户
-- **飞书** — @larksuiteoapi/node-sdk，国内企业场景
-- 架构：chat handler 抽象化，每个 IM 一个 provider 插件
-- 限制（接受的）：Paw 关了 bot 就断，不做 24/7 常驻
+### Phase 2: 环境感知 (v0.14)
+
+**主题：让 AI 了解你的工作**
+
+#### 2.1 Workspace 感知
+- 启动时扫描 workspace 结构（gitignore-aware）
+- 维护文件索引（路径 + 类型 + 最后修改时间）
+- fs.watch 实时更新索引
+- 用户发消息时，自动注入相关文件路径到 system prompt
+
+#### 2.2 Git 集成
+- 自动检测 git 仓库
+- 发消息时注入 git status/diff 摘要
+- "最近改了什么" → 直接知道，不需要 shell_exec
+- Commit 消息生成（基于 staged changes）
+
+#### 2.3 上下文注入 UI
+- 消息下方显示 "Context: 3 files, git: 2 modified"
+- 点击展开查看具体注入了什么
+- 用户可以移除不相关的上下文
+- 上下文来源标签（workspace / git / clipboard / manual）
+
+### Phase 3: 系统集成 (v0.15)
+
+**主题：让 AI 融入你的工作流**
+
+#### 3.1 剪贴板感知
+- 复制代码 → Paw 知道你可能要问关于这段代码的问题
+- 复制错误信息 → 自动建议排查方向
+- 复制 URL → 自动抓取内容
+- 不主动弹窗，只在用户发消息时注入
+
+#### 3.2 进程感知
+- 监听前台应用切换（通过 Electron API）
+- 终端检测：最近的命令 + 输出 + exit code
+- Build 工具检测：webpack/vite/tsc 输出解析
+- npm scripts 发现：知道项目能跑什么
+
+#### 3.3 通知与提醒
+- 长时间 shell_exec → 完成时 native notification
+- Cron 任务结果 → menubar badge
+- Build 失败 → 主动分析（需用户配置）
+
+### Phase 4: 操作能力 (v0.16+)
+
+**主题：让 AI 帮你做事**
+
+#### 4.1 安全的系统操作
+- 终端操作：AI 生成命令 → 用户确认 → 执行 → 结果回流
+- 文件批量操作：重命名、移动、重构 → diff 预览 → 确认
+- 进程管理：启动/停止 dev server、清理端口
+
+#### 4.2 应用集成（长期）
+- 浏览器联动：当前标签页内容
+- 编辑器联动：VSCode 当前文件（通过 extension）
+- 设计工具：Figma 选中元素（通过 plugin）
+
+## 体验设计细节
+
+### 预览面板交互
+
+```
+用户: 帮我做一个登录页面
+
+AI: [生成代码中...]
+    ┌─────────────────────────┐
+    │ 💻 Live Preview    ⟳ ✕ │
+    │                         │
+    │   ┌───────────────┐     │
+    │   │  Login Form   │     │
+    │   │  [username]   │     │
+    │   │  [password]   │     │
+    │   │  [  Login  ]  │     │
+    │   └───────────────┘     │
+    │                         │
+    └─────────────────────────┘
+    
+    [Apply to file] [Copy code] [Open in browser]
+```
+
+预览不是弹窗。是消息流里的一部分。代码块旁边就是渲染结果。
+
+### 上下文注入显示
+
+```
+┌─ Context ──────────────────────┐
+│ 📁 src/App.tsx (modified 2m)   │
+│ 📁 src/styles.css              │
+│ 🔀 git: +45 -12 (unstaged)    │
+│ 📋 clipboard: error stack      │
+│                        [Edit]  │
+└────────────────────────────────┘
+用户: 这个报错怎么修？
+```
+
+用户看得到 AI 知道什么。透明 > 魔法。
+
+### 文件拖拽反馈
+
+```
+拖拽中:
+┌─────────────────────────────┐
+│                             │
+│     📄 App.tsx (12KB)       │
+│     React component         │
+│     Will: read & analyze    │
+│                             │
+└─────────────────────────────┘
+
+拖拽后（input bar 上方）:
+┌──────────────────────────────────┐
+│ 📄 App.tsx    📸 screenshot.png  │
+│ 12KB, React   340KB, 1920×1080  │
+│          [×]              [×]   │
+└──────────────────────────────────┘
+```
+
+不只是文件名，显示文件类型、大小、维度（图片）。
+
+## 技术约束
+
+- **Electron 限制**：webview 需要 `webviewTag: true`，sandbox 问题需注意
+- **性能预算**：fs.watch 不要监听 node_modules，workspace 扫描要异步
+- **隐私**：所有感知数据只在本地处理，不发送到云端（除了用户主动发的消息）
+- **渐进增强**：每个感知功能都有开关，默认保守
+
+## 不做的事
+
+- 不做云端同步（Google Drive / iCloud 备份是用户自己的事）
+- 不做团队协作（Paw 是个人工具）
+- 不做通用 AI 聊天（有 workspace 才有意义）
+- 不做浏览器扩展（Paw 是桌面应用，不是浏览器插件）
+- 不做 AI 训练/微调（Paw 是消费者，不是训练平台）

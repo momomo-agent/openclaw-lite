@@ -4,9 +4,10 @@ import { useAppState } from '../store'
 interface InputBarProps {
   sessionId: string | null
   onSend: (text: string, files: File[]) => void
+  isGroup?: boolean
 }
 
-export default function InputBar({ sessionId, onSend }: InputBarProps) {
+export default function InputBar({ sessionId, onSend, isGroup = false }: InputBarProps) {
   const { workspaces } = useAppState()
   const [text, setText] = useState('')
   const [files, setFiles] = useState<File[]>([])
@@ -86,10 +87,22 @@ export default function InputBar({ sessionId, onSend }: InputBarProps) {
   const [mentionIdx, setMentionIdx] = useState(0)
   const mentionStartPos = useRef(-1)
 
+  // F203: Pill tokens
+  const [pills, setPills] = useState<Array<{ id: string; name: string; start: number; end: number }>>([])
+
   const agentNames = [...new Set(workspaces.map(w => w.identity?.name || w.id))]
 
+  // Fuzzy match: substring + initials
+  const fuzzyMatch = (name: string, query: string) => {
+    const lowerName = name.toLowerCase()
+    const lowerQuery = query.toLowerCase()
+    if (lowerName.includes(lowerQuery)) return true
+    const initials = name.split(/\s+/).map(w => w[0]).join('').toLowerCase()
+    return initials.includes(lowerQuery)
+  }
+
   const filteredMentions = mentionFilter
-    ? agentNames.filter(n => n.toLowerCase().includes(mentionFilter.toLowerCase()))
+    ? agentNames.filter(n => fuzzyMatch(n, mentionFilter))
     : agentNames
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -97,17 +110,25 @@ export default function InputBar({ sessionId, onSend }: InputBarProps) {
     const pos = e.target.selectionStart
     setText(val)
 
-    // Check for @ trigger
-    const beforeCursor = val.slice(0, pos)
-    const atIdx = beforeCursor.lastIndexOf('@')
-    if (atIdx >= 0 && (atIdx === 0 || /\s/.test(beforeCursor[atIdx - 1]))) {
-      const query = beforeCursor.slice(atIdx + 1)
-      if (!query.includes(' ')) {
-        mentionStartPos.current = atIdx
-        setMentionFilter(query)
-        setMentionOpen(true)
-        setMentionIdx(0)
-        return
+    // Update pill positions based on text changes
+    setPills(prev => prev.filter(pill => {
+      const pillText = `@${pill.name}`
+      return val.slice(pill.start, pill.end) === pillText
+    }).map(pill => ({ ...pill })))
+
+    // Check for @ trigger (only in group chats)
+    if (isGroup) {
+      const beforeCursor = val.slice(0, pos)
+      const atIdx = beforeCursor.lastIndexOf('@')
+      if (atIdx >= 0 && (atIdx === 0 || /\s/.test(beforeCursor[atIdx - 1]))) {
+        const query = beforeCursor.slice(atIdx + 1)
+        if (!query.includes(' ')) {
+          mentionStartPos.current = atIdx
+          setMentionFilter(query)
+          setMentionOpen(true)
+          setMentionIdx(0)
+          return
+        }
       }
     }
     setMentionOpen(false)
@@ -116,8 +137,11 @@ export default function InputBar({ sessionId, onSend }: InputBarProps) {
   const insertMention = useCallback((name: string) => {
     const start = mentionStartPos.current
     if (start < 0) return
+    const pillText = `@${name}`
     const after = text.slice(textareaRef.current?.selectionStart || text.length)
-    setText(text.slice(0, start) + '@' + name + ' ' + after)
+    const newText = text.slice(0, start) + pillText + ' ' + after
+    setText(newText)
+    setPills(prev => [...prev, { id: Date.now().toString(), name, start, end: start + pillText.length }])
     setMentionOpen(false)
     textareaRef.current?.focus()
   }, [text])
@@ -187,7 +211,11 @@ export default function InputBar({ sessionId, onSend }: InputBarProps) {
         {/* F246: Attach preview with image thumbnails */}
         {files.length > 0 && (
           <div className="attach-preview-area">
-            {files.map((f, i) => (
+            {files.map((f, i) => {
+              const sizeStr = f.size < 1024 ? `${f.size}B`
+                : f.size < 1024 * 1024 ? `${(f.size / 1024).toFixed(1)}KB`
+                : `${(f.size / (1024 * 1024)).toFixed(1)}MB`
+              return (
               <div key={i} className="attach-chip" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 {isImage(f) && (
                   <img
@@ -196,30 +224,45 @@ export default function InputBar({ sessionId, onSend }: InputBarProps) {
                   />
                 )}
                 <span>{f.name}</span>
+                <span style={{ opacity: 0.5, fontSize: 11 }}>{sizeStr}</span>
                 <span className="remove" onClick={() => setFiles(files.filter((_, j) => j !== i))}>×</span>
               </div>
-            ))}
+              )
+            })}
           </div>
         )}
         {/* F224: Mention dropdown */}
         {mentionOpen && filteredMentions.length > 0 && (
           <div style={{
             position: 'absolute', bottom: '100%', left: 12, marginBottom: 4,
-            background: 'var(--bg-secondary)', border: '1px solid var(--border)',
-            borderRadius: 6, padding: '4px 0', minWidth: 160, zIndex: 100,
-            boxShadow: '0 4px 12px rgba(0,0,0,.3)'
+            background: 'var(--bg-secondary)', border: '1px solid var(--accent)',
+            borderRadius: 8, padding: '4px 0', minWidth: 200, zIndex: 100,
+            boxShadow: '0 4px 16px rgba(0,0,0,.4)'
           }}>
-            {filteredMentions.map((name, i) => (
-              <div key={name}
-                onClick={() => insertMention(name)}
-                style={{
-                  padding: '6px 12px', cursor: 'pointer', fontSize: 13,
-                  background: i === mentionIdx ? 'var(--accent-dim)' : 'transparent',
-                  color: 'var(--text-primary)'
-                }}>
-                @{name}
-              </div>
-            ))}
+            {filteredMentions.map((name, i) => {
+              const ws = workspaces.find(w => (w.identity?.name || w.id) === name)
+              return (
+                <div key={name}
+                  onClick={() => insertMention(name)}
+                  style={{
+                    padding: '8px 12px', cursor: 'pointer', fontSize: 13,
+                    background: i === mentionIdx ? 'var(--accent-dim)' : 'transparent',
+                    color: 'var(--text-primary)',
+                    display: 'flex', alignItems: 'center', gap: 8
+                  }}>
+                  <img
+                    src={ws?.identity?.avatar?.startsWith('preset:')
+                      ? `../avatars/${ws.identity.avatar.replace('preset:', '')}.png`
+                      : ws?.identity?.avatar?.startsWith('../')
+                      ? ws.identity.avatar
+                      : '../avatars/1.png'}
+                    style={{ width: 20, height: 20, borderRadius: '50%', objectFit: 'cover' }}
+                    onError={(e) => { e.currentTarget.src = '../avatars/1.png' }}
+                  />
+                  <span>@{name}</span>
+                </div>
+              )
+            })}
           </div>
         )}
         <div className="input-bar" data-testid="input-bar">
@@ -244,7 +287,7 @@ export default function InputBar({ sessionId, onSend }: InputBarProps) {
             }}
             onCompositionStart={() => { composing.current = true }}
             onCompositionEnd={() => { composing.current = false }}
-            placeholder="Ask anything... (@name to target)"
+            placeholder={isGroup ? "Message... (@name to mention)" : "Message..."}
             rows={1}
           />
           <button id="sendBtn" data-testid="send-btn" className={text.trim() || files.length ? 'active' : ''} onClick={handleSend}>

@@ -230,7 +230,18 @@ async function streamAnthropic(messages, systemPrompt, config, requestId, tools,
       }
       // Always persist to flowSteps (including silent tools like delegate_to) for DB persistence
       flowSteps.push({ name: tc.name, input, output: String(result).slice(0, 500) })
-      toolResults.push({ type: 'tool_result', tool_use_id: tc.id, content: ctx.truncateToolResult(result) })
+      // Build tool_result content — support image results (e.g. screen_capture)
+      let toolResultContent
+      if (result && typeof result === 'object' && result.image) {
+        // Multi-part: text + image
+        toolResultContent = [
+          { type: 'text', text: ctx.truncateToolResult(result.result || result.error || 'Done') },
+          { type: 'image', source: result.image },
+        ]
+      } else {
+        toolResultContent = ctx.truncateToolResult(result)
+      }
+      toolResults.push({ type: 'tool_result', tool_use_id: tc.id, content: toolResultContent })
     }
     // Send round info to renderer (include purpose extracted from thinking)
     if (toolCalls.length > 0) {

@@ -748,6 +748,21 @@ export default function ChatView() {
     if (!currentSessionId) return
     if (await handleSlashCommand(text)) return
 
+    // Serialize files for IPC (Electron structured clone drops File data)
+    const serializedFiles = await Promise.all(files.map(async (f) => {
+      const entry: any = { name: f.name, type: f.type, size: f.size }
+      // Desktop-dragged files have .path (Electron-specific)
+      if ((f as any).path) {
+        entry.path = (f as any).path
+      } else {
+        // Pasted/uploaded files: convert to base64
+        const buf = await f.arrayBuffer()
+        const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)))
+        entry.data = `data:${f.type};base64,${b64}`
+      }
+      return entry
+    }))
+
     // F247: User message with image display
     const userMsg: Message = {
       id: Date.now().toString(),
@@ -795,7 +810,7 @@ export default function ChatView() {
     setStatus(currentSessionId, '')
 
     try {
-      await api.chat({ sessionId: currentSessionId, message: text, requestId, attachments: files })
+      await api.chat({ sessionId: currentSessionId, message: text, requestId, attachments: serializedFiles })
     } catch (err: any) {
       console.error('[ChatView] chat error:', err)
       clearStreamState(currentSessionId)
@@ -950,7 +965,7 @@ export default function ChatView() {
         ownerWorkspaceId={sessionParticipants[0]}
         onRetry={handleRetry}
       />
-      <InputBar sessionId={currentSessionId} onSend={handleSend} />
+      <InputBar sessionId={currentSessionId} onSend={handleSend} isGroup={isGroup} />
       <TaskBar sessionId={currentSessionId} />
       <SettingsPanel visible={showSettings} onClose={() => setShowSettings(false)} />
       <MembersPanel visible={showMembers} sessionId={currentSessionId} onClose={() => setShowMembers(false)}
