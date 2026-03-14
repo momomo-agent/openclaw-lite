@@ -1170,14 +1170,27 @@ function finishChat(sessionId, requestId, assistantText, wsIdentity, toolSteps, 
     updateTrayTitle()
   }
 
-  // ── Queue drain: process next queued message for this session ──
+  // ── Queue drain: collect all queued messages and process as one ──
   if (sessionId) {
     chatQueue.markIdle(sessionId)
-    const next = chatQueue.shift(sessionId)
-    if (next) {
-      console.log(`[Paw] Draining queued message for session ${sessionId.slice(0, 8)} (remaining: ${chatQueue.depth(sessionId)})`)
+    const items = chatQueue.shiftAll(sessionId)
+    if (items.length > 0) {
+      console.log(`[Paw] Draining ${items.length} queued message(s) for session ${sessionId.slice(0, 8)}`)
+      // Build collect prompt (OpenClaw-style: each message clearly separated)
+      const merged = items.length === 1
+        ? items[0]
+        : {
+            ...items[items.length - 1],  // inherit sessionId, requestId etc. from last item
+            userMessageSaved: true,       // all items were already persisted
+            prompt: [
+              '[Queued messages while agent was busy]',
+              ...items.map((item, i) =>
+                `---\nQueued #${i + 1}\n${item.prompt}`
+              ),
+            ].join('\n\n'),
+          }
       // Run async — don't block finishChat
-      _runChat(next).catch(err => console.error('[Paw] Queue drain error:', err))
+      _runChat(merged).catch(err => console.error('[Paw] Queue drain error:', err))
     }
   }
 }
@@ -1192,17 +1205,11 @@ ipcMain.handle('chat', async (_, { prompt, message, history, rawMessages, agentI
 
   // ── Queue: if this session already has an active reply, queue the message ──
   if (sessionId && chatQueue.isActive(sessionId)) {
-    const queued = chatQueue.enqueue(sessionId, { prompt, files, agentId, sessionId, requestId, focus, targetWorkspaceId })
+    const queued = chatQueue.enqueue(sessionId, { prompt, files, agentId, sessionId, requestId, focus, targetWorkspaceId, userMessageSaved: true })
     if (queued) {
       console.log(`[Paw] Queued message for session ${sessionId.slice(0, 8)} (depth: ${chatQueue.depth(sessionId)})`)
-      // Save user message to DB immediately so it appears in UI
-      const wsPath = getSessionWorkspace(sessionId) || clawDir
-      if (wsPath) {
-        sessionStore.appendMessage(wsPath, sessionId, {
-          role: 'user', content: prompt, timestamp: Date.now(),
-          ...(files?.length ? { attachments: files.map(f => ({ name: f.name || f.originalName, type: f.type || f.mimeType })) } : {}),
-        })
-      }
+      // Save user message to DB immediately (crash-safe, appears in UI on reload)
+      persistUserMessage(sessionId, prompt)
       eventBus.dispatch('chat-queued', { requestId, sessionId, depth: chatQueue.depth(sessionId) })
       return { queued: true, depth: chatQueue.depth(sessionId) }
     }
@@ -1211,7 +1218,7 @@ ipcMain.handle('chat', async (_, { prompt, message, history, rawMessages, agentI
   return _runChat({ prompt, files, agentId, sessionId, requestId, focus, targetWorkspaceId })
 })
 
-async function _runChat({ prompt, files, agentId, sessionId, requestId, focus, targetWorkspaceId }) {
+async function _runChat({ prompt, files, agentId, sessionId, requestId, focus, targetWorkspaceId, userMessageSaved }) {
   if (sessionId) { chatQueue.markActive(sessionId) }
 
   const config = (() => {
@@ -1483,8 +1490,8 @@ ${roster}
     workspaceId: _wsObj?.id || null,
   }
 
-  // Persist user message BEFORE streaming — crash-safe
-  persistUserMessage(sessionId, prompt)
+  // Persist user message BEFORE streaming — crash-safe (skip if already saved by queue)
+  if (!userMessageSaved) persistUserMessage(sessionId, prompt)
 
   let lastError = null
   for (const target of modelsToTry) {

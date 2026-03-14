@@ -57,6 +57,14 @@ class ChatQueue {
     return s.queue.shift() || null
   }
 
+  /** Drain all queued messages at once. Returns [] if empty. */
+  shiftAll(sessionId) {
+    const s = this._getSession(sessionId)
+    const items = s.queue.slice()
+    s.queue = []
+    return items
+  }
+
   /** Clear all queued messages for a session */
   clear(sessionId) {
     const s = this._getSession(sessionId)
