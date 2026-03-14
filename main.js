@@ -129,7 +129,7 @@ function truncateToolResult(result, contextWindowTokens) {
 const { extractLinkContext: coreExtractLinkContext } = require('./core/link-extract')
 const { listAgents: coreListAgents, loadAgent: coreLoadAgent, saveAgent: coreSaveAgent, createAgent: coreCreateAgent, agentsDir: coreAgentsDir } = require('./core/agents')
 const { pushStatus: corePushStatus, sendNotification: coreSendNotification, pushWatsonStatus: corePushWatsonStatus } = require('./core/notify')
-const { startHeartbeat: coreStartHeartbeat, stopHeartbeat: coreStopHeartbeat, startHeartbeatCron, stopHeartbeatCron } = require('./core/heartbeat')
+const { startHeartbeat: coreStartHeartbeat, stopHeartbeat: coreStopHeartbeat, startHeartbeatCron, stopHeartbeatCron, isWithinActiveHours, buildHeartbeatPrompt, processHeartbeatResponse } = require('./core/heartbeat')
 const { McpManager } = require('./core/mcp-client')
 const { CronService } = require('./core/cron')
 const { updateTrayMenu: coreUpdateTrayMenu } = require('./core/tray')
@@ -1503,6 +1503,23 @@ ${roster}
   const totalTokens = estimateMessagesTokens(prunedMessages)
   let finalMessages = prunedMessages
   let compacted = false
+
+  // Memory flush before compaction — save durable memories before context is lost
+  const softThreshold = compactThreshold - 4000 // flush 4K tokens before hard compact
+  if (totalTokens > softThreshold && prunedMessages.length > COMPACT_KEEP_RECENT * 2 + 2 && clawDir) {
+    try {
+      console.log(`[memory-flush] ${totalTokens} tokens near compaction threshold, triggering memory flush`)
+      const flushPrompt = `Pre-compaction memory flush. Store durable memories now (use memory/${new Date().toISOString().slice(0,10)}.md; create memory/ if needed). IMPORTANT: If the file already exists, APPEND new content only — do not overwrite existing entries. If nothing to store, reply with NO_REPLY.`
+      const flushMsgs = [...prunedMessages, { role: 'user', content: flushPrompt }]
+      const flushReqId = 'memflush-' + Date.now().toString(36)
+      const flushStreamFn = provider === 'anthropic' ? streamAnthropic : streamOpenAI
+      await flushStreamFn(flushMsgs, systemPrompt, { apiKey, baseUrl, model }, flushReqId, getToolsWithMcp(), sessionId, null, ctx)
+      console.log('[memory-flush] complete')
+    } catch (e) {
+      console.warn('[memory-flush] failed:', e.message)
+    }
+  }
+
   if (totalTokens > compactThreshold && prunedMessages.length > COMPACT_KEEP_RECENT * 2 + 2) {
     console.log(`[compaction] ${totalTokens} tokens exceeds threshold ${compactThreshold} (model: ${model}), compacting...`)
     eventBus.dispatch('chat-status', { text: '压缩历史对话...', requestId })
@@ -1636,7 +1653,7 @@ function getSessionWorkspacePath(workspaceId, sessionId) {
 // ── Group Chat delegate_to → extracted to core/delegate.js (M39) ──
 // ── Streaming engines → extracted to core/stream-anthropic.js + core/stream-openai.js (M39) ──
 
-// ── M8-01: Heartbeat ──
+// ── M8-01: Heartbeat (OpenClaw-aligned) ──
 
 function startHeartbeat() {
   stopHeartbeat()
@@ -1645,27 +1662,45 @@ function startHeartbeat() {
   if (cfg.heartbeat?.enabled === false) return
   const hb = cfg.heartbeat || {}
   const ms = (hb.intervalMinutes || 30) * 60000
-  let prompt = hb.prompt || 'Heartbeat: check if anything needs attention. Reply HEARTBEAT_OK if nothing.'
-  // Append HEARTBEAT.md if present
-  if (clawDir) {
-    const hbPath = path.join(clawDir, 'HEARTBEAT.md')
-    if (fs.existsSync(hbPath)) {
-      try { prompt += '\n\n' + fs.readFileSync(hbPath, 'utf8') } catch {}
-    }
-  }
+
   heartbeatTimer = setInterval(async () => {
     try {
       const c = JSON.parse(fs.readFileSync(configPath(), 'utf8'))
       if (!c.apiKey) return
-      const sp = await buildSystemPrompt()
+
+      // Active hours check
+      if (!isWithinActiveHours(c.heartbeat?.activeHours)) {
+        console.log('[heartbeat] Outside active hours, skipping')
+        return
+      }
+
+      // Build prompt from HEARTBEAT.md
+      const prompt = buildHeartbeatPrompt(clawDir, c)
+      if (!prompt) {
+        console.log('[heartbeat] HEARTBEAT.md empty, skipping')
+        return
+      }
+
+      // Light context: only inject HEARTBEAT.md, not full system prompt
+      const lightContext = c.heartbeat?.lightContext
+      let sp
+      if (lightContext) {
+        sp = 'You are a local AI assistant. Follow HEARTBEAT.md instructions strictly.\nIf nothing needs attention, reply HEARTBEAT_OK.\nDo not include HEARTBEAT_OK in alert messages.'
+      } else {
+        sp = await buildSystemPrompt()
+        sp += '\n\n## Heartbeat\nThis is a heartbeat check. Follow HEARTBEAT.md if it exists. If nothing needs attention, reply with HEARTBEAT_OK. Do not include HEARTBEAT_OK in alert messages.'
+      }
+
       const msgs = [{ role: 'user', content: prompt }]
       const hbStreamFn = (c.provider || 'anthropic') === 'anthropic' ? streamAnthropic : streamOpenAI
-      // Use a dedicated heartbeat requestId to avoid hijacking active user chats
       const hbRequestId = 'hb-' + Date.now().toString(36)
       const r = await hbStreamFn(msgs, sp, c, hbRequestId, null, null, null, ctx)
-      if (r?.answer && !r.answer.includes('HEARTBEAT_OK')) {
-        sendNotification('Paw', r.answer.slice(0, 200))
-        eventBus.dispatch('heartbeat-result', r.answer)
+
+      // Process response with HEARTBEAT_OK contract
+      const alert = processHeartbeatResponse(r?.answer, c.heartbeat?.ackMaxChars)
+      if (alert) {
+        sendNotification('Paw', alert.slice(0, 200))
+        eventBus.dispatch('heartbeat-result', alert)
       }
     } catch (e) { console.error('Heartbeat error:', e.message) }
   }, ms)
