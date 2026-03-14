@@ -3,11 +3,24 @@
  * Extracted from main.js M39 refactor.
  *
  * handleDelegateTo: routes messages to other participants in group chat.
+ * Dependencies injected via ctx for testability:
+ *   ctx.getWorkspace(id)     — workspace registry lookup (falls back to require)
+ *   ctx.buildSystemPrompt(p) — prompt builder (falls back to require)
  */
 const fs = require('fs')
-const eventBus = require('./event-bus')
-const workspaceRegistry = require('./workspace-registry')
-const { buildSystemPrompt: coreBuildSystemPrompt } = require('./prompt-builder')
+const _eventBus = require('./event-bus')
+
+// Lazy-loaded defaults (overridable via ctx for testing)
+let _workspaceRegistry = null
+let _buildSystemPrompt = null
+function _getWorkspaceRegistry() {
+  if (!_workspaceRegistry) _workspaceRegistry = require('./workspace-registry')
+  return _workspaceRegistry
+}
+function _getBuildSystemPrompt() {
+  if (!_buildSystemPrompt) _buildSystemPrompt = require('./prompt-builder').buildSystemPrompt
+  return _buildSystemPrompt
+}
 
 async function handleDelegateTo(input, config, sessionId, ctx) {
   const { participant_name, message } = input
@@ -15,9 +28,14 @@ async function handleDelegateTo(input, config, sessionId, ctx) {
   const delegateDb = ctx.resolveSessionDb(sessionId)
   if (!sessionId || !delegateDb) return 'Error: no active session'
 
+  // Resolve dependencies (ctx overrides for testing, require() defaults for production)
+  const getWorkspace = ctx.getWorkspace || _getWorkspaceRegistry().getWorkspace
+  const buildSystemPrompt = ctx.buildSystemPrompt || _getBuildSystemPrompt()
+  const eventBus = ctx.eventBus || _eventBus
+
   // Find participant — all participants are workspace IDs now
   const participantIds = ctx.sessionStore.getSessionParticipants(delegateDb, sessionId)
-  const allWs = participantIds.map(pid => workspaceRegistry.getWorkspace(pid)).filter(Boolean)
+  const allWs = participantIds.map(pid => getWorkspace(pid)).filter(Boolean)
 
   // Match by name (case-insensitive, partial)
   const q = participant_name.toLowerCase()
@@ -54,7 +72,7 @@ async function handleDelegateTo(input, config, sessionId, ctx) {
   console.log(`[delegate_to] routing to ${targetWs.identity?.name} (${targetWs.id})`)
 
   // Build target participant's system prompt
-  const targetPrompt = await coreBuildSystemPrompt(targetWs.path)
+  const targetPrompt = await buildSystemPrompt(targetWs.path)
 
   // Add group context to their prompt
   const names = allWs.map(w => w.identity?.name || w.id)
@@ -95,6 +113,10 @@ async function handleDelegateTo(input, config, sessionId, ctx) {
   const savedAbortController = ctx._activeAbortController
   const parentRequestId = ctx._activeRequestId
 
+  // Declared outside try so catch can clean up
+  const delegateRid = parentRequestId + '-delegate'
+  const remapHandlers = []
+
   try {
     // Signal delegate start — frontend creates independent bubble
     const avatar = targetWs.identity?.avatar || '🤖'
@@ -104,8 +126,6 @@ async function handleDelegateTo(input, config, sessionId, ctx) {
     }
 
     // Intercept delegate stream events and remap to delegate channels via eventBus
-    const delegateRid = parentRequestId + '-delegate'
-    const remapHandlers = []
     const remapChannels = { 'chat-token': true, 'chat-tool-step': true, 'chat-round-info': true, 'chat-status': true, 'chat-text-start': true }
     for (const ch of Object.keys(remapChannels)) {
       const handler = (data) => {
