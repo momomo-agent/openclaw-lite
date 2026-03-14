@@ -159,6 +159,49 @@ function sendNotification(title, body) {
   if (Notification.isSupported()) new Notification({ title, body }).show()
 }
 
+/**
+ * Convert raw error messages into user-friendly text.
+ * Strips IPC wrappers, classifies errors, adds actionable hints.
+ */
+function friendlyError(err) {
+  let msg = typeof err === 'string' ? err : err?.message || 'Unknown error'
+
+  // Strip Electron IPC wrapper
+  msg = msg.replace(/^Error invoking remote method '[^']+': Error: /i, '')
+  msg = msg.replace(/^Error: /i, '')
+
+  // Classify and rewrite
+  const lower = msg.toLowerCase()
+
+  if (lower.includes('no api key') || lower.includes('api key')) {
+    return { short: 'No API key', detail: 'Go to Settings (⚙️) to configure your API key.', category: 'config' }
+  }
+  if (lower.includes('401') || lower.includes('unauthorized') || lower.includes('invalid.*key')) {
+    return { short: 'Invalid API key', detail: 'Your API key was rejected. Check Settings (⚙️) to update it.', category: 'auth' }
+  }
+  if (lower.includes('429') || lower.includes('rate limit') || lower.includes('too many')) {
+    return { short: 'Rate limited', detail: 'Too many requests. Wait a moment and try again.', category: 'rate-limit' }
+  }
+  if (lower.includes('timeout') || lower.includes('timed out') || lower.includes('etimedout')) {
+    return { short: 'Request timed out', detail: 'The server took too long to respond. Try again.', category: 'network' }
+  }
+  if (lower.includes('econnrefused') || lower.includes('enotfound') || lower.includes('network') || lower.includes('fetch failed')) {
+    return { short: 'Network error', detail: 'Could not reach the API server. Check your internet connection.', category: 'network' }
+  }
+  if (lower.includes('overloaded') || lower.includes('529') || lower.includes('503') || lower.includes('server error')) {
+    return { short: 'Server overloaded', detail: 'The API server is temporarily overloaded. Try again in a few seconds.', category: 'server' }
+  }
+  if (lower.includes('context') && lower.includes('long')) {
+    return { short: 'Context too long', detail: 'The conversation is too long for the model. Start a new chat or compact the history.', category: 'context' }
+  }
+  if (lower.includes('not available') || lower.includes('not found')) {
+    return { short: 'Service unavailable', detail: msg, category: 'unavailable' }
+  }
+
+  // Default: sanitize but keep the message
+  return { short: msg.length > 80 ? msg.slice(0, 77) + '…' : msg, detail: msg, category: 'unknown' }
+}
+
 // ── Delegated to core/ modules ──
 function configPath() { return globalConfigPath(); }
 function loadConfig() { return loadGlobalConfig(); }
@@ -651,6 +694,7 @@ ipcMain.handle('pick-image', async () => {
 ipcMain.handle('reset-claw-dir', () => {
   stopHeartbeat()
   stopMemoryWatch()
+  if (cronService) { cronService.stop(); cronService = null }
   clawDir = null
   syncState()
   return true
@@ -684,6 +728,10 @@ ipcMain.handle('create-claw-dir', async () => {
 
   startMemoryWatch()
   buildMemoryIndex()
+  // Restart heartbeat + cron for new workspace
+  stopHeartbeat(); startHeartbeat()
+  if (cronService) cronService.stop()
+  initMcpAndCron()
   return dir
 })
 
@@ -702,6 +750,10 @@ ipcMain.handle('select-claw-dir', async () => {
     startMemoryWatch()
 
     buildMemoryIndex()
+    // Restart heartbeat + cron for selected workspace
+    stopHeartbeat(); startHeartbeat()
+    if (cronService) cronService.stop()
+    initMcpAndCron()
     return clawDir
   }
   return null
@@ -1228,7 +1280,7 @@ ipcMain.handle('chat', async (_, { prompt, message, history, rawMessages, agentI
   const apiKey = config.apiKey
   const baseUrl = config.baseUrl
   const model = agent?.model || config.model
-  if (!apiKey) throw new Error('No API key configured. Click ⚙️ to set up.')
+  if (!apiKey) throw new Error('No API key configured. Open Settings to set up.')
 
   // Build system prompt + select tools
   let systemPrompt
@@ -1421,9 +1473,10 @@ ${roster}
       console.warn(`[Paw] model ${target.model} failed: ${err.message} (cooldown ${Math.round((cd.until - Date.now()) / 1000)}s, errors: ${cd.errorCount})`)
       if (target === modelsToTry[modelsToTry.length - 1]) {
         console.error('[Paw] all models failed:', err.message)
-        pushStatus('error', err.message.slice(0, 80))
-        finishChat(sessionId, requestId, `❌ Error: ${err.message}`, null)
-        return { error: err.message }
+        const fe = friendlyError(err)
+        pushStatus('error', fe.short)
+        finishChat(sessionId, requestId, `${fe.short}\n\n${fe.detail}`, null)
+        return { error: fe.detail }
       }
     }
   }

@@ -107,10 +107,11 @@ export default function MessageItem({ message, isStreaming, statusText, ownerWor
           {isError ? (
             <>
               <div className="msg-content msg-error-content">
-                {message.content}
+                <span className="error-icon">⚠</span>
+                <span>{message.content}</span>
               </div>
               {onRetry && (
-                <button className="retry-btn" onClick={onRetry}>↻ 重试</button>
+                <button className="retry-btn" onClick={onRetry}>↻ Retry</button>
               )}
             </>
           ) : (
@@ -123,7 +124,7 @@ export default function MessageItem({ message, isStreaming, statusText, ownerWor
           )}
           {/* Send failure: small retry icon beside message */}
           {isUser && message.status === 'failed' && onRetry && (
-            <button className="retry-icon-btn" onClick={onRetry} title="重新发送">↻ 重试</button>
+            <button className="retry-icon-btn" onClick={onRetry} title="Retry">↻</button>
           )}
           {/* Typing indicator: three bouncing dots while streaming */}
           {isStreaming && (

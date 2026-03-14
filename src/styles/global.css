@@ -306,10 +306,27 @@ button:hover { background: var(--border-muted); }
 .msg-content { color: var(--text-secondary); line-height: 1.6; font-size: 15px; overflow-x: hidden; word-break: break-word; overflow-wrap: anywhere; }
 
 /* Error messages — reply error (assistant msg with isError) */
-.msg-error-content { color: var(--status-error); border-left: 3px solid var(--status-error); padding-left: 8px; font-size: 14px; }
+.msg-error-content {
+  color: var(--text-secondary);
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.msg-error-content .error-icon {
+  color: var(--status-error);
+  font-size: 15px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
 .retry-btn {
-  margin-top: 8px; padding: 4px 14px; border: 1px solid var(--border-default); background: transparent;
-  border-radius: 6px; cursor: pointer; font-size: 12px; color: var(--text-tertiary); transition: all 0.15s;
+  margin-top: 6px; padding: 5px 16px; border: 1px solid rgba(239, 68, 68, 0.25); background: transparent;
+  border-radius: 6px; cursor: pointer; font-size: 12px; color: var(--text-secondary); transition: all 0.15s;
 }
 .retry-btn:hover { background: var(--accent); color: #000; border-color: var(--accent); }
 /* Send failure — user msg turns red + small retry icon */

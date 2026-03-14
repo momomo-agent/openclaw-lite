@@ -569,12 +569,17 @@ export default function ChatView() {
       if (!g) return
       const { sid } = g
 
+      // Sanitize error message: strip IPC wrappers, show friendly text
+      let errMsg = data.error || 'Something went wrong'
+      errMsg = errMsg.replace(/^Error invoking remote method '[^']+': Error: /i, '')
+      errMsg = errMsg.replace(/^Error: /i, '')
+
       routeAdd(sid, {
         id: 'error-' + Date.now(),
         role: 'error' as any,
-        content: data.error || 'An error occurred',
+        content: errMsg,
         timestamp: Date.now(),
-        error: data.error,
+        error: errMsg,
       })
       clearStreamState(sid)
       storeRef.current.setActivity(sid, 'idle')
