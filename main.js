@@ -536,37 +536,30 @@ async function createWindow() {
 
   mainWindow.on('blur', () => {
     _pawWasBlurred = true
+    // Auto-capture full screen when leaving Paw (before another app covers it)
+    // This captures the desktop WITHOUT Paw in front
+    const tmpFile = path.join(require('os').tmpdir(), `paw-capture-${Date.now()}.png`)
+    const { execFile } = require('child_process')
+    execFile('/usr/sbin/screencapture', ['-x', '-C', tmpFile], (err) => {
+      if (err) return
+      try {
+        const buf = fs.readFileSync(tmpFile)
+        _lastScreenCapture = {
+          data: buf.toString('base64'),
+          windowName: '桌面全屏',
+          width: 1920,
+          height: 1080,
+          timestamp: Date.now(),
+        }
+        fs.unlinkSync(tmpFile)
+      } catch {}
+    })
   })
 
   mainWindow.on('focus', () => {
     _unreadCount = 0
     updateTrayTitle()
-
-    // Auto-capture: when switching FROM another app TO Paw, snapshot what was behind
-    if (_pawWasBlurred) {
-      _pawWasBlurred = false
-      desktopCapturer.getSources({
-        types: ['window'],
-        thumbnailSize: { width: 1920, height: 1080 },
-      }).then(sources => {
-        const pawTitles = BrowserWindow.getAllWindows().map(w => w.getTitle())
-        const prev = sources.find(s =>
-          !pawTitles.some(t => s.name.includes(t)) &&
-          s.name !== 'Paw' &&
-          s.name.trim().length > 0
-        )
-        if (prev && !prev.thumbnail.isEmpty()) {
-          _lastScreenCapture = {
-            data: prev.thumbnail.toPNG().toString('base64'),
-            windowName: prev.name,
-            width: prev.thumbnail.getSize().width,
-            height: prev.thumbnail.getSize().height,
-            timestamp: Date.now(),
-          }
-          console.log(`[Paw] Auto-captured: ${prev.name} (${_lastScreenCapture.width}×${_lastScreenCapture.height})`)
-        }
-      }).catch(() => {})
-    }
+    _pawWasBlurred = false
   })
 
   // Expose last screen capture to tools
