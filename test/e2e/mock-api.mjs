@@ -152,8 +152,8 @@ function routeResponse(messages) {
   }
 
   if (lower.includes('reply a')) {
-    // Long response to ensure B and C get queued while A is streaming
-    return makeStreamingResponse('reply A — this is a deliberately long response to ensure that messages B and C arrive while this response is still streaming, so they get properly queued and collected into a single batch response')
+    // Long response to ensure B and C get sent while this is still streaming
+    return makeStreamingResponse('reply A — this is a deliberately long response to ensure that the follow-up messages arrive while this response is still being streamed to the client, so they get properly collected into a single batch and processed together as intended by the architecture')
   }
   if (lower.includes('reply b')) {
     return makeStreamingResponse('reply B')

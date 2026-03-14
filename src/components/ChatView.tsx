@@ -210,19 +210,32 @@ export default function ChatView() {
         match,
       })
       if (!sid) return null
-      // Auto-adopt new requestId when idle (queue drain scenario: main.js starts
-      // processing a queued message, renderer has no active streaming for this session)
-      if ((!ss || !ss.requestId) && data.requestId) {
-        ss = getStreamState(sid)
-        ss.requestId = data.requestId
-        return { sid, ss }
-      }
       if (!ss || !match) return null
       return { sid, ss }
     }
 
+    /** Adopt a new requestId for a session (queue drain: main.js starts processing a queued message) */
+    const adoptRequestId = (sid: string, requestId: string): StreamState => {
+      const ss = getStreamState(sid)
+      ss.requestId = requestId
+      return ss
+    }
+
     const handleTextStart = (data: any) => {
-      const g = guard('text-start', data)
+      let g = guard('text-start', data)
+      
+      // Queue drain scenario: no active streaming for this session, adopt the new requestId
+      if (!g && data.requestId) {
+        const sid = data.sessionId || currentSidRef.current
+        if (sid) {
+          const existing = streamStates.current.get(sid)
+          if (!existing || !existing.requestId) {
+            dbg('text-start (adopt-drain)', { sid: sid.slice(0, 8), reqId: data.requestId.slice(0, 8) })
+            const ss = adoptRequestId(sid, data.requestId)
+            g = { sid, ss }
+          }
+        }
+      }
       if (!g) return
       const { sid, ss } = g
 
