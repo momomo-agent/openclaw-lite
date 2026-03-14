@@ -1485,69 +1485,27 @@ ${roster}
   }
   // Build user content (text + file attachments)
   const userContent = []
-  let fileContext = ''  // text content from non-image files, injected into prompt
+  let fileContext = ''  // paths of non-image files, appended to prompt
 
   if (files?.length) {
     for (const f of files) {
-      // Read file data: from path (desktop drag) or data (paste/upload)
-      let fileBuffer = null
-      let base64 = null
-      let isDirectory = false
-      if (f.path && fs.existsSync(f.path)) {
-        const stat = fs.statSync(f.path)
-        if (stat.isDirectory()) {
-          isDirectory = true
-        } else {
-          fileBuffer = fs.readFileSync(f.path)
-          base64 = fileBuffer.toString('base64')
+      if (f.type?.startsWith('image/')) {
+        // Image → vision API (base64)
+        let base64 = null
+        if (f.path && fs.existsSync(f.path)) {
+          base64 = fs.readFileSync(f.path).toString('base64')
+        } else if (f.data) {
+          base64 = f.data.replace(/^data:[^;]+;base64,/, '')
         }
-      } else if (f.data) {
-        base64 = f.data.replace(/^data:[^;]+;base64,/, '')
-        fileBuffer = Buffer.from(base64, 'base64')
-      }
-
-      if (isDirectory) {
-        // Directory → generate tree (max 3 levels, skip node_modules/.git)
-        const tree = []
-        const skipDirs = new Set(['node_modules', '.git', '.paw', '__pycache__', '.next', 'dist', 'build'])
-        function walkDir(dir, prefix, depth) {
-          if (depth > 3) return
-          try {
-            const entries = fs.readdirSync(dir, { withFileTypes: true })
-              .filter(e => !skipDirs.has(e.name) && !e.name.startsWith('.'))
-              .sort((a, b) => (a.isDirectory() === b.isDirectory() ? a.name.localeCompare(b.name) : a.isDirectory() ? -1 : 1))
-            for (let i = 0; i < entries.length && tree.length < 100; i++) {
-              const e = entries[i]
-              const isLast = i === entries.length - 1
-              const connector = isLast ? '└── ' : '├── '
-              tree.push(`${prefix}${connector}${e.name}${e.isDirectory() ? '/' : ''}`)
-              if (e.isDirectory()) {
-                walkDir(path.join(dir, e.name), prefix + (isLast ? '    ' : '│   '), depth + 1)
-              }
-            }
-          } catch {}
+        if (base64) {
+          userContent.push({ type: 'image', source: { type: 'base64', media_type: f.type, data: base64 } })
         }
-        walkDir(f.path, '', 0)
-        const dirName = path.basename(f.path)
-        fileContext += `\n\n---\n📁 ${dirName}/\n\`\`\`\n${tree.join('\n')}\n\`\`\``
-      } else if (f.type?.startsWith('image/') && base64) {
-        // Image → vision API
-        userContent.push({ type: 'image', source: { type: 'base64', media_type: f.type, data: base64 } })
-      } else if (fileBuffer) {
-        // Text/code file → inject content into prompt context
-        const textExts = ['.txt','.md','.markdown','.js','.ts','.tsx','.jsx','.py','.json','.yaml','.yml','.toml','.css','.html','.xml','.sh','.bash','.zsh','.fish','.rb','.go','.rs','.java','.c','.cpp','.h','.hpp','.swift','.kt','.sql','.env','.gitignore','.conf','.cfg','.ini','.csv','.log']
-        const ext = path.extname(f.name || '').toLowerCase()
-        if (textExts.includes(ext) || !f.type || f.type.startsWith('text/')) {
-          try {
-            const content = fileBuffer.toString('utf8')
-            // Limit to ~50KB to avoid context explosion
-            const truncated = content.length > 50000 ? content.slice(0, 50000) + '\n... (truncated)' : content
-            fileContext += `\n\n---\n📄 ${f.name} (${(f.size / 1024).toFixed(1)}KB)\n\`\`\`${ext.slice(1)}\n${truncated}\n\`\`\``
-          } catch { /* binary file, skip */ }
-        } else {
-          // Unknown binary file — just mention it
-          fileContext += `\n\n---\n📎 ${f.name} (${(f.size / 1024).toFixed(1)}KB, ${f.type || 'unknown type'})`
-        }
+      } else if (f.path) {
+        // Non-image file → just provide the path (LLM can use file_read if needed)
+        const stat = fs.existsSync(f.path) ? fs.statSync(f.path) : null
+        const isDir = stat?.isDirectory()
+        const sizeStr = stat ? `${(stat.size / 1024).toFixed(1)}KB` : ''
+        fileContext += `\n📎 ${isDir ? '📁' : ''} ${f.path}${sizeStr ? ` (${sizeStr})` : ''}`
       }
     }
   }
@@ -1555,7 +1513,10 @@ ${roster}
   // Link understanding - async fetch link summaries (non-blocking)
   let linkContext = ''
   try { linkContext = await extractLinkContext(prompt) } catch {}
-  const contextSuffix = [fileContext, linkContext ? `\n\n---\n[Auto-fetched link context]\n${linkContext}` : ''].filter(Boolean).join('')
+  const contextSuffix = [
+    fileContext ? `\n\n[Attached files]${fileContext}` : '',
+    linkContext ? `\n\n---\n[Auto-fetched link context]\n${linkContext}` : '',
+  ].filter(Boolean).join('')
   const textWithContext = contextSuffix ? `${prompt}${contextSuffix}` : prompt
   userContent.push({ type: 'text', text: textWithContext || '(attached files)' })
   messages.push({ role: 'user', content: userContent })

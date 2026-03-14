@@ -33,7 +33,11 @@ export default function MessageItem({ message, isStreaming, statusText, ownerWor
   const resolvedAvatar = isUser ? (userProfile?.userAvatar || message.avatar) : (ws?.identity?.avatar || message.avatar)
   const resolvedName = (!isUser && ws?.identity?.name) || message.sender
 
-  const renderContent = (text: string) => renderMarkdown(text)
+  const renderContent = (text: string) => {
+    // F203: Highlight @mentions
+    const highlighted = text.replace(/@(\w+)/g, '<span style="background: var(--accent-dim); color: var(--accent); padding: 2px 4px; border-radius: 3px;">@$1</span>')
+    return renderMarkdown(highlighted)
+  }
 
   const attachments = message.attachments
 

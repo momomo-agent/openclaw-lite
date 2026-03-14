@@ -34,6 +34,7 @@ export default function InputBar({ sessionId, onSend, isGroup = false }: InputBa
       setText('')
       setFiles([])
     }
+    setPills([])
     prevSessionId.current = sessionId
   }, [sessionId])
 
@@ -151,12 +152,27 @@ export default function InputBar({ sessionId, onSend, isGroup = false }: InputBa
     onSend(text, files)
     setText('')
     setFiles([])
+    setPills([])
     if (sessionId) drafts.current.delete(sessionId)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // F241: Block send during IME composition
     if (composing.current) return
+
+    // F203: Backspace on pill boundary deletes entire pill
+    if (e.key === 'Backspace' && !mentionOpen) {
+      const pos = textareaRef.current?.selectionStart || 0
+      const pill = pills.find(p => pos === p.end || pos === p.end + 1)
+      if (pill) {
+        e.preventDefault()
+        const newText = text.slice(0, pill.start) + text.slice(pill.end)
+        setText(newText)
+        setPills(prev => prev.filter(p => p.id !== pill.id))
+        setTimeout(() => textareaRef.current?.setSelectionRange(pill.start, pill.start), 0)
+        return
+      }
+    }
 
     if (mentionOpen && filteredMentions.length > 0) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIdx(i => Math.min(i + 1, filteredMentions.length - 1)); return }
@@ -261,6 +277,33 @@ export default function InputBar({ sessionId, onSend, isGroup = false }: InputBa
                   />
                   <span>@{name}</span>
                 </div>
+              )
+            })}
+          </div>
+        )}
+        {/* F203: Pill overlays */}
+        {pills.length > 0 && (
+          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none', padding: '10px 48px 10px 48px' }}>
+            {pills.map(pill => {
+              const ws = workspaces.find(w => (w.identity?.name || w.id) === pill.name)
+              return (
+                <span key={pill.id} style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  background: 'var(--accent-dim)', color: 'var(--accent)',
+                  borderRadius: 4, padding: '2px 6px', fontSize: 13,
+                  position: 'absolute', whiteSpace: 'nowrap'
+                }}>
+                  <img
+                    src={ws?.identity?.avatar?.startsWith('preset:')
+                      ? `../avatars/${ws.identity.avatar.replace('preset:', '')}.png`
+                      : ws?.identity?.avatar?.startsWith('../')
+                      ? ws.identity.avatar
+                      : '../avatars/1.png'}
+                    style={{ width: 16, height: 16, borderRadius: '50%' }}
+                    onError={(e) => { e.currentTarget.src = '../avatars/1.png' }}
+                  />
+                  <span>@{pill.name}</span>
+                </span>
               )
             })}
           </div>

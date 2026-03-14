@@ -751,11 +751,10 @@ export default function ChatView() {
     // Serialize files for IPC (Electron structured clone drops File data)
     const serializedFiles = await Promise.all(files.map(async (f) => {
       const entry: any = { name: f.name, type: f.type, size: f.size }
-      // Desktop-dragged files have .path (Electron-specific)
       if ((f as any).path) {
         entry.path = (f as any).path
-      } else {
-        // Pasted/uploaded files: convert to base64
+      } else if (f.type.startsWith('image/')) {
+        // Only convert images to base64 (for vision API). Other files need a path.
         const buf = await f.arrayBuffer()
         const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)))
         entry.data = `data:${f.type};base64,${b64}`
