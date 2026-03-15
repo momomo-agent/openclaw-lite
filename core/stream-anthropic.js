@@ -125,9 +125,21 @@ async function streamAnthropic(messages, systemPrompt, config, requestId, tools,
     let buf = '', toolCalls = [], curBlock = null
     let roundUsageInput = 0, roundUsageOutput = 0
     let roundThinking = '' // Accumulate thinking for this round (tool group purpose)
+    const STALL_TIMEOUT_MS = 60000 // 60s with no data = stalled
 
     while (true) {
-      const { done, value } = await reader.read()
+      // Race between reader and stall timeout
+      let stallTimer
+      const stallPromise = new Promise((_, reject) => {
+        stallTimer = setTimeout(() => reject(new Error('Stream stalled: no data for 60s')), STALL_TIMEOUT_MS)
+      })
+      let readResult
+      try {
+        readResult = await Promise.race([reader.read(), stallPromise])
+      } finally {
+        clearTimeout(stallTimer)
+      }
+      const { done, value } = readResult
       if (done) break
       buf += decoder.decode(value, { stream: true })
       const lines = buf.split('\n'); buf = lines.pop()

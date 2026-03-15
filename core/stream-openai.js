@@ -91,9 +91,20 @@ async function streamOpenAI(messages, systemPrompt, config, requestId, tools, se
     const decoder = new TextDecoder()
     let buf = '', toolCalls = {}
     let roundUsageInput = 0, roundUsageOutput = 0
+    const STALL_TIMEOUT_MS = 60000
 
     while (true) {
-      const { done, value } = await reader.read()
+      let stallTimer
+      const stallPromise = new Promise((_, reject) => {
+        stallTimer = setTimeout(() => reject(new Error('Stream stalled: no data for 60s')), STALL_TIMEOUT_MS)
+      })
+      let readResult
+      try {
+        readResult = await Promise.race([reader.read(), stallPromise])
+      } finally {
+        clearTimeout(stallTimer)
+      }
+      const { done, value } = readResult
       if (done) break
       buf += decoder.decode(value, { stream: true })
       const lines = buf.split('\n'); buf = lines.pop()

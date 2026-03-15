@@ -196,7 +196,7 @@ function friendlyError(err) {
   if (lower.includes('429') || lower.includes('rate limit') || lower.includes('too many')) {
     return { short: 'Rate limited', detail: 'Too many requests. Wait a moment and try again.', category: 'rate-limit' }
   }
-  if (lower.includes('timeout') || lower.includes('timed out') || lower.includes('etimedout')) {
+  if (lower.includes('timeout') || lower.includes('timed out') || lower.includes('etimedout') || lower.includes('stalled')) {
     return { short: 'Request timed out', detail: 'The server took too long to respond. Try again.', category: 'network' }
   }
   if (lower.includes('econnrefused') || lower.includes('enotfound') || lower.includes('network') || lower.includes('fetch failed')) {
