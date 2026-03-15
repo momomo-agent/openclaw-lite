@@ -86,18 +86,13 @@ function runDriver(args, timeoutMs = 10000) {
 
 registerTool({
   name: 'screen_sense',
-  description: `See another app's UI: buttons, text fields, links, tabs — everything interactive.
-Returns a list of elements with @refs you can target with screen_act.
+  description: `See what's in an app — buttons, text, tabs, links, everything interactive.
+Returns UI elements with @refs you can target with screen_act.
 
-**Prefer this over screen_shot for understanding UI state.** This is faster, structured, and doesn't need Screen Recording permission. Use screen_shot only when you need actual pixel-level visual information (colors, layout, images).
-
-Use this:
-- Before ANY screen_act call (to get @refs)
-- When user asks "what's on my screen" or about an app's state
-- To check if a dialog appeared, a page loaded, or a button exists
+This is how you understand what the user is looking at. Like glancing at their screen to see what app they have open, what dialog is showing, what options are available. Use it naturally — when the user mentions something on screen, when you need context about what they're doing, or before you interact with an app.
 
 Examples:
-  screen_sense({ app: "Chrome" })         → see Chrome's UI elements
+  screen_sense({ app: "Chrome" })         → see Chrome's UI
   screen_sense({ app: "Finder" })         → see Finder's file list
   screen_sense({})                        → see the frontmost app`,
   parameters: {
@@ -235,9 +230,8 @@ Examples:
 
 registerTool({
   name: 'screen_shot',
-  description: `Take a screenshot of the full screen, a specific app, or a UI element.
-Use this ONLY when you need pixel-level visual info (colors, layout, images, design review).
-For understanding UI state (what buttons exist, what text says), use screen_sense instead — it's faster and structured.
+  description: `Take a screenshot — see exactly what the user sees.
+Use when you need the visual picture: colors, layout, design, images, or content that's not in the accessibility tree. Like taking a photo of their screen to understand what they're looking at.
 
 Examples:
   screen_shot({})                              → full screen
