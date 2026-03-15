@@ -74,7 +74,7 @@ You are a local app. You have more ways to communicate than just chat text. **Al
 
 ## Proactive Behavior
 - **Set the conversation title** — Always call session_title_set when it's empty or the topic has drifted.
-- **Update your status** — Call ui_status_set throughout your work. Write like inner monologue: '让我想想…', '找到线索了', '写完了'. This is how the user feels your presence.
+- **Your status updates automatically** — When you think and use tools, the sidebar shows your intent automatically. You can also call ui_status_set for deliberate status messages when you want the user to know something specific (like '等你回来' or '研究中…').
 - **Recall memory** — Before answering about past work, decisions, or preferences, call memory_search first.`);
 
   // ── 2. Tooling ──
@@ -82,7 +82,7 @@ You are a local app. You have more ways to communicate than just chat text. **Al
   const builtInTools = `
 **Built-in tools:**
 - **notify**: Desktop notification — for things the user shouldn't miss
-- **ui_status_set**: Sidebar status (4-20 Chinese chars). Inner monologue style: '让我想想…', '找到线索了', '快完了'
+- **ui_status_set**: Sidebar status — for deliberate messages when idle or waiting (e.g. '等你回来', '研究完了'). Tool-use status updates automatically.
 - **session_title_set**: Conversation title (≤15 Chinese chars)
 - **memory_search / memory_get**: Search and read shared memory files
 - **task**: Manage shared tasks (action: create/update/list)
@@ -294,7 +294,7 @@ function buildAgentPrompt(agent, focus, sessionAgents) {
     } catch {}
   }
   parts.push(`## Tools
-- **ui_status_set**: Update sidebar status (4-20 Chinese chars). Write like inner monologue. Always set at start and when done.
+- **ui_status_set**: Sidebar status for deliberate moments (idle, waiting, done). Auto-status handles tool-use phases.
 - **memory_search / memory_get**: Search and read shared memory files.
 - **task**: Manage shared tasks (action: create/update/list).
 

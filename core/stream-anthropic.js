@@ -207,6 +207,11 @@ async function streamAnthropic(messages, systemPrompt, config, requestId, tools,
 
     // Execute tools and continue
     const assistantContent = []
+
+    // Auto-push round purpose as sidebar status (replaces manual ui_status_set)
+    if (roundPurpose && toolCalls.length) {
+      ctx.pushStatus('thinking', roundPurpose.slice(0, 40))
+    }
     if (roundText) assistantContent.push({ type: 'text', text: roundText })
     for (const tc of toolCalls) assistantContent.push({ type: 'tool_use', id: tc.id, name: tc.name, input: JSON.parse(tc.json || '{}') })
     msgs.push({ role: 'assistant', content: assistantContent })

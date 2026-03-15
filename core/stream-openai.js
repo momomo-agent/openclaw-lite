@@ -195,6 +195,8 @@ async function streamOpenAI(messages, systemPrompt, config, requestId, tools, se
     if (tcList.length > 0) {
       const oaiPurpose = roundText ? roundText.trim().split('\n').pop()?.trim().slice(0, 80) || '' : ''
       ipc('chat-round-info', { requestId, round: round + 1, purpose: oaiPurpose })
+      // Auto-push round purpose as sidebar status
+      if (oaiPurpose) ctx.pushStatus('thinking', oaiPurpose.slice(0, 40))
     }
     ipc('chat-token', { requestId, text: '\n' })
   }

@@ -36,6 +36,8 @@ export default function InputBar({ sessionId, onSend, isGroup = false }: InputBa
     }
     setPills([])
     prevSessionId.current = sessionId
+    // Auto-focus input when switching to a new session
+    setTimeout(() => textareaRef.current?.focus(), 50)
   }, [sessionId])
 
   // F252: Cmd+K focus input
