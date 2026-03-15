@@ -270,6 +270,19 @@ function saveSession(session) {
 function createSession(title, opts) {
   // Resolve target workspace: explicit workspaceId > first participant > active clawDir > first registered
   // IMPORTANT: coding-agent workspaces don't have their own DB, so use the first local workspace instead
+
+  // Ensure non-coding-agent workspace is first (group owner must have personality/SOUL.md)
+  if (opts?.participants?.length > 1) {
+    const sorted = [...opts.participants].sort((a, b) => {
+      const wsA = workspaceRegistry.getWorkspace(a)
+      const wsB = workspaceRegistry.getWorkspace(b)
+      const aIsCoding = wsA?.type === 'coding-agent' ? 1 : 0
+      const bIsCoding = wsB?.type === 'coding-agent' ? 1 : 0
+      return aIsCoding - bIsCoding
+    })
+    opts = { ...opts, participants: sorted }
+  }
+
   let targetWsPath = null
   const wsId = opts?.workspaceId || (opts?.participants && opts.participants[0])
   if (wsId) {
