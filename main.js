@@ -1505,9 +1505,10 @@ function startHeartbeat() {
       }
 
       const msgs = [{ role: 'user', content: prompt }]
-      const hbStreamFn = (c.provider || 'anthropic') === 'anthropic' ? streamAnthropic : streamOpenAI
       const hbRequestId = 'hb-' + Date.now().toString(36)
-      const r = await hbStreamFn(msgs, sp, c, hbRequestId, null, null, null, ctx)
+      const hbProvider = c.provider || 'anthropic'
+      const hbStreamFn = hbProvider === 'anthropic' ? streamAnthropic : streamOpenAI
+      const r = await hbStreamFn(msgs, sp, c, hbRequestId)
 
       // Process response with HEARTBEAT_OK contract
       const alert = processHeartbeatResponse(r?.answer, c.heartbeat?.ackMaxChars)
