@@ -41,6 +41,7 @@ export default function ChatView() {
   const sessionParticipants = currentSession?.participants || []
   const isGroup = sessionParticipants.length > 1
   const ownerWs = sessionParticipants[0] ? workspaces.find(w => w.id === sessionParticipants[0]) : workspaces[0]
+  const isCodingAgentChat = !isGroup && ownerWs?.type === 'coding-agent'
   const sessionTitle = currentSession?.title || (isGroup ? '群聊' : (ownerWs?.identity?.name || ''))
 
   // === Refs for latest values (handlers registered once need current values via refs) ===
@@ -935,6 +936,7 @@ export default function ChatView() {
           </span>
         </div>
         <div className="header-actions">
+          {!isCodingAgentChat && (
           <button className="icon-btn" onClick={() => setShowMembers(!showMembers)} title="成员管理">
             <span className="ic">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -945,6 +947,7 @@ export default function ChatView() {
               </svg>
             </span>
           </button>
+          )}
           <button className="icon-btn" onClick={() => setShowSettings(!showSettings)} title="设置">
             <span className="ic">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
