@@ -2,12 +2,20 @@
  * core/stream-orchestrator.js — Unified streaming engine
  *
  * Provider-agnostic tool loop, usage tracking, stall detection, status push.
- * Providers (Anthropic/OpenAI) implement a parser that emits normalized events.
+ * Providers (Anthropic/OpenAI) implement adapters with normalized events.
  *
- * Architecture:
+ * Architecture (inspired by pi-agent/OpenClaw):
  *   StreamOrchestrator (this file) — round loop, tool execution, state management
- *   AnthropicParser — SSE → normalized events
- *   OpenAIParser — SSE → normalized events
+ *     ≈ pi-agent-core's agentLoop()
+ *   provider-anthropic.js / provider-openai.js — SSE parsing, message formatting
+ *     ≈ pi-ai's provider StreamFunctions
+ *   main.js chat handler — retry, session, persistence
+ *     ≈ openclaw's pi-embedded-runner
+ *
+ * Key design from pi-agent:
+ *   - convertToLlm: message format conversion separated from business logic
+ *   - getSteeringMessages: inject directives mid-tool-execution
+ *   - getFollowUpMessages: continue after agent would otherwise stop
  */
 const { LoopDetector } = require('./loop-detection')
 const eventBus = require('./event-bus')
@@ -17,7 +25,7 @@ const SILENT_TOOLS = new Set(['ui_status_set', 'notify', 'delegate_to', 'stay_si
 
 /**
  * @typedef {Object} StreamEvent
- * @property {'text'|'thinking'|'tool_start'|'tool_delta'|'tool_end'|'usage'|'done'} type
+ * @property {'text'|'thinking'|'tool_start'|'tool_delta'|'tool_end'|'usage'} type
  * @property {string} [text]       — for text/thinking events
  * @property {Object} [tool]       — for tool_start: { id, name }
  * @property {string} [json]       — for tool_delta: partial JSON
@@ -26,18 +34,47 @@ const SILENT_TOOLS = new Set(['ui_status_set', 'notify', 'delegate_to', 'stay_si
 
 /**
  * @typedef {Object} ProviderAdapter
+ * @property {string}   name             — 'anthropic' | 'openai'
+ * @property {function} initMessages     — (messages, systemPrompt, config, ctx) => provider-format messages
+ *                                          ≈ pi-agent's convertToLlm: converts app messages to LLM format
  * @property {function} prepareRequest   — (round, msgs, system, tools, config, ctx) => { url, headers, body }
  * @property {function} parseSSE         — (line: string, state: Object) => StreamEvent[]
  * @property {function} buildAssistantMsg — (roundText, toolCalls) => message object for transcript
  * @property {function} buildToolResult  — (toolCallId, content) => message object for transcript
- * @property {function} handleError      — (status, body, ctx, msgs) => { retry: boolean } or throws
- * @property {string}   name             — 'anthropic' | 'openai'
+ * @property {function} appendToolResults — (msgs, toolResultMsgs) => void
+ * @property {function} handleError      — (status, body, ctx, msgs, ipc, requestId, config) => { retry } | null
+ * @property {function} [buildToolResultWithImage] — (toolCallId, result, ctx) => message with image
+ */
+
+/**
+ * @typedef {Object} StreamOptions
+ * @property {function} [getSteeringMessages] — () => AgentMessage[] | null
+ *   Called after each tool execution to check for user interruptions/steering.
+ *   If messages are returned, remaining tool calls are skipped and these messages
+ *   are injected before the next LLM call.
+ *   ≈ pi-agent-core's getSteeringMessages()
+ *
+ * @property {function} [getFollowUpMessages] — () => AgentMessage[] | null
+ *   Called when the agent has no more tool calls and would otherwise stop.
+ *   If messages are returned, they're added to context and the agent continues.
+ *   ≈ pi-agent-core's getFollowUpMessages()
  */
 
 /**
  * Main streaming function — provider-agnostic.
+ *
+ * @param {Array} messages — conversation history (app format)
+ * @param {string} systemPrompt
+ * @param {Object} config — provider config (model, baseUrl, apiKey, etc.)
+ * @param {string} requestId — unique request identifier for IPC routing
+ * @param {Array} tools — tool definitions (Anthropic format)
+ * @param {string} sessionId — session identifier for IPC scoping
+ * @param {Object} wsIdentity — workspace identity (name, avatar)
+ * @param {Object} ctx — shared context with cross-cutting deps
+ * @param {ProviderAdapter} adapter — provider-specific implementation
+ * @param {StreamOptions} [options] — optional hooks for steering/followup
  */
-async function streamChat(messages, systemPrompt, config, requestId, tools, sessionId, wsIdentity, ctx, adapter) {
+async function streamChat(messages, systemPrompt, config, requestId, tools, sessionId, wsIdentity, ctx, adapter, options = {}) {
   ctx._activeRequestId = requestId
   ctx._activeAbortController = new AbortController()
 
@@ -54,10 +91,13 @@ async function streamChat(messages, systemPrompt, config, requestId, tools, sess
   const activeTools = tools || ctx.getToolsWithMcp()
   let fullText = ''
   let flowSteps = []
-  const msgs = adapter.initMessages ? adapter.initMessages(messages, systemPrompt, config, ctx) : [...messages]
+  // Convert app messages to LLM format via adapter (≈ pi-agent's convertToLlm)
+  const msgs = adapter.initMessages
+    ? adapter.initMessages(messages, systemPrompt, config, ctx)
+    : [...messages]
   const loopDetector = new LoopDetector()
 
-  // Usage accumulator
+  // Usage accumulator (matches OpenClaw's UsageAccumulator pattern)
   let totalUsage = { inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0 }
   let lastUsage = { inputTokens: 0, cacheRead: 0, cacheWrite: 0 }
 
@@ -82,7 +122,6 @@ async function streamChat(messages, systemPrompt, config, requestId, tools, sess
 
     if (!res.ok) {
       const errText = await res.text()
-      // Let adapter handle (may retry with compaction)
       const handled = await adapter.handleError(res.status, errText, ctx, msgs, ipc, requestId, config)
       if (handled && handled.retry) {
         round--
@@ -98,9 +137,9 @@ async function streamChat(messages, systemPrompt, config, requestId, tools, sess
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let buf = ''
-    const toolCalls = []  // [{ id, name, json }]
+    const toolCalls = []
     let roundUsage = { inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0 }
-    const parseState = { curTool: null }  // Shared mutable state for parser
+    const parseState = { curTool: null }
 
     while (true) {
       let stallTimer
@@ -165,8 +204,20 @@ async function streamChat(messages, systemPrompt, config, requestId, tools, sess
     // Persist thinking
     if (roundThinking) flowSteps.push({ name: '__thinking__', output: roundThinking })
 
-    // No tool calls → done
+    // No tool calls → check for follow-up messages before ending
     if (!toolCalls.length) {
+      // ≈ pi-agent-core's getFollowUpMessages: continue if there's more to process
+      if (options.getFollowUpMessages) {
+        const followUp = options.getFollowUpMessages()
+        if (followUp && followUp.length > 0) {
+          console.log(`[Paw] follow-up messages injected: ${followUp.length}`)
+          msgs.push(...followUp)
+          fullText += '\n'
+          ipc('chat-token', { requestId, text: '\n' })
+          continue  // Start a new round with follow-up messages
+        }
+      }
+
       ctx.pushStatus('done', 'Done')
       console.log(`[Paw] stream ${adapter.name} done, fullText length: ${fullText.length}`)
       clearTimeout(timeoutId)
@@ -196,11 +247,25 @@ async function streamChat(messages, systemPrompt, config, requestId, tools, sess
     const assistantMsg = adapter.buildAssistantMsg(roundText, toolCalls)
     msgs.push(assistantMsg)
 
-    // Execute tools
-    let loopBlocked = false
+    // Execute tools — with steering check between each tool
+    let steered = false
     const toolResultMsgs = []
 
     for (const tc of toolCalls) {
+      // ≈ pi-agent-core's getSteeringMessages: check for user interruptions
+      if (options.getSteeringMessages && !steered) {
+        const steering = options.getSteeringMessages()
+        if (steering && steering.length > 0) {
+          console.log(`[Paw] steering interrupt: skipping remaining ${toolCalls.length - toolResultMsgs.length} tool calls`)
+          // Add results for tools already executed
+          adapter.appendToolResults(msgs, toolResultMsgs)
+          // Inject steering messages
+          msgs.push(...steering)
+          steered = true
+          break  // Skip remaining tool calls, start new LLM round
+        }
+      }
+
       let input = {}
       try { input = JSON.parse(tc.json || '{}') } catch {}
 
@@ -211,7 +276,6 @@ async function streamChat(messages, systemPrompt, config, requestId, tools, sess
         ipc('chat-tool-step', { requestId, name: tc.name, input, output: loopCheck.reason })
         flowSteps.push({ name: tc.name, input, output: loopCheck.reason })
         toolResultMsgs.push(adapter.buildToolResult(tc.id, loopCheck.reason))
-        loopBlocked = true
         continue
       }
       if (loopCheck.warning) console.warn(`[Paw] ${loopCheck.reason}`)
@@ -246,8 +310,10 @@ async function streamChat(messages, systemPrompt, config, requestId, tools, sess
       toolResultMsgs.push(adapter.buildToolResult(tc.id, toolResultContent))
     }
 
-    // Add tool results to transcript
-    adapter.appendToolResults(msgs, toolResultMsgs)
+    // If steered, skip normal tool result append (already done above)
+    if (!steered) {
+      adapter.appendToolResults(msgs, toolResultMsgs)
+    }
 
     // Send round info to renderer
     if (toolCalls.length > 0) {
