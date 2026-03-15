@@ -145,6 +145,7 @@ const { streamAnthropic } = require('./core/stream-anthropic')
 const { streamOpenAI } = require('./core/stream-openai')
 const { handleDelegateTo } = require('./core/delegate')
 const { loadCCSessions: _loadCCSessions, routeToCodingAgent, streamCodingAgent } = require('./core/coding-agent-router')
+const { buildConversationHistory, buildUserContent, injectGroupChatContext, injectTeammateContext, buildFailoverList } = require('./core/chat-pipeline')
 
 // Legacy globals - kept for backward compat, synced to state via syncState()
 let mainWindow
@@ -1385,132 +1386,27 @@ async function _runChat({ prompt, files, agentId, sessionId, requestId, focus, t
     systemPrompt = agent.soul + '\n\n---\n\n' + systemPrompt
   }
 
-  // Inject participant context + group chat orchestrator
+  // Inject participant context + group chat orchestrator (M36: extracted to chat-pipeline)
   const _sessionDb = resolveSessionDb(sessionId)
   let _isGroupChat = false
-  if (sessionId && _sessionDb) {
-    try {
-      const participants = sessionStore.getSessionParticipants(_sessionDb, sessionId)
-      const participantInfos = participants.map(pid => {
-        const w = workspaceRegistry.getWorkspace(pid)
-        const typeHint = w?.type === 'coding-agent' ? ` (coding agent — ${w.engine || 'code'})` : ''
-        return { id: pid, name: w?.identity?.name || pid, description: (w?.identity?.description || '') + typeHint }
-      })
-      const ownerWsId = targetWorkspaceId || participants[0]
-      const ownerWs = workspaceRegistry.getWorkspace(ownerWsId)
-      const myName = ownerWs?.identity?.name || 'Assistant'
+  const groupResult = injectGroupChatContext({
+    systemPrompt, sessionId, sessionDb: _sessionDb, sessionStore, workspaceRegistry,
+    targetWorkspaceId, DELEGATE_TO_TOOL, STAY_SILENT_TOOL,
+  })
+  systemPrompt = groupResult.systemPrompt
+  _isGroupChat = groupResult.isGroupChat
+  if (groupResult.extraTools.length) chatTools = [...chatTools, ...groupResult.extraTools]
 
-      if (participants.length > 1) {
-        _isGroupChat = true
-        const roster = participantInfos.map(p => `- **${p.name}**${p.description ? ': ' + p.description : ''}`).join('\n')
-        systemPrompt += `\n\n---\n\n## Group Chat — You Are the Orchestrator
-You are **${myName}**, the owner of this group chat.
+  // F046: Inject other agents' recent messages for visibility (M36: extracted)
+  systemPrompt = injectTeammateContext(systemPrompt, { agent, sessionId, sessionDb: _sessionDb, sessionStore })
 
-### Current Participants (authoritative — ignore historical references to removed members)
-${roster}
-
-### Rules
-1. **User mentions another participant** → call \`delegate_to\`.
-2. **User talks to you or sends a general message** → respond yourself.
-3. **After delegate_to** → call \`delegate_to\` again, add genuine context, or call \`stay_silent\`.
-4. **Never restate or summarize** what a delegate just said.
-5. **Removed members are gone.** Do NOT delegate to or mention them as active.
-6. **Untitled session** → call \`session_title_set\` to set a title.`
-        chatTools = [...chatTools, DELEGATE_TO_TOOL, STAY_SILENT_TOOL]
-      } else if (participants.length === 1) {
-        systemPrompt += `\n\n---\n\nYou are **${myName}**. This is a private conversation between you and the user. No other participants are present.`
-      }
-    } catch {}
-  }
-
-  // F046: Inject other agents' recent messages for visibility
-  if (agent && sessionId && _sessionDb) {
-    try {
-      const session = sessionStore.loadSession(_sessionDb, sessionId)
-      if (session?.messages?.length) {
-        const otherMsgs = session.messages
-          .filter(m => m.role === 'assistant' && m.sender && m.sender !== agent.name)
-          .slice(-10)
-          .map(m => `[Teammate ${m.sender}]: ${(m.content || '').slice(0, 200)}`)
-        if (otherMsgs.length) {
-          systemPrompt += '\n\n---\n\n## Teammate Context\n' + otherMsgs.join('\n')
-        }
-      }
-    } catch {}
-  }
-
-  // Build messages — rawMessages (pre-filtered independent context) takes priority
-  const messages = []
-  if (rawMessages?.length) {
-    messages.push(...rawMessages)
-  } else if (history?.length) {
-    // Group chat: load from DB to get sender metadata
-    const participants = sessionId && _sessionDb ? sessionStore.getSessionParticipants(_sessionDb, sessionId) : []
-    const isGroupChat = participants.length > 1
-    if (isGroupChat && sessionId && _sessionDb) {
-      // Load full session to get sender info per message
-      const fullSession = sessionStore.loadSession(_sessionDb, sessionId)
-      if (fullSession?.messages?.length) {
-        for (const m of fullSession.messages) {
-          if (m.role === 'user') {
-            messages.push({ role: 'user', content: m.content })
-          } else if (m.role === 'assistant') {
-            // Annotate who said it so the current responder knows
-            const senderLabel = m.sender && m.sender !== 'Assistant' ? `[${m.sender}]: ` : ''
-            messages.push({ role: 'assistant', content: senderLabel + (m.content || '') })
-          }
-        }
-      }
-    } else {
-      for (const h of history) {
-        messages.push({ role: 'user', content: h.prompt })
-        if (h.answer && h.answer.trim()) {
-          messages.push({ role: 'assistant', content: h.answer })
-        }
-      }
-    }
-  } else if (sessionId && _sessionDb) {
-    // React path: no history sent, load conversation from SQLite
-    const wsPath = _sessionDb
-    const savedSession = sessionStore.loadSession(wsPath, sessionId)
-    if (savedSession?.messages?.length) {
-      for (const m of savedSession.messages) {
-        if (m.role === 'user') {
-          messages.push({ role: 'user', content: m.content })
-        } else if (m.role === 'assistant') {
-          // Group chat: annotate sender so orchestrator knows who said what
-          const senderLabel = _isGroupChat && m.sender && m.sender !== 'Assistant' ? `[${m.sender}]: ` : ''
-          messages.push({ role: 'assistant', content: senderLabel + (m.content || '') })
-        }
-      }
-    }
-  }
-  // Build user content (text + file attachments)
-  const userContent = []
-  let fileContext = ''  // paths of non-image files, appended to prompt
-
-  if (files?.length) {
-    for (const f of files) {
-      if (f.type?.startsWith('image/')) {
-        // Image → vision API (base64)
-        let base64 = null
-        if (f.path && fs.existsSync(f.path)) {
-          base64 = fs.readFileSync(f.path).toString('base64')
-        } else if (f.data) {
-          base64 = f.data.replace(/^data:[^;]+;base64,/, '')
-        }
-        if (base64) {
-          userContent.push({ type: 'image', source: { type: 'base64', media_type: f.type, data: base64 } })
-        }
-      } else if (f.path) {
-        // Non-image file → just provide the path (LLM can use file_read if needed)
-        const stat = fs.existsSync(f.path) ? fs.statSync(f.path) : null
-        const isDir = stat?.isDirectory()
-        const sizeStr = stat ? `${(stat.size / 1024).toFixed(1)}KB` : ''
-        fileContext += `\n📎 ${isDir ? '📁' : ''} ${f.path}${sizeStr ? ` (${sizeStr})` : ''}`
-      }
-    }
-  }
+  // Build messages (M36: extracted to chat-pipeline)
+  const messages = buildConversationHistory({
+    rawMessages, history, sessionId, sessionDb: _sessionDb,
+    isGroupChat: _isGroupChat, sessionStore,
+  })
+  // Build user content (M36: extracted to chat-pipeline)
+  const { userContent, fileContext } = buildUserContent(prompt, files)
 
   // Link understanding - async fetch link summaries (non-blocking)
   let linkContext = ''
@@ -1568,18 +1464,8 @@ ${roster}
     console.warn('[context-sensing] failed:', err.message)
   }
 
-  // Model fallback list with cooldown management
-  const fallbacks = config.fallbackModels || []
-  const modelsToTry = [{ model, provider }, ...fallbacks.map(f => {
-    const p = f.includes('/') ? f.split('/')[0] : provider
-    const m = f.includes('/') ? f.split('/').slice(1).join('/') : f
-    return { model: m, provider: p }
-  })].filter(t => failoverManager.isAvailable(t.model))
-
-  // If all models are in cooldown, try the primary anyway
-  if (modelsToTry.length === 0) {
-    modelsToTry.push({ model, provider })
-  }
+  // Model fallback list (M36: extracted to chat-pipeline)
+  const modelsToTry = buildFailoverList(model, provider, config, failoverManager)
 
   // Resolve workspace identity for streaming events (dynamic avatar/name)
   const _wsPath = getSessionWorkspacePath(targetWorkspaceId || null)
