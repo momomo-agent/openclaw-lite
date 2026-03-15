@@ -1070,34 +1070,39 @@
     "title": "Coding Agent Participant 数据模型",
     "milestone": "M38",
     "priority": "P0",
-    "passes": false
+    "passes": false,
+    "description": "Coding Agent 作为对话参与者的数据模型设计"
   },
   {
     "id": "F256",
     "title": "消息路由支持 Coding Agent",
     "milestone": "M38",
     "priority": "P0",
-    "passes": false
+    "passes": false,
+    "description": "消息发送路由到 Coding Agent 而非 LLM"
   },
   {
     "id": "F257",
     "title": "新建对话 — Coding Agent 入口",
     "milestone": "M38",
     "priority": "P0",
-    "passes": false
+    "passes": false,
+    "description": "新建对话时可选 Coding Agent"
   },
   {
     "id": "F258",
     "title": "成员管理 — 添加 Coding Agent",
     "milestone": "M38",
     "priority": "P0",
-    "passes": false
+    "passes": false,
+    "description": "对话中添加/移除 Coding Agent 成员"
   },
   {
     "id": "F259",
     "title": "清理旧 CC 面板",
     "milestone": "M38",
     "priority": "P0",
-    "passes": false
+    "passes": false,
+    "description": "删除 vanilla JS 时代的 Claude Code 独立面板"
   }
 ]
