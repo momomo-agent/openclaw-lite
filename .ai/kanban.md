@@ -22,24 +22,24 @@
 
 ---
 
-## 下一个：M35 — 存储统一
+## 已完成：M35 — 存储统一 + 体验优化 ✅
 
 ### P0 存储统一
 | Feature | 状态 | 说明 |
 |---------|------|------|
-| F200 全局配置迁移到 ~/.paw/ | ⬜ 待做 | settings.json / workspaces.json / prefs.json / user-avatar 全部移到 ~/.paw/ |
-| F201 启动自动迁移 | ⬜ 待做 | 检测旧路径，自动迁移到 ~/.paw/，一次性 |
-| F202 Session 存储归属 | ⬜ 待做 | 每个 workspace 各自存 .paw/sessions.db |
-| F203 @mention 自动补全 | ⬜ 待做 | 输入 @ 弹出参与者列表，模糊搜索 |
-| F204 工具调用显示优化 | ⬜ 待做 | 折叠状态一句话概括 |
-| F205 Workspace 管理 | ⬜ 待做 | 添加已有文件夹 / 创建新 workspace / 删除 |
-| F206 Coding Agent 管理 | ⬜ 待做 | 选引擎 + 项目文件夹 |
-| F207 新建对话页修正 | ⬜ 待做 | Workspace 和 CA 分开展示 |
-| F208 冷启动页 | ⬜ 待做 | 首次启动引导 |
-| F209 错误消息持久化 | ⬜ 待做 | 错误信息存入 messages 表 |
-| F210 输入框/附件跟随对话 | ⬜ 待做 | 切换 session 保存草稿 |
-| F211 回复失败重试 | ⬜ 待做 | 重试按钮 |
-| F212 Cmd+Shift+S 切换侧边栏 | ⬜ 待做 | 快捷键 |
+| F200 全局配置迁移到 ~/.paw/ | ✅ 完成 | GLOBAL_DIR 已指向 ~/.paw/ |
+| F201 启动自动迁移 | ✅ 完成 | coding-agents.json 自动迁移 |
+| F202 Session 存储归属 | ✅ 完成 | 每个 workspace 各自 .paw/sessions.db |
+| F203 @mention 自动补全 | ✅ 完成 | 群聊 @ 触发下拉，fuzzy 匹配，pill token |
+| F204 工具调用显示优化 | ✅ 完成 | ToolGroup 折叠/展开 |
+| F205 Workspace 管理 | ✅ 完成 | workspace-add/remove/create IPC |
+| F206 Coding Agent 管理 | ✅ 完成 | SettingsPanel + NewChatSelector |
+| F207 新建对话页修正 | ✅ 完成 | NewChatSelector 498 行 |
+| F208 冷启动页 | ✅ 完成 | SetupScreen 245 行 |
+| F209 错误消息持久化 | ✅ 完成 | isError 存 metadata，重启后可见 + 重试 |
+| F210 输入框/附件跟随对话 | ✅ 完成 | InputBar drafts Map |
+| F211 回复失败重试 | ✅ 完成 | MessageItem retry 按钮 |
+| F212 Cmd+Shift+S 切换侧边栏 | ✅ 完成 | Sidebar 快捷键 |
 
 ---
 
@@ -47,6 +47,7 @@
 
 | 里程碑 | 描述 | 状态 |
 |--------|------|------|
+| M35 | 存储统一 + 体验优化 | ✅ |
 | M34 | UI Polish + React 迁移 | ✅ |
 | M33 | Skill Creator + MCP + Cron 对齐 OpenClaw | ✅ |
 | M32 | 多 Workspace IM 体验 | ✅ |
