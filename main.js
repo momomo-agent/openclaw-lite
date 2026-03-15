@@ -1196,6 +1196,12 @@ function finishChat(sessionId, requestId, assistantText, wsIdentity, toolSteps, 
       }
     }
   }
+  // ── Error message persistence ──
+  if (wsPath && isError && assistantText) {
+    sessionStore.appendMessage(wsPath, sessionId, {
+      role: 'assistant', content: assistantText, timestamp: Date.now(), isError: true,
+    })
+  }
   eventBus.dispatch('chat-done', { requestId, sessionId, error: isError ? assistantText : undefined })
   // Unread count: increment when window not focused
   if (!isError && mainWindow && !mainWindow.isFocused()) {
@@ -1531,7 +1537,10 @@ ${roster}
   try {
     const ctx_sensing = await gatherContext()
     if (ctx_sensing?.text) {
+      console.log('[context-sensing] injected:', ctx_sensing.text.slice(0, 100))
       systemPrompt += ctx_sensing.text
+    } else {
+      console.log('[context-sensing] no context gathered')
     }
   } catch (err) {
     console.warn('[context-sensing] failed:', err.message)

@@ -559,8 +559,8 @@ export default function ChatView() {
           console.warn('[ChatView] handleDone: DB returned 0 messages — keeping existing UI messages')
           return
         }
-        // Error handling — show error card (user message stays normal, it was "sent" successfully)
-        if (data.error) {
+        // Error handling — fallback for edge cases where DB save failed
+        if (data.error && !dbMessages.some((m: any) => m.isError)) {
           let errMsg = data.error
           errMsg = errMsg.replace(/^Error invoking remote method '[^']+': Error: /i, '')
           errMsg = errMsg.replace(/^Error: /i, '')
