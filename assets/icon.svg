@@ -17,18 +17,25 @@
         <feMergeNode in="SourceGraphic"/>
       </feMerge>
     </filter>
+    <!-- macOS icon drop shadow -->
+    <filter id="icon-shadow" x="-10%" y="-5%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="rgba(0,0,0,0.35)"/>
+    </filter>
   </defs>
 
-  <!-- Background -->
-  <rect width="1024" height="1024" rx="228" fill="url(#bg)"/>
-  <rect x="3" y="3" width="1018" height="1018" rx="226" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="1.5"/>
+  <!-- macOS icon: 824x824 content area centered in 1024x1024 canvas -->
+  <!-- Inset: 100px each side (top slightly less for visual center) -->
+  <g filter="url(#icon-shadow)">
+    <rect x="100" y="90" width="824" height="824" rx="185" fill="url(#bg)"/>
+    <rect x="103" y="93" width="818" height="818" rx="183" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="1.5"/>
+  </g>
 
-  <!-- Paw print — scaled up, centered -->
-  <g transform="translate(512, 530) scale(1.3)" filter="url(#soft-glow)">
+  <!-- Paw print — centered in the 824x824 area -->
+  <g transform="translate(512, 510) scale(1.15)" filter="url(#soft-glow)">
     <!-- Main pad -->
     <ellipse cx="0" cy="55" rx="115" ry="100" fill="url(#paw)" opacity="0.95"/>
     
-    <!-- Four toes — spread wider -->
+    <!-- Four toes -->
     <ellipse cx="-120" cy="-55" rx="48" ry="58" transform="rotate(-12, -120, -55)" fill="url(#paw)" opacity="0.92"/>
     <ellipse cx="-42" cy="-120" rx="44" ry="54" transform="rotate(-5, -42, -120)" fill="url(#paw)" opacity="0.92"/>
     <ellipse cx="48" cy="-120" rx="44" ry="54" transform="rotate(5, 48, -120)" fill="url(#paw)" opacity="0.92"/>
@@ -36,5 +43,5 @@
   </g>
 
   <!-- Subtle top highlight -->
-  <ellipse cx="512" cy="300" rx="260" ry="140" fill="white" opacity="0.015"/>
+  <ellipse cx="512" cy="290" rx="240" ry="120" fill="white" opacity="0.015"/>
 </svg>
