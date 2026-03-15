@@ -30,36 +30,55 @@
 
 ## 架构方向
 
-### 方向 1：Streaming 统一层（最高优先级）
+### 方向 1：Streaming 统一层（✅ 已完成 — 2a7249f）
 
 **目标：** 一套 streaming 核心循环，provider 只负责协议解析。
 
+**参考：** pi-agent/OpenClaw 的三层架构：
+- **pi-ai** — 最底层 LLM 调用，每个 provider 实现 `StreamFunction`，SSE → 统一 `AssistantMessageEvent` 流
+- **pi-agent-core** — 中间层 `agentLoop()`，管 tool loop + context + steering
+- **openclaw** — 最上层 `pi-embedded-runner`，管 retry/failover/compaction/usage/session
+
+Paw 对应关系：
+- `stream-orchestrator.js` ≈ pi-agent-core 的 `agentLoop`
+- `provider-anthropic.js` / `provider-openai.js` ≈ pi-ai 的各 provider
+- main.js 的 chat handler ≈ openclaw 的 `pi-embedded-runner`
+
+当前与 pi-agent 的差距（后续可改进）：
+1. pi-ai 的 provider 返回 `EventStream`（async iterator），Paw 还是 parseSSE 回调
+2. pi-agent-core 的 `convertToLlm` 把消息格式转换和 LLM 调用分离，Paw 混在 adapter 里
+3. pi-agent 支持 `getSteeringMessages()` 和 `getFollowUpMessages()`，Paw 还没有
+
 ```
                   ┌─────────────────────────┐
-                  │    StreamOrchestrator    │
+                  │    StreamOrchestrator    │   ← core/stream-orchestrator.js
                   │                         │
-                  │  - roundText/fullText   │
-                  │  - tool loop            │
+                  │  - round loop           │
+                  │  - tool execution       │
                   │  - usage tracking       │
                   │  - stall detection      │
                   │  - status push          │
                   │  - loop detection       │
                   └──────┬──────────────────┘
-                         │ uses
+                         │ adapter pattern
               ┌──────────┴──────────┐
               │                     │
     ┌─────────▼──────┐   ┌─────────▼──────┐
-    │ AnthropicParser │   │  OpenAIParser  │
-    │                 │   │                │
-    │ SSE → events    │   │ SSE → events   │
-    │ tool_use blocks │   │ function_call  │
+    │ provider-       │   │ provider-       │
+    │ anthropic.js    │   │ openai.js       │
+    │                 │   │                 │
+    │ prepareRequest  │   │ prepareRequest  │
+    │ parseSSE        │   │ parseSSE        │
+    │ buildMessages   │   │ buildMessages   │
     └─────────────────┘   └────────────────┘
 ```
 
-**收益：**
-- Bug 修一次，两个 provider 都修好
-- 新 provider（Gemini、本地模型）加一个 Parser 就行
-- 测试只需测 StreamOrchestrator
+**已完成：** 2026-03-15, commit 2a7249f
+- stream-orchestrator.js (300行) — 通用轮循环
+- provider-anthropic.js (200行) — Anthropic 适配器
+- provider-openai.js (180行) — OpenAI 适配器
+- stream-anthropic.js + stream-openai.js 变成 10 行 wrapper
+- 向后兼容，main.js 不需要改
 
 ### 方向 2：main.js 分层（高优先级）
 
