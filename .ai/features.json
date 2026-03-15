@@ -522,14 +522,14 @@
     "id": "F100",
     "category": "ux",
     "description": "Scrollbar 美化 + 防水平溢出",
-    "passes": false,
+    "passes": true,
     "milestone": "M23"
   },
   {
     "id": "F101",
     "category": "ux",
     "description": "未读消息计数（menubar badge）",
-    "passes": false,
+    "passes": true,
     "milestone": "M23"
   },
   {
@@ -1046,9 +1046,10 @@
   {
     "id": "F231",
     "category": "ux",
-    "description": "React: 导出 + 新建对话选择器",
-    "passes": false,
-    "milestone": "M36"
+    "description": "新建对话选择器",
+    "passes": true,
+    "milestone": "M36",
+    "title": "React: 新建对话选择器"
   },
   {
     "id": "F232",

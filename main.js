@@ -792,24 +792,6 @@ ipcMain.handle('message-update-meta', (_, { sessionId, messageId, fields }) => {
   if (wsPath) sessionStore.updateMessageMeta(wsPath, sessionId, messageId, fields)
   return true
 })
-ipcMain.handle('session-export', (_, id) => {
-  const s = loadSession(id)
-  if (!s) return null
-  let md = `# ${s.title}\n\n`
-  for (const m of s.messages) md += `**${m.role === 'user' ? 'You' : 'Assistant'}:**\n${m.content}\n\n---\n\n`
-  return md
-})
-
-ipcMain.handle('write-export', (_, filename, content) => {
-  if (!clawDir) return false
-  const exportDir = path.join(clawDir, '.paw', 'exports')
-  fs.mkdirSync(exportDir, { recursive: true })
-  const p = path.join(exportDir, filename)
-  fs.writeFileSync(p, content)
-  shell.openPath(exportDir)
-  return true
-})
-
 // ── IPC: Agents ──
 
 ipcMain.handle('agents-list', () => listAgents())
