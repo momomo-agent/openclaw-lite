@@ -480,6 +480,7 @@ async function createWindow() {
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 21, y: 21 },
     vibrancy: 'sidebar',
+    icon: path.join(__dirname, 'assets', 'icon.icns'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -610,6 +611,12 @@ app.whenReady().then(() => {
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
   createWindow()
+
+  // Set dock icon (dev mode — packaged app uses build.icon from package.json)
+  const appIconPath = path.join(__dirname, 'assets', 'icon.icns')
+  if (app.dock && fs.existsSync(appIconPath)) {
+    app.dock.setIcon(nativeImage.createFromPath(appIconPath))
+  }
 
   // Tray icon - AI Native menubar presence
   const trayIconPath = path.join(__dirname, 'assets', 'trayTemplate.png')
