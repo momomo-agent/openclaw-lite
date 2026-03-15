@@ -58,74 +58,9 @@ const { SessionExpiry } = require('./core/session-expiry')
 const failoverManager = new FailoverManager()
 let _lastAnthropicCallTime = 0
 
-// Tool result truncation — OpenClaw-aligned: head+tail, preserves error info at tail
-const TOOL_RESULT_MAX_SHARE = 0.3       // Max 30% of context window per result
-const TOOL_RESULT_HARD_MAX = 400000     // Hard cap even for large context windows
-const TOOL_RESULT_MIN_KEEP = 2000       // Always keep at least this much
-const TRUNCATION_SUFFIX = '\n\n⚠️ [Content truncated — original was too large. Use offset/limit to read smaller chunks.]'
-const MIDDLE_OMISSION = '\n\n⚠️ [... middle content omitted — showing head and tail ...]\n\n'
-
-// API error classification — OpenClaw-aligned
-function isContextOverflowError(status, body) {
-  if (status === 400) {
-    const lower = (body || '').toLowerCase()
-    return lower.includes('context') || lower.includes('too many tokens') ||
-      lower.includes('maximum context length') || lower.includes('prompt is too long')
-  }
-  return false
-}
-
-function isBillingError(status, body) {
-  return status === 402 || (status === 400 && (body || '').toLowerCase().includes('billing'))
-}
-
-// Anthropic magic string scrub — prevent refusal test injection
-const ANTHROPIC_MAGIC = 'ANTHROPIC_MAGIC_STRING_TRIGGER_REFUSAL'
-function scrubMagicStrings(text) {
-  if (!text || !text.includes(ANTHROPIC_MAGIC)) return text
-  return text.replaceAll(ANTHROPIC_MAGIC, 'ANTHROPIC MAGIC STRING (redacted)')
-}
-
-function hasImportantTail(text) {
-  const tail = text.slice(-2000).toLowerCase()
-  return /\b(error|exception|failed|fatal|traceback|panic|errno|exit code)\b/.test(tail)
-    || /\}\s*$/.test(tail.trim())
-    || /\b(total|summary|result|complete|finished|done)\b/.test(tail)
-}
-
-function calculateMaxToolResultChars(contextWindowTokens) {
-  const maxTokens = Math.floor((contextWindowTokens || 200000) * TOOL_RESULT_MAX_SHARE)
-  return Math.min(maxTokens * 4, TOOL_RESULT_HARD_MAX)
-}
-
-function truncateToolResult(result, contextWindowTokens) {
-  const s = String(result)
-  const maxChars = calculateMaxToolResultChars(contextWindowTokens)
-  if (s.length <= maxChars) return s
-
-  const budget = Math.max(TOOL_RESULT_MIN_KEEP, maxChars - TRUNCATION_SUFFIX.length)
-
-  // Head+tail strategy if tail has important content (errors, summaries)
-  if (hasImportantTail(s) && budget > TOOL_RESULT_MIN_KEEP * 2) {
-    const tailBudget = Math.min(Math.floor(budget * 0.3), 4000)
-    const headBudget = budget - tailBudget - MIDDLE_OMISSION.length
-    if (headBudget > TOOL_RESULT_MIN_KEEP) {
-      let headCut = headBudget
-      const headNl = s.lastIndexOf('\n', headBudget)
-      if (headNl > headBudget * 0.8) headCut = headNl
-      let tailStart = s.length - tailBudget
-      const tailNl = s.indexOf('\n', tailStart)
-      if (tailNl !== -1 && tailNl < tailStart + tailBudget * 0.2) tailStart = tailNl + 1
-      return s.slice(0, headCut) + MIDDLE_OMISSION + s.slice(tailStart) + TRUNCATION_SUFFIX
-    }
-  }
-
-  // Default: keep head
-  let cutPoint = budget
-  const lastNl = s.lastIndexOf('\n', budget)
-  if (lastNl > budget * 0.8) cutPoint = lastNl
-  return s.slice(0, cutPoint) + TRUNCATION_SUFFIX
-}
+// Tool result + error classification — extracted to core/
+const { truncateToolResult, calculateMaxChars: calculateMaxToolResultChars } = require('./core/tool-result')
+const { scrubMagicStrings, isContextOverflowError, isBillingError, friendlyError } = require('./core/error-classify')
 const { extractLinkContext: coreExtractLinkContext } = require('./core/link-extract')
 const { listAgents: coreListAgents, loadAgent: coreLoadAgent, saveAgent: coreSaveAgent, createAgent: coreCreateAgent, agentsDir: coreAgentsDir } = require('./core/agents')
 const { pushStatus: corePushStatus, sendNotification: coreSendNotification, pushWatsonStatus: corePushWatsonStatus } = require('./core/notify')
@@ -178,45 +113,6 @@ function sendNotification(title, body) {
  * Convert raw error messages into user-friendly text.
  * Strips IPC wrappers, classifies errors, adds actionable hints.
  */
-function friendlyError(err) {
-  let msg = typeof err === 'string' ? err : err?.message || 'Unknown error'
-
-  // Strip Electron IPC wrapper
-  msg = msg.replace(/^Error invoking remote method '[^']+': Error: /i, '')
-  msg = msg.replace(/^Error: /i, '')
-
-  // Classify and rewrite
-  const lower = msg.toLowerCase()
-
-  if (lower.includes('no api key') || lower.includes('api key')) {
-    return { short: 'No API key', detail: 'Go to Settings (⚙️) to configure your API key.', category: 'config' }
-  }
-  if (lower.includes('401') || lower.includes('unauthorized') || lower.includes('invalid.*key')) {
-    return { short: 'Invalid API key', detail: 'Your API key was rejected. Check Settings (⚙️) to update it.', category: 'auth' }
-  }
-  if (lower.includes('429') || lower.includes('rate limit') || lower.includes('too many')) {
-    return { short: 'Rate limited', detail: 'Too many requests. Wait a moment and try again.', category: 'rate-limit' }
-  }
-  if (lower.includes('timeout') || lower.includes('timed out') || lower.includes('etimedout') || lower.includes('stalled')) {
-    return { short: 'Request timed out', detail: 'The server took too long to respond. Try again.', category: 'network' }
-  }
-  if (lower.includes('econnrefused') || lower.includes('enotfound') || lower.includes('network') || lower.includes('fetch failed')) {
-    return { short: 'Network error', detail: 'Could not reach the API server. Check your internet connection.', category: 'network' }
-  }
-  if (lower.includes('overloaded') || lower.includes('529') || lower.includes('503') || lower.includes('server error')) {
-    return { short: 'Server overloaded', detail: 'The API server is temporarily overloaded. Try again in a few seconds.', category: 'server' }
-  }
-  if (lower.includes('context') && lower.includes('long')) {
-    return { short: 'Context too long', detail: 'The conversation is too long for the model. Start a new chat or compact the history.', category: 'context' }
-  }
-  if (lower.includes('not available') || lower.includes('not found')) {
-    return { short: 'Service unavailable', detail: msg, category: 'unavailable' }
-  }
-
-  // Default: sanitize but keep the message
-  return { short: msg.length > 80 ? msg.slice(0, 77) + '…' : msg, detail: msg, category: 'unknown' }
-}
-
 // ── Delegated to core/ modules ──
 function configPath() { return globalConfigPath(); }
 function loadConfig() { return loadGlobalConfig(); }
