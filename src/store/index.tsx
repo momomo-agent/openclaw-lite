@@ -13,6 +13,7 @@ interface AppState {
   sidebarVisible: boolean
   avatarVersion: number
   showTools: boolean
+  newChatTrigger: number
 }
 
 interface AppContextType extends AppState {
@@ -27,6 +28,7 @@ interface AppContextType extends AppState {
   setSidebarVisible: (v: boolean) => void
   bumpAvatarVersion: () => void
   setShowTools: (v: boolean) => void
+  triggerNewChat: () => void
 }
 
 const AppContext = createContext<AppContextType | null>(null)
@@ -43,6 +45,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [sidebarVisible, setSidebarVisible] = useState(true)
   const [avatarVersion, setAvatarVersion] = useState(0)
   const [showTools, setShowTools] = useState(false)
+  const [newChatTrigger, setNewChatTrigger] = useState(0)
+  const triggerNewChat = () => setNewChatTrigger(v => v + 1)
   const bumpAvatarVersion = () => setAvatarVersion(v => v + 1)
 
   const setActivity = (sessionId: string, level: ActivityLevel) => {
@@ -65,6 +69,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       sidebarVisible, setSidebarVisible,
       avatarVersion, bumpAvatarVersion,
       showTools, setShowTools,
+      newChatTrigger, triggerNewChat,
       setActivity, setStatus
     }}>
       {children}

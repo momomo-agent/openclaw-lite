@@ -9,7 +9,7 @@ import SetupScreen from './components/SetupScreen'
 import './styles/global.css'
 
 function AppContent() {
-  const { setSessions, setWorkspaces, setActivity, setStatus, setUserProfile, setCurrentSessionId, setClawDir, setFeatureFlags, setShowTools } = useAppState()
+  const { setSessions, setWorkspaces, setActivity, setStatus, setUserProfile, setCurrentSessionId, setClawDir, setFeatureFlags, setShowTools, triggerNewChat } = useAppState()
   const api = useIPC()
   const { setTheme } = useTheme()
   const [ready, setReady] = useState(false)
@@ -105,13 +105,7 @@ function AppContent() {
     const cleanupMemory = api.onMemoryChanged?.(() => {})
 
     const cleanupTray = api.onTrayNewChat?.(() => {
-      api.createSession({}).then(async (result: any) => {
-        if (result?.id) {
-          setCurrentSessionId(result.id)
-          const updated = await api.listSessions()
-          setSessions(updated)
-        }
-      })
+      triggerNewChat()
     })
 
     const cleanupWs = api.onWorkspaceChanged?.(async () => {

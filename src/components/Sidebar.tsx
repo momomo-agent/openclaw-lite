@@ -184,12 +184,17 @@ interface ContextMenuState {
 }
 
 export default function Sidebar() {
-  const { sessions, workspaces, currentSessionId, setCurrentSessionId, setSessions, setWorkspaces, setStatus, sidebarVisible, setSidebarVisible, bumpAvatarVersion } = useAppState()
+  const { sessions, workspaces, currentSessionId, setCurrentSessionId, setSessions, setWorkspaces, setStatus, sidebarVisible, setSidebarVisible, bumpAvatarVersion, newChatTrigger } = useAppState()
   const api = useIPC()
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState>({ visible: false, x: 0, y: 0, sessionId: null })
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameText, setRenameText] = useState('')
   const [showNewChat, setShowNewChat] = useState(false)
+
+  // Open new chat selector when triggered by Cmd+N or tray
+  useEffect(() => {
+    if (newChatTrigger > 0) setShowNewChat(true)
+  }, [newChatTrigger])
 
   // F250: Sidebar resize
   const [sidebarWidth, setSidebarWidth] = useState(() => {

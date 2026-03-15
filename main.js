@@ -615,6 +615,7 @@ app.whenReady().then(() => {
   const template = [
     { role: 'appMenu' },
     { label: 'File', submenu: [
+      { label: 'New Chat', accelerator: 'CmdOrCtrl+N', click: () => { mainWindow?.show(); eventBus.dispatch('tray-new-chat', {}) } },
       { label: 'New Window…', accelerator: 'CmdOrCtrl+Shift+N', click: openNewWindow },
       { type: 'separator' },
       { role: 'close' },
