@@ -1,36 +1,52 @@
 // test/screen-control.test.mjs — Screen control tools tests
-import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest'
-import { execFile } from 'child_process'
+//
+// Uses dependency injection (_setDeps) instead of vi.mock('child_process')
+// because Vitest ESM mocks can't intercept CJS require() calls.
 
-// Mock child_process
-vi.mock('child_process', () => ({
-  execFile: vi.fn(),
-  execFileSync: vi.fn(() => '/usr/local/lib/node_modules')
-}))
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest'
 
 // Mock electron
+const mockBrowserWindow = {
+  getAllWindows: vi.fn(() => [])
+}
+
 vi.mock('electron', () => ({
-  BrowserWindow: {
-    getAllWindows: vi.fn(() => [])
-  }
+  BrowserWindow: mockBrowserWindow
 }))
 
-// Mock fs
-vi.mock('fs', () => ({
-  accessSync: vi.fn(() => {}), // Default: driver found
+const mockExecFile = vi.fn()
+const mockExecFileSync = vi.fn(() => '/usr/local/lib/node_modules')
+const mockFs = {
+  accessSync: vi.fn(),
   readFileSync: vi.fn(() => Buffer.from('fake-png-data')),
   unlinkSync: vi.fn(),
-  constants: { X_OK: 1 }
-}))
+  constants: { X_OK: 1 },
+}
 
-// Load the tool to register it
-beforeAll(() => {
-  require('../tools/screen-control')
+let resetDriverCache
+
+beforeAll(async () => {
+  // Import and inject test deps BEFORE any handler runs
+  const mod = await import('../tools/screen-control')
+  mod._setDeps({
+    execFile: mockExecFile,
+    execFileSync: mockExecFileSync,
+    fs: mockFs,
+    getElectron: () => ({ BrowserWindow: mockBrowserWindow }),
+  })
+  resetDriverCache = mod._resetDriverCache
 })
+
+function getTool(name) {
+  const { getTool: gt } = require('../tools/registry')
+  return gt(name)
+}
 
 describe('screen_sense', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    resetDriverCache()
+    mockFs.accessSync.mockImplementation(() => {})
   })
 
   it('formats element list with role grouping', async () => {
@@ -39,20 +55,18 @@ describe('screen_sense', () => {
       { ref: '@e2', role: 'Button', label: 'Cancel' },
       { ref: '@e3', role: 'TextField', label: 'Email', value: 'user@example.com' },
       { ref: '@e4', role: 'Link', label: 'Learn more' },
-      { ref: '@e5', role: 'StaticText', label: 'Welcome' }
+      { ref: '@e5', role: 'StaticText', label: 'Welcome' },
     ]
 
-    // Mock successful driver execution
-    execFile.mockImplementation((path, args, opts, callback) => {
+    mockExecFile.mockImplementation((path, args, opts, callback) => {
       callback(null, JSON.stringify(mockElements), '')
     })
 
-    const { getTool } = require('../tools/registry')
     const tool = getTool('screen_sense')
     expect(tool).toBeDefined()
 
     const result = await tool.handler({})
-    
+
     expect(result).toContain('5 elements')
     expect(result).toContain('2×Button')
     expect(result).toContain('@e1')
@@ -60,37 +74,34 @@ describe('screen_sense', () => {
   })
 
   it('handles empty element list', async () => {
-    execFile.mockImplementation((path, args, opts, callback) => {
+    mockExecFile.mockImplementation((path, args, opts, callback) => {
       callback(null, JSON.stringify([]), '')
     })
 
-    const { getTool } = require('../tools/registry')
     const tool = getTool('screen_sense')
     const result = await tool.handler({})
-    
+
     expect(result).toContain('No interactive elements found')
   })
 
   it('handles driver errors gracefully', async () => {
-    execFile.mockImplementation((path, args, opts, callback) => {
+    mockExecFile.mockImplementation((path, args, opts, callback) => {
       callback(new Error('Driver not found'), '', 'driver error')
     })
 
-    const { getTool } = require('../tools/registry')
     const tool = getTool('screen_sense')
     const result = await tool.handler({})
-    
+
     expect(result).toContain('driver error')
   })
 
   it('passes app target correctly', async () => {
-    execFile.mockImplementation((path, args, opts, callback) => {
+    mockExecFile.mockImplementation((path, args, opts, callback) => {
       expect(args).toContain('--app')
       expect(args).toContain('Chrome')
       callback(null, JSON.stringify([]), '')
     })
 
-    const { getTool } = require('../tools/registry')
     const tool = getTool('screen_sense')
     await tool.handler({ app: 'Chrome' })
   })
@@ -99,81 +110,78 @@ describe('screen_sense', () => {
 describe('screen_act', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    resetDriverCache()
+    mockFs.accessSync.mockImplementation(() => {})
   })
 
   it('executes click action', async () => {
-    execFile.mockImplementation((path, args, opts, callback) => {
+    mockExecFile.mockImplementation((path, args, opts, callback) => {
       expect(args).toContain('click')
       expect(args).toContain('@e5')
       callback(null, JSON.stringify({ ok: true }), '')
     })
 
-    const { getTool } = require('../tools/registry')
     const tool = getTool('screen_act')
     const result = await tool.handler({ action: 'click', ref: '@e5' })
-    
+
     expect(result).toContain('Done')
     expect(result).toContain('click')
   })
 
   it('executes fill action with text', async () => {
-    execFile.mockImplementation((path, args, opts, callback) => {
+    mockExecFile.mockImplementation((path, args, opts, callback) => {
       expect(args).toContain('fill')
       expect(args).toContain('@e3')
       expect(args).toContain('hello world')
       callback(null, JSON.stringify({ ok: true }), '')
     })
 
-    const { getTool } = require('../tools/registry')
     const tool = getTool('screen_act')
-    const result = await tool.handler({ 
-      action: 'fill', 
-      ref: '@e3', 
-      text: 'hello world' 
+    const result = await tool.handler({
+      action: 'fill',
+      ref: '@e3',
+      text: 'hello world',
     })
-    
+
     expect(result).toContain('Done')
   })
 
   it('validates required parameters', async () => {
-    const { getTool } = require('../tools/registry')
     const tool = getTool('screen_act')
-    
+
     const result = await tool.handler({ action: 'click' })
     expect(result).toContain('Error')
     expect(result).toContain('ref required')
   })
 
   it('executes press action', async () => {
-    execFile.mockImplementation((path, args, opts, callback) => {
+    mockExecFile.mockImplementation((path, args, opts, callback) => {
       expect(args).toContain('press')
       expect(args).toContain('cmd+w')
       callback(null, JSON.stringify({ ok: true, action: 'press' }), '')
     })
 
-    const { getTool } = require('../tools/registry')
     const tool = getTool('screen_act')
     const result = await tool.handler({ action: 'press', key: 'cmd+w' })
-    
+
     expect(result).toContain('Done')
   })
 
   it('executes drag action', async () => {
-    execFile.mockImplementation((path, args, opts, callback) => {
+    mockExecFile.mockImplementation((path, args, opts, callback) => {
       expect(args).toContain('drag')
       expect(args).toContain('@e1')
       expect(args).toContain('@e2')
       callback(null, JSON.stringify({ ok: true, action: 'drag' }), '')
     })
 
-    const { getTool } = require('../tools/registry')
     const tool = getTool('screen_act')
-    const result = await tool.handler({ 
-      action: 'drag', 
-      from_ref: '@e1', 
-      to_ref: '@e2' 
+    const result = await tool.handler({
+      action: 'drag',
+      from_ref: '@e1',
+      to_ref: '@e2',
     })
-    
+
     expect(result).toContain('Done')
   })
 })
@@ -181,29 +189,30 @@ describe('screen_act', () => {
 describe('screen_shot', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    resetDriverCache()
+    mockFs.accessSync.mockImplementation(() => {})
+    mockFs.readFileSync.mockReturnValue(Buffer.from('fake-png-data'))
   })
 
   it('returns image result structure', async () => {
-    const fs = await import('fs')
-    const { BrowserWindow } = await import('electron')
-    
-    // Mock window hide/show
-    BrowserWindow.getAllWindows.mockReturnValue([{
+    mockBrowserWindow.getAllWindows.mockReturnValue([{
       getTitle: () => 'Paw',
       isVisible: () => true,
       hide: vi.fn(),
-      show: vi.fn()
+      show: vi.fn(),
     }])
 
-    // Mock screencapture success
-    execFile.mockImplementation((path, args, opts, callback) => {
-      callback(null, '', '')
+    // screencapture succeeds — call callback immediately (no setTimeout in test)
+    mockExecFile.mockImplementation((path, args, callback) => {
+      // Simulate async but immediate callback
+      setImmediate(() => callback(null, '', ''))
     })
 
-    const { getTool } = require('../tools/registry')
     const tool = getTool('screen_shot')
     const result = await tool.handler({})
-    
+
+    if (result.error) console.log('screen_shot error:', result.error)
+
     expect(result).toHaveProperty('result')
     expect(result).toHaveProperty('image')
     expect(result.image).toHaveProperty('type', 'base64')
@@ -212,30 +221,33 @@ describe('screen_shot', () => {
   })
 
   it('handles screenshot errors', async () => {
-    execFile.mockImplementation((path, args, opts, callback) => {
-      callback(new Error('Permission denied'), '', '')
+    mockExecFile.mockImplementation((path, args, callback) => {
+      if (typeof callback === 'function') {
+        callback(new Error('Permission denied'), '', '')
+      } else if (typeof args === 'function') {
+        args(new Error('Permission denied'), '', '')
+      }
     })
 
-    const { getTool } = require('../tools/registry')
     const tool = getTool('screen_shot')
     const result = await tool.handler({})
-    
+
     expect(result).toHaveProperty('error')
   })
 })
 
 describe('Driver discovery', () => {
-  it('checks multiple candidate paths', async () => {
-    const fs = await import('fs')
-    
-    // First two fail, third succeeds
-    fs.accessSync
-      .mockImplementationOnce(() => { throw new Error('not found') })
-      .mockImplementationOnce(() => { throw new Error('not found') })
-      .mockImplementationOnce(() => {}) // success
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetDriverCache()
+  })
 
-    // Trigger driver discovery by calling a tool
-    const { getTool } = require('../tools/registry')
+  it('checks multiple candidate paths', async () => {
+    mockFs.accessSync
+      .mockImplementationOnce(() => { throw new Error('not found') })
+      .mockImplementationOnce(() => { throw new Error('not found') })
+      .mockImplementationOnce(() => {})
+
     const tool = getTool('screen_sense')
     expect(tool).toBeDefined()
   })
