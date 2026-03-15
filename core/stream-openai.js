@@ -121,6 +121,7 @@ async function streamOpenAI(messages, systemPrompt, config, requestId, tools, se
           const delta = choice?.delta
           if (delta?.content) {
             roundText += delta.content
+            fullText += delta.content
             ipc('chat-token', { requestId, text: delta.content })
           }
           if (delta?.tool_calls) {
@@ -143,8 +144,6 @@ async function streamOpenAI(messages, systemPrompt, config, requestId, tools, se
     totalUsageOutput += roundUsageOutput
 
     if (!tcList.length || !tcList[0].name) {
-      // Final round — no tool calls, roundText is the final answer
-      fullText += roundText
       ctx.pushStatus('done', 'Done')
       // chat-done dispatched by chat handler after persisting to SQLite
       clearTimeout(timeoutId)

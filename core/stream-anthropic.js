@@ -166,7 +166,7 @@ async function streamAnthropic(messages, systemPrompt, config, requestId, tools,
               roundThinking += evt.delta.thinking
               ipc('chat-token', { requestId, text: evt.delta.thinking, thinking: true })
             }
-            if (evt.delta?.text && !curBlock) { roundText += evt.delta.text; ipc('chat-token', { requestId, text: evt.delta.text }) }
+            if (evt.delta?.text && !curBlock) { roundText += evt.delta.text; fullText += evt.delta.text; ipc('chat-token', { requestId, text: evt.delta.text }) }
             if (evt.delta?.partial_json && curBlock) curBlock.json += evt.delta.partial_json
           } else if (evt.type === 'content_block_stop' && curBlock) {
             toolCalls.push(curBlock); curBlock = null
@@ -184,8 +184,6 @@ async function streamAnthropic(messages, systemPrompt, config, requestId, tools,
     if (roundThinking) flowSteps.push({ name: '__thinking__', output: roundThinking })
 
     if (!toolCalls.length) {
-      // Final round — no tool calls, roundText is the final answer
-      fullText += roundText
       ctx.pushStatus('done', 'Done')
       // chat-done dispatched by chat handler after persisting to SQLite
       console.log('[Paw] streamAnthropic done, fullText length:', fullText.length)
