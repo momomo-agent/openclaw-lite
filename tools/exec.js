@@ -79,16 +79,19 @@ registerTool({
     required: ['command']
   },
   handler: async (args, context) => {
-    const { clawDir, approvalCallback } = context;
+    const { clawDir, approvalCallback, config } = context;
     const classification = classifyCommand(args.command);
 
-    // Blocked commands
+    // Blocked commands — always blocked regardless of settings
     if (classification === 'blocked') {
       return `Command blocked: environment variable injection detected. PATH/LD_PRELOAD/DYLD overrides are not allowed.`;
     }
 
-    // Safe commands skip approval
-    if (classification !== 'safe' && approvalCallback) {
+    // If execApproval is disabled in settings, skip all approval dialogs
+    const needsApproval = config?.execApproval !== false;
+
+    // Safe commands always skip approval
+    if (classification !== 'safe' && needsApproval && approvalCallback) {
       // Check persistent approvals first
       const approvalFile = clawDir ? require('path').join(clawDir, '.paw', 'exec-approvals.json') : null;
       let persistedApprovals = {};

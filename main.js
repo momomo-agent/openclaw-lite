@@ -374,6 +374,7 @@ async function executeTool(name, input, config, { sessionId: _sid, agentName: _a
       mainWindow,
       sessionStore,
       memoryIndex,
+      config,
       tavilyKey: config?.tavilyKey,
       skillEnv: config?.skillEnv || {},
       sendNotification,
