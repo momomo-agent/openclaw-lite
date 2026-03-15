@@ -41,7 +41,8 @@
     ],
     "dmg": {
       "title": "Paw"
-    }
+    },
+    "icon": "assets/icon.icns"
   },
   "devDependencies": {
     "@types/react": "^19.2.14",
