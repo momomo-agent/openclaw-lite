@@ -18,6 +18,7 @@ require('./cron');
 require('./mcp-config');
 require('./session-title');
 require('./screen-capture');
+require('./screen-control');
 
 const { getAllTools, getTool, getAnthropicTools, getToolsPrompt } = require('./registry');
 

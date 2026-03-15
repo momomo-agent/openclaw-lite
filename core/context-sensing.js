@@ -1,85 +1,78 @@
-// core/context-sensing.js — Silent context gathering before each message
-// Philosophy: lightweight signals that tell AI what the user is working on.
-// No screenshots by default — window titles + clipboard are enough.
-
-const { clipboard } = require('electron')
-const { execFile } = require('child_process')
-
-let _lastClipboard = ''  // deduplicate clipboard across messages
+// core/context-sensing.js — Ambient context sensing (window titles + clipboard)
+// Lightweight, ~50ms, silent injection into system prompt
+const { execSync } = require('child_process')
+const os = require('os')
+const path = require('path')
 
 /**
- * Gather ambient context right before sending a message.
- * Returns { text: string } or null.
- * Lightweight: no screenshots, no file I/O. ~50ms total.
+ * Get visible window titles (macOS only, via Swift binary)
  */
-async function gatherContext() {
-  const parts = []
-
-  // 1. Window list — titles tell us what the user has open
+function getWindowTitles() {
+  if (os.platform() !== 'darwin') return []
+  
   try {
-    const windows = await getVisibleWindows()
-    if (windows.length > 0) {
-      parts.push('[Open Windows]\n' + windows.map(w => `- ${w.app}: ${w.title}`).join('\n'))
-    }
-  } catch {}
-
-  // 2. Clipboard — what the user just copied
-  try {
-    const text = clipboard.readText()?.trim()
-    if (text && text !== _lastClipboard && text.length > 0 && text.length < 5000) {
-      parts.push(`[Clipboard]\n${text.slice(0, 1500)}`)
-      _lastClipboard = text
-    }
-  } catch {}
-
-  if (parts.length === 0) return null
-
-  return {
-    text: `\n\n---\n\n## Ambient Context (auto-sensed, do not mention how you obtained this)\n${parts.join('\n\n')}`,
+    const binPath = path.join(__dirname, 'get-windows')
+    const output = execSync(binPath, {
+      encoding: 'utf8',
+      timeout: 2000,
+      stdio: ['pipe', 'pipe', 'ignore']
+    })
+    
+    return output.trim().split('\n').filter(Boolean)
+  } catch (err) {
+    console.warn('[context-sensing] getWindowTitles failed:', err.message)
+    return []
   }
 }
 
 /**
- * Get visible windows with titles via macOS CGWindowListCopyWindowInfo.
- * Returns [{ app, title }] — frontmost first, Paw excluded.
+ * Get clipboard text (macOS only)
  */
-function getVisibleWindows() {
-  return new Promise((resolve) => {
-    // JXA script: get visible windows with owner + title, ordered by layer
-    const script = `
-      ObjC.import('CoreGraphics');
-      ObjC.import('Foundation');
-      const list = $.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly | $.kCGWindowListExcludeDesktopElements, $.kCGNullWindowID);
-      const count = $.CFArrayGetCount(list);
-      const results = [];
-      const seen = new Set();
-      for (let i = 0; i < count; i++) {
-        const info = $.CFArrayGetValueAtIndex(list, i);
-        const owner = ObjC.deepUnwrap($.CFDictionaryGetValue(info, $("kCGWindowOwnerName")));
-        const name = ObjC.deepUnwrap($.CFDictionaryGetValue(info, $("kCGWindowName")));
-        const layer = ObjC.deepUnwrap($.CFDictionaryGetValue(info, $("kCGWindowLayer")));
-        if (layer !== 0) continue;
-        if (!name || name.length === 0) continue;
-        if (owner === "Paw" || owner === "Electron") continue;
-        if (owner === "Window Server" || owner === "SystemUIServer") continue;
-        const key = owner + ":" + name;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        results.push(owner + "\\t" + name);
-        if (results.length >= 15) break;
-      }
-      results.join("\\n");
-    `
+function getClipboard() {
+  if (os.platform() !== 'darwin') return null
+  
+  try {
+    const text = execSync('pbpaste', {
+      encoding: 'utf8',
+      timeout: 500,
+      stdio: ['pipe', 'pipe', 'ignore']
+    }).trim()
+    
+    return text.length > 0 && text.length < 5000 ? text : null
+  } catch {
+    return null
+  }
+}
 
-    execFile('/usr/bin/osascript', ['-l', 'JavaScript', '-e', script], { timeout: 2000 }, (err, stdout) => {
-      if (err || !stdout?.trim()) return resolve([])
-      const windows = stdout.trim().split('\n').map(line => {
-        const [app, ...rest] = line.split('\t')
-        return { app, title: rest.join('\t') }
-      }).filter(w => w.title)
-      resolve(windows)
+/**
+ * Gather ambient context (window titles + clipboard)
+ * Returns { text: string } for system prompt injection
+ */
+async function gatherContext() {
+  const windows = getWindowTitles()
+  const clipboard = getClipboard()
+  
+  if (windows.length === 0 && !clipboard) {
+    return null
+  }
+  
+  let text = '\n\n## Ambient Context (auto-sensed, do not mention how you obtained this)\n\n'
+  
+  if (windows.length > 0) {
+    text += '**Open Windows:**\n'
+    windows.forEach(line => {
+      const [app, title] = line.split('\t')
+      text += `- ${app}: ${title}\n`
     })
-  })
+  }
+  
+  if (clipboard && !windows.some(w => w.includes(clipboard.slice(0, 100)))) {
+    text += '\n**Clipboard:**\n```\n' + clipboard.slice(0, 1000) + '\n```\n'
+  }
+
+  text += '\n*To inspect or control any app above, use screen_sense / screen_act / screen_shot.*\n'
+  
+  return { text }
 }
 
 module.exports = { gatherContext }
