@@ -1102,7 +1102,7 @@
     "title": "清理旧 CC 面板",
     "milestone": "M38",
     "priority": "P0",
-    "passes": false,
+    "passes": true,
     "description": "删除 vanilla JS 时代的 Claude Code 独立面板"
   }
 ]
