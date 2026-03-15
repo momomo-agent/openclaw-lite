@@ -45,9 +45,9 @@ Paw 对应关系：
 - main.js 的 chat handler ≈ openclaw 的 `pi-embedded-runner`
 
 当前与 pi-agent 的差距（后续可改进）：
-1. pi-ai 的 provider 返回 `EventStream`（async iterator），Paw 还是 parseSSE 回调
-2. pi-agent-core 的 `convertToLlm` 把消息格式转换和 LLM 调用分离，Paw 混在 adapter 里
-3. pi-agent 支持 `getSteeringMessages()` 和 `getFollowUpMessages()`，Paw 还没有
+1. pi-ai 的 provider 返回 `EventStream`（async iterator），Paw 还是 parseSSE 回调 — 可在需要 Gemini/WebSocket provider 时改
+2. ~~pi-agent-core 的 `convertToLlm` 把消息格式转换和 LLM 调用分离，Paw 混在 adapter 里~~ ✅ 已实现：`initMessages` 作为 convertToLlm 等价物
+3. ~~pi-agent 支持 `getSteeringMessages()` 和 `getFollowUpMessages()`，Paw 还没有~~ ✅ 已实现：c461841
 
 ```
                   ┌─────────────────────────┐
