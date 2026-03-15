@@ -88,7 +88,13 @@ registerTool({
   name: 'screen_sense',
   description: `See another app's UI: buttons, text fields, links, tabs — everything interactive.
 Returns a list of elements with @refs you can target with screen_act.
-Use this when the user asks about what's on screen, or before you click/type in an app.
+
+**Prefer this over screen_shot for understanding UI state.** This is faster, structured, and doesn't need Screen Recording permission. Use screen_shot only when you need actual pixel-level visual information (colors, layout, images).
+
+Use this:
+- Before ANY screen_act call (to get @refs)
+- When user asks "what's on my screen" or about an app's state
+- To check if a dialog appeared, a page loaded, or a button exists
 
 Examples:
   screen_sense({ app: "Chrome" })         → see Chrome's UI elements
@@ -229,9 +235,9 @@ Examples:
 
 registerTool({
   name: 'screen_shot',
-  description: `Take a screenshot. Can capture the full screen, a specific app window, or a specific UI element.
-Returns the image for visual analysis. Use this to verify what happened after screen_act,
-or when you need to SEE something (design review, visual debugging, reading content).
+  description: `Take a screenshot of the full screen, a specific app, or a UI element.
+Use this ONLY when you need pixel-level visual info (colors, layout, images, design review).
+For understanding UI state (what buttons exist, what text says), use screen_sense instead — it's faster and structured.
 
 Examples:
   screen_shot({})                              → full screen

@@ -127,8 +127,8 @@ export default function InputBar({ sessionId, onSend, isGroup = false }: InputBa
       return updated
     })
 
-    // Check for @ trigger (only in group chats)
-    if (isGroup) {
+    // Check for @ trigger (only in group chats, skip during IME composition)
+    if (isGroup && !composing.current) {
       const beforeCursor = val.slice(0, pos)
       const atIdx = beforeCursor.lastIndexOf('@')
       if (atIdx >= 0 && (atIdx === 0 || /\s/.test(beforeCursor[atIdx - 1]))) {
