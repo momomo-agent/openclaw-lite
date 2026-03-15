@@ -10,7 +10,7 @@ const { resolveContextWindow } = require('./model-context')
 const { sanitizeTranscript } = require('./transcript-repair')
 
 const anthropicAdapter = {
-  name: 'anthropic',
+  name: 'Anthropic',
 
   /**
    * Initialize messages — sanitize transcript for Anthropic format.

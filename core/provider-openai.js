@@ -10,7 +10,7 @@ const { resolveContextWindow } = require('./model-context')
 const { sanitizeTranscript } = require('./transcript-repair')
 
 const openaiAdapter = {
-  name: 'openai',
+  name: 'OpenAI',
 
   /**
    * Initialize messages — prepend system message + sanitize.

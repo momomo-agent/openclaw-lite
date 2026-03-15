@@ -131,7 +131,7 @@ describe('streamOpenAI', () => {
       .mockResolvedValueOnce(mockSSEResponse([
         { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'web_fetch', arguments: '' } }] } }] },
         { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"url":"https://example.com"}' } }] } }] },
-        { choices: [{ delta: {} }], usage: { prompt_tokens: 30, completion_tokens: 15 } },
+        { choices: [{ finish_reason: 'tool_calls', delta: {} }], usage: { prompt_tokens: 30, completion_tokens: 15 } },
       ]))
       .mockResolvedValueOnce(mockSSEResponse([
         { choices: [{ delta: { content: 'Got it!' } }] },
@@ -178,7 +178,7 @@ describe('streamOpenAI', () => {
     mockFetch
       .mockResolvedValueOnce(mockSSEResponse([
         { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'web_fetch', arguments: '{"url":"a"}' } }] } }] },
-        { choices: [{ delta: {} }], usage: { prompt_tokens: 100, completion_tokens: 20 } },
+        { choices: [{ finish_reason: 'tool_calls', delta: {} }], usage: { prompt_tokens: 100, completion_tokens: 20 } },
       ]))
       .mockResolvedValueOnce(mockSSEResponse([
         { choices: [{ delta: { content: 'done' } }] },
