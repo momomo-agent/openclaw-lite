@@ -54,5 +54,63 @@
     "blockedReason": null,
     "rejectReason": null,
     "status": "done"
+  },
+  "F260": {
+    "status": "done",
+    "reviewCount": 2,
+    "reviewLog": [
+      {
+        "round": 1,
+        "notes": "",
+        "clean": true
+      },
+      {
+        "round": 2,
+        "notes": "",
+        "clean": true
+      }
+    ],
+    "exitChecks": {
+      "plan": {},
+      "dev": {},
+      "test": {}
+    },
+    "blockedReason": null,
+    "rejectReason": null
+  },
+  "F261": {
+    "status": "done",
+    "reviewCount": 2,
+    "reviewLog": [
+      {
+        "round": 1,
+        "notes": "",
+        "clean": true
+      },
+      {
+        "round": 2,
+        "notes": "",
+        "clean": true
+      }
+    ],
+    "exitChecks": {
+      "plan": {},
+      "dev": {},
+      "test": {}
+    },
+    "blockedReason": null,
+    "rejectReason": null
+  },
+  "F262": {
+    "status": "killed",
+    "reviewCount": 0,
+    "reviewLog": [],
+    "exitChecks": {
+      "plan": {},
+      "dev": {},
+      "test": {}
+    },
+    "blockedReason": "coding-agent-router.test.mjs 已有单元测试覆盖，E2E 需 mock 整个 SDK 链路投入过大",
+    "rejectReason": null
   }
 }

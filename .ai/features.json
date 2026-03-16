@@ -1105,5 +1105,26 @@
     "priority": "P0",
     "passes": true,
     "description": "删除 vanilla JS 时代的 Claude Code 独立面板"
+  },
+  {
+    "id": "F260",
+    "description": "CC Cancel (abort) 单元测试",
+    "milestone": "m1",
+    "passes": true,
+    "auto": true
+  },
+  {
+    "id": "F261",
+    "description": "tool-result.js 专项单元测试",
+    "milestone": "m1",
+    "passes": true,
+    "auto": true
+  },
+  {
+    "id": "F262",
+    "description": "Coding Agent 参与者 E2E 测试",
+    "milestone": "m1",
+    "passes": false,
+    "auto": true
   }
 ]
