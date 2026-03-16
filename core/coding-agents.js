@@ -27,6 +27,28 @@ function detectBin(name) {
     const p = `${dir}/${name}`
     if (fs.existsSync(p)) return p
   }
+  // nvm: ~/.nvm/versions/node/*/bin
+  try {
+    const nvmDir = `${home}/.nvm/versions/node`
+    if (fs.existsSync(nvmDir)) {
+      const versions = fs.readdirSync(nvmDir).sort().reverse()
+      for (const v of versions) {
+        const p = `${nvmDir}/${v}/bin/${name}`
+        if (fs.existsSync(p)) return p
+      }
+    }
+  } catch {}
+  // fnm: ~/.local/share/fnm/node-versions/*/installation/bin
+  try {
+    const fnmDir = `${home}/.local/share/fnm/node-versions`
+    if (fs.existsSync(fnmDir)) {
+      const versions = fs.readdirSync(fnmDir).sort().reverse()
+      for (const v of versions) {
+        const p = `${fnmDir}/${v}/installation/bin/${name}`
+        if (fs.existsSync(p)) return p
+      }
+    }
+  } catch {}
   return null
 }
 
