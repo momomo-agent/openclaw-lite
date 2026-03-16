@@ -69,7 +69,7 @@ function renderVideo(href: string, title: string, text: string): string {
 
 function renderFileCard(href: string, name: string): string {
   const ext = extFromHref(href).toUpperCase() || 'FILE'
-  return `<a class="md-file-card" href="${href}" target="_blank" rel="noopener">
+  return `<a class="md-file-card" href="#" data-path="${href}">
     <span class="md-file-icon">${ext}</span>
     <span class="md-file-name">${name}</span>
     <span class="md-file-open">↗</span>

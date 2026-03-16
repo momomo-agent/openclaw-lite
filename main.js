@@ -964,7 +964,9 @@ ipcMain.handle('open-file', (_, filePath) => {
 
 // Open image/video/audio/markdown in a new Electron window
 ipcMain.handle('open-file-preview', (_, filePath) => {
+  console.log('[preview] filePath:', filePath, 'clawDir:', clawDir)
   const p = path.resolve(clawDir || '', filePath)
+  console.log('[preview] resolved:', p, 'exists:', fs.existsSync(p))
   if (!fs.existsSync(p)) return
   const ext = path.extname(p).toLowerCase().slice(1)
   const name = path.basename(p)
@@ -985,12 +987,14 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
     webPreferences: { nodeIntegration: false, contextIsolation: true },
   })
 
-  const btnStyle = `-webkit-app-region:no-drag;background:#2a2a2a;border:none;color:#aaa;font-size:11px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:system-ui`
+  const btnStyle = `-webkit-app-region:no-drag;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);color:#999;font-size:11px;padding:3px 10px;border-radius:6px;cursor:pointer;font-family:system-ui`
+  const btnHoverIn = `this.style.background='rgba(255,255,255,0.1)';this.style.borderColor='rgba(255,255,255,0.15)';this.style.color='#ccc'`
+  const btnHoverOut = `this.style.background='rgba(255,255,255,0.06)';this.style.borderColor='rgba(255,255,255,0.08)';this.style.color='#999'`
   const titleBar = `
-    <div style="-webkit-app-region:drag;display:flex;align-items:center;height:38px;padding:0 12px 0 78px;background:#1a1a1a;border-bottom:1px solid #2a2a2a;flex-shrink:0;gap:6px">
-      <span style="font-size:12px;color:#888;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${name}</span>
-      <button onclick="window.postMessage({action:'open-file'})" style="${btnStyle}" onmouseover="this.style.background='#333'" onmouseout="this.style.background='#2a2a2a'">Open</button>
-      <button onclick="window.postMessage({action:'open-folder'})" style="${btnStyle}" onmouseover="this.style.background='#333'" onmouseout="this.style.background='#2a2a2a'">Folder</button>
+    <div style="-webkit-app-region:drag;display:flex;align-items:center;padding:10px 16px 10px 78px;background:color-mix(in srgb, #0a0a0a 75%, transparent);-webkit-backdrop-filter:blur(16px) saturate(180%);backdrop-filter:blur(16px) saturate(180%);flex-shrink:0;gap:8px;border-bottom:1px solid rgba(255,255,255,0.06)">
+      <span style="font-size:14px;color:#e0e0e0;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${name}</span>
+      <button onclick="window.postMessage({action:'open-file'})" style="${btnStyle}" onmouseover="${btnHoverIn}" onmouseout="${btnHoverOut}">Open</button>
+      <button onclick="window.postMessage({action:'open-folder'})" style="${btnStyle}" onmouseover="${btnHoverIn}" onmouseout="${btnHoverOut}">Folder</button>
     </div>
     <script>window.addEventListener('message',e=>{const a=e.data?.action;if(a)fetch('paw-action://'+a).catch(()=>{})})</script>
   `
@@ -1046,10 +1050,10 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
       </script>`
   }
 
-  const html = `<html><body style="margin:0;display:flex;flex-direction:column;height:100vh;font-family:system-ui,-apple-system,sans-serif;color:#e0e0e0;line-height:1.6;font-size:14px;background:#1a1a1a">${titleBar}${content}</body></html>`
+  const html = `<html><body style="margin:0;display:flex;flex-direction:column;height:100vh;font-family:system-ui,-apple-system,sans-serif;color:#e0e0e0;line-height:1.6;font-size:14px;background:#0a0a0a">${titleBar}${content}</body></html>`
   
   // Write to temp file to avoid data URL length limits
-  const tmpDir = path.join(require('os').tmpdir(), 'paw-preview')
+  const tmpDir = path.join(__dirname, 'renderer', '.preview-tmp')
   fs.mkdirSync(tmpDir, { recursive: true })
   const tmpFile = path.join(tmpDir, `preview-${Date.now()}.html`)
   fs.writeFileSync(tmpFile, html, 'utf8')

@@ -141,9 +141,10 @@ export default function ChatView() {
       const target = e.target as HTMLElement
       const link = target.closest('a') as HTMLAnchorElement | null
       if (!link) return
-      const filePath = link.dataset?.path || link.getAttribute('data-path')
-      if (filePath) {
+      const rawPath = link.dataset?.path || link.getAttribute('data-path')
+      if (rawPath) {
         e.preventDefault()
+        const filePath = rawPath.startsWith('file://') ? decodeURI(rawPath.replace('file://', '')) : rawPath
         const ext = filePath.split('.').pop()?.toLowerCase() || ''
         const previewExts = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'pdf', 'mp4', 'mov', 'webm', 'mkv', 'avi', 'mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'md', 'markdown']
         if (previewExts.includes(ext)) api.openFilePreview?.(filePath) || api.openFile?.(filePath)

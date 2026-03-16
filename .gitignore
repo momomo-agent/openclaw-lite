@@ -4,3 +4,4 @@ out/
 .DS_Store
 developer-id.*
 renderer/
+renderer/.preview-tmp/
