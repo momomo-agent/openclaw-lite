@@ -14,7 +14,7 @@ if [ ! -f "$DMG" ]; then
 fi
 
 echo "🍎 Notarizing: $DMG"
-xcrun notarytool submit "$DMG" --keychain-profile "notarytool" --wait
+xcrun notarytool submit "$DMG" --keychain-profile "notarytool" --keychain ~/Library/Keychains/login.keychain-db --wait
 
 echo "📎 Stapling..."
 xcrun stapler staple "$DMG"

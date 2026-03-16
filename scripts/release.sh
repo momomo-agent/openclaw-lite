@@ -117,7 +117,7 @@ hdiutil create -volname "Paw" -srcfolder "$APP" -ov -format UDZO "$DMG"
 
 # 7. Notarize + staple
 echo "🍎 Notarizing..."
-xcrun notarytool submit "$DMG" --keychain-profile "notarytool" --wait
+xcrun notarytool submit "$DMG" --keychain-profile "notarytool" --keychain ~/Library/Keychains/login.keychain-db --wait
 if [ $? -ne 0 ]; then
   echo "❌ Notarization failed"
   exit 1
