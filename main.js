@@ -992,9 +992,9 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
   const btnHoverOut = `this.style.background='transparent';this.style.color='#555'`
   const titleBar = `
     <div style="-webkit-app-region:drag;display:flex;align-items:center;padding:10px 16px 10px 78px;background:color-mix(in srgb, #ffffff 75%, transparent);-webkit-backdrop-filter:blur(16px) saturate(180%);backdrop-filter:blur(16px) saturate(180%);flex-shrink:0;gap:10px">
-      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px">
-        <span style="font-size:14px;color:#111;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name}</span>
-        <a href="#" onclick="event.preventDefault();window.postMessage({action:'open-folder'})" style="-webkit-app-region:no-drag;font-size:11px;color:#666;font-weight:400;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" onmouseover="this.style.color='#333'" onmouseout="this.style.color='#666'">${dir}</a>
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:0">
+        <span style="font-size:14px;color:#111;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.3">${name}</span>
+        <a href="#" onclick="event.preventDefault();window.postMessage({action:'open-folder'})" style="-webkit-app-region:no-drag;font-size:11px;color:#666;font-weight:400;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;line-height:1.3" onmouseover="this.style.color='#333'" onmouseout="this.style.color='#666'">${dir}</a>
       </div>
       <button onclick="window.postMessage({action:'open-file'})" style="${btnStyle}" onmouseover="${btnHoverIn}" onmouseout="${btnHoverOut}">Open</button>
     </div>
