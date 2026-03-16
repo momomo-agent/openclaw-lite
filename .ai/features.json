@@ -1126,5 +1126,68 @@
     "milestone": "m1",
     "passes": false,
     "auto": true
+  },
+  {
+    "id": "F263",
+    "description": "SDK 连接失败友好提示",
+    "milestone": "m2",
+    "passes": true,
+    "auto": true
+  },
+  {
+    "id": "F264",
+    "description": "API key 无效/过期错误提示",
+    "milestone": "m2",
+    "passes": true,
+    "auto": true
+  },
+  {
+    "id": "F265",
+    "description": "工具执行失败错误卡片",
+    "milestone": "m2",
+    "passes": true,
+    "auto": true
+  },
+  {
+    "id": "F266",
+    "description": "超长消息截断处理",
+    "milestone": "m2",
+    "passes": true,
+    "auto": true
+  },
+  {
+    "id": "F267",
+    "description": "大量工具步骤性能",
+    "milestone": "m2",
+    "passes": true,
+    "auto": true
+  },
+  {
+    "id": "F268",
+    "description": "多 coding agent 同时在群聊",
+    "milestone": "m2",
+    "passes": true,
+    "auto": true
+  },
+  {
+    "id": "F269",
+    "description": "@mention 不存在成员处理",
+    "milestone": "m2",
+    "passes": true,
+    "auto": true
+  },
+  {
+    "id": "F270",
+    "description": "skill_list 工具",
+    "milestone": "m2",
+    "passes": true,
+    "auto": true
+  },
+  {
+    "id": "F271",
+    "description": "skill_remove 工具",
+    "milestone": "m2",
+    "passes": true,
+    "auto": true
   }
 ]

@@ -8,6 +8,8 @@ require('./search');
 require('./skill');
 require('./skill-install');
 require('./skill-create');
+require('./skill-list');
+require('./skill-remove');
 require('./notify');
 require('./ui-status');
 require('./memory');

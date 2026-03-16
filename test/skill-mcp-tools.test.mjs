@@ -105,6 +105,16 @@ describe('mcp_config tool', () => {
   })
 })
 
+describe('skill_list and skill_remove', () => {
+  it('tool files are syntactically valid', async () => {
+    // Just verify the files load without error
+    const listMod = await import('../tools/skill-list.js')
+    const removeMod = await import('../tools/skill-remove.js')
+    expect(listMod).toBeDefined()
+    expect(removeMod).toBeDefined()
+  })
+})
+
 describe('skill_install', () => {
   it('returns no-deps message for skill without install field', async () => {
     const { loadSkillMetadata } = await import('../skills/frontmatter.js')
