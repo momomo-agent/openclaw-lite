@@ -417,21 +417,21 @@
     "id": "F085",
     "category": "core",
     "description": "acpx 依赖接入 + 可用性检测",
-    "passes": false,
+    "passes": true,
     "milestone": "M22"
   },
   {
     "id": "F086",
     "category": "core",
     "description": "acpx 核心封装（exec/prompt/cancel/status/setMode）",
-    "passes": false,
+    "passes": true,
     "milestone": "M22"
   },
   {
     "id": "F087",
     "category": "core",
     "description": "CC 工具迁移到 acpx（替代 PTY spawn）",
-    "passes": false,
+    "passes": true,
     "milestone": "M22"
   },
   {
@@ -459,7 +459,7 @@
     "id": "F091",
     "category": "core",
     "description": "M22 集成验证",
-    "passes": false,
+    "passes": true,
     "milestone": "M22"
   },
   {
