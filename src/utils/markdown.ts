@@ -84,6 +84,19 @@ function getRenderer() {
 
   const renderer = new window.marked.Renderer()
 
+  // Code renderer: detect mermaid, render as <pre class="mermaid">
+  renderer.code = function (token: any) {
+    const lang = token.lang || ''
+    const code = token.text || ''
+    if (lang === 'mermaid') {
+      return `<pre class="mermaid">${code}</pre>`
+    }
+    // Default: highlighted code block
+    const langClass = lang ? ` class="language-${lang}"` : ''
+    const highlighted = window.hljs && lang ? window.hljs.highlight(code, { language: lang, ignoreIllegals: true }).value : code
+    return `<pre><code${langClass}>${highlighted}</code></pre>`
+  }
+
   // Image renderer: detect audio/video by extension, otherwise render as <img>
   renderer.image = function (token: any) {
     const rawHref = token.href || ''

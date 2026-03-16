@@ -1,6 +1,7 @@
-import React from 'react'
+import React, { useEffect, useRef } from 'react'
 import { Message, ToolStep } from '../types'
 import { renderMarkdown } from '../utils/markdown'
+import { renderMermaidBlocks } from '../utils/mermaid-render'
 import { useAppState } from '../store'
 import { Avatar } from './Avatar'
 import ToolGroup from './ToolGroup'
@@ -15,9 +16,17 @@ interface MessageItemProps {
 
 export default function MessageItem({ message, isStreaming, statusText, ownerWorkspaceId, onRetry }: MessageItemProps) {
   const { workspaces, userProfile, showTools } = useAppState()
+  const contentRef = useRef<HTMLDivElement>(null)
   const isUser = message.role === 'user'
   const isError = message.isError === true  // assistant message that errored
   const isA2A = message.role === 'agent-to-agent'
+
+  // Render mermaid diagrams after content updates
+  useEffect(() => {
+    if (!isUser && message.content) {
+      renderMermaidBlocks(contentRef.current)
+    }
+  }, [message.content, isUser])
 
   // Dynamic workspace identity resolution — always use live identity, never stale history
   // Priority: workspaceId/senderWorkspaceId → workspacePath → ownerWorkspaceId → first workspace
@@ -121,6 +130,7 @@ export default function MessageItem({ message, isStreaming, statusText, ownerWor
           ) : (
             message.content?.trim() ? (
               <div
+                ref={contentRef}
                 className={`msg-content md-content${isA2A ? ' a2a-content' : ''}`}
                 dangerouslySetInnerHTML={{ __html: renderContent(message.content) }}
               />
