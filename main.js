@@ -1075,9 +1075,7 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
     content = `
       <link rel="stylesheet" href="file://${encodeURI(hljsCssPath)}">
       <script src="file://${encodeURI(hljsPath)}"></script>
-      <div style="flex:1;overflow:auto;padding:16px 24px;background:#fff">
-        <pre style="margin:0;background:#f7f7f6;padding:16px;border-radius:8px;border:1px solid #dddcda;overflow-x:auto;font-size:13px;line-height:1.6;tab-size:4"><code id="code-body" class="language-${lang}"></code></pre>
-      </div>
+      <pre style="flex:1;margin:0;background:#fff;padding:16px 24px;overflow:auto;font-size:13px;line-height:1.6;tab-size:4"><code id="code-body" class="language-${lang}"></code></pre>
       <script>
         const raw = \`${escaped}\`;
         document.getElementById('code-body').textContent = raw;
