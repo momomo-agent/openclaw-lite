@@ -978,9 +978,8 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
   const win = new BrowserWindow({
     width: isAudio ? 420 : 800,
     height: isAudio ? 180 : 600,
-    frame: false,
-    titleBarStyle: 'hidden',
-    trafficLightPosition: { x: -100, y: -100 },
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 14, y: 12 },
     transparent: false,
     vibrancy: 'under-window',
     webPreferences: { nodeIntegration: false, contextIsolation: true },
@@ -988,11 +987,10 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
 
   const btnStyle = `-webkit-app-region:no-drag;background:#2a2a2a;border:none;color:#aaa;font-size:11px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:system-ui`
   const titleBar = `
-    <div style="-webkit-app-region:drag;display:flex;align-items:center;height:38px;padding:0 12px;background:#1a1a1a;border-bottom:1px solid #2a2a2a;flex-shrink:0;gap:6px">
+    <div style="-webkit-app-region:drag;display:flex;align-items:center;height:38px;padding:0 12px 0 78px;background:#1a1a1a;border-bottom:1px solid #2a2a2a;flex-shrink:0;gap:6px">
       <span style="font-size:12px;color:#888;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${name}</span>
       <button onclick="window.postMessage({action:'open-file'})" style="${btnStyle}" onmouseover="this.style.background='#333'" onmouseout="this.style.background='#2a2a2a'">Open</button>
       <button onclick="window.postMessage({action:'open-folder'})" style="${btnStyle}" onmouseover="this.style.background='#333'" onmouseout="this.style.background='#2a2a2a'">Folder</button>
-      <button onclick="window.close()" style="${btnStyle};font-size:14px;padding:2px 8px;line-height:1" onmouseover="this.style.background='#e53935';this.style.color='#fff'" onmouseout="this.style.background='#2a2a2a';this.style.color='#aaa'">×</button>
     </div>
     <script>window.addEventListener('message',e=>{const a=e.data?.action;if(a)fetch('paw-action://'+a).catch(()=>{})})</script>
   `
