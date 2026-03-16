@@ -437,22 +437,23 @@
   {
     "id": "F088",
     "category": "ux",
-    "description": "CC UX 适配（JSONL 事件解析 + Cancel + 状态面板）",
-    "passes": false,
-    "milestone": "M22"
+    "description": "JSONL事件解析 + Cancel (abort) 支持",
+    "passes": true,
+    "milestone": "M22",
+    "title": "CC UX 适配（JSONL 事件解析 + Cancel）"
   },
   {
     "id": "F089",
     "category": "core",
     "description": "acpx Session 管理（持久化 + session 切换保留）",
-    "passes": false,
+    "passes": true,
     "milestone": "M22"
   },
   {
     "id": "F090",
     "category": "core",
     "description": "多 Harness 支持（Codex / Gemini CLI 切换）",
-    "passes": false,
+    "passes": true,
     "milestone": "M22"
   },
   {

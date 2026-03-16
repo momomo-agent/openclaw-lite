@@ -14,6 +14,8 @@ const workspaceRegistry = require('./workspace-registry')
 // Persistent map: ccSessionKey → Claude Code SDK session ID
 // Survives app restart so coding agents don't lose conversation history
 const sessionCCSessions = new Map()
+// Active ClaudeCodeSession instances (for abort support)
+const activeCCSessions = new Map()
 const CC_SESSIONS_FILE = '.paw/cc-sessions.json'
 
 function loadCCSessions() {
@@ -147,13 +149,16 @@ async function routeToCodingAgentSDK(workspace, message, { sessionId, requestId,
       if (session.sessionId) {
         saveCCSession(ccSessionKey, session.sessionId)
       }
+      activeCCSessions.delete(sessionId)
     },
     onError: (err) => {
       console.error(`[claude-code-sdk] error:`, err)
+      activeCCSessions.delete(sessionId)
     }
   })
 
   try {
+    activeCCSessions.set(sessionId, session)
     const result = await session.send(message)
 
     if (parentRequestId && senderName) {
@@ -206,4 +211,15 @@ async function streamCodingAgent(agentId, prompt, { cwd, sessionId, requestId },
   }
 }
 
-module.exports = { loadCCSessions, routeToCodingAgent, routeToCodingAgentSDK, streamCodingAgent }
+/** Cancel an active coding agent session */
+function cancelCodingAgent(sessionId) {
+  const session = activeCCSessions.get(sessionId)
+  if (session) {
+    session.abort()
+    activeCCSessions.delete(sessionId)
+    return true
+  }
+  return false
+}
+
+module.exports = { loadCCSessions, routeToCodingAgent, routeToCodingAgentSDK, streamCodingAgent, cancelCodingAgent }

@@ -18,6 +18,12 @@ class ClaudeCodeSession {
     this.onError = onError
     this.model = model
     this.sessionId = sessionId || null
+    this._aborted = false
+  }
+
+  /** Cancel the current query */
+  abort() {
+    this._aborted = true
   }
 
   /**
@@ -42,6 +48,7 @@ class ClaudeCodeSession {
   }
 
   async _doSend(message) {
+    this._aborted = false
     const env = {
       ...process.env,
       CLAUDECODE: undefined,  // Bypass nested session detection
@@ -67,6 +74,10 @@ class ClaudeCodeSession {
     let assistantText = ''
 
     for await (const msg of query({ prompt: message, options: opts })) {
+      if (this._aborted) {
+        console.log('[ClaudeCodeSession] Aborted')
+        break
+      }
       if (msg.type === 'system' && msg.subtype === 'init') {
         this.sessionId = msg.session_id
         console.log('[ClaudeCodeSession] Session:', this.sessionId)
