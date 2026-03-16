@@ -4,175 +4,348 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Paw — Portable AI Workspace</title>
+<meta name="description" content="Turn any folder into an AI workspace. Local-first, multi-agent, AI-native desktop app for macOS.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
+:root {
+  --fg: #e8e8e6;
+  --fg-dim: #8a8a86;
+  --fg-faint: #5a5a57;
+  --bg: #111110;
+  --bg-raised: #1a1a18;
+  --bg-hover: #222220;
+  --accent: #c4b5a0;
+  --accent-dim: #8a7e6e;
+  --border: rgba(255,255,255,0.06);
+  --border-hover: rgba(255,255,255,0.12);
+  --radius: 10px;
+  --font: 'DM Sans', -apple-system, sans-serif;
+  --mono: 'JetBrains Mono', 'SF Mono', monospace;
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
-  background: #0a0a0a; color: #e0e0e0; line-height: 1.6;
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--fg);
   -webkit-font-smoothing: antialiased;
+  line-height: 1.6;
+  overflow-x: hidden;
 }
-a { color: #ccc; text-decoration: none; }
-a:hover { color: #fff; }
+
+a { color: var(--fg-dim); text-decoration: none; transition: color 0.15s; }
+a:hover { color: var(--fg); }
+
+/* ── Nav ── */
+.nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  padding: 16px 32px;
+  display: flex; align-items: center; justify-content: space-between;
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  background: rgba(17,17,16,0.75);
+  border-bottom: 1px solid var(--border);
+}
+.nav-brand {
+  display: flex; align-items: center; gap: 10px;
+  font-weight: 700; font-size: 15px; color: var(--fg);
+  letter-spacing: -0.02em;
+}
+.nav-brand span { font-size: 18px; }
+.nav-links { display: flex; gap: 24px; font-size: 13px; font-weight: 500; }
+.nav-links a { color: var(--fg-dim); }
+.nav-links a:hover { color: var(--fg); }
+
+/* ── Hero ── */
 .hero {
-  min-height: 80vh; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; text-align: center;
-  padding: 80px 24px 60px;
+  min-height: 100vh;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center;
+  padding: 120px 24px 80px;
+  position: relative;
 }
-.hero-icon { font-size: 64px; margin-bottom: 24px; }
-.hero h1 { font-size: 48px; font-weight: 700; letter-spacing: -1px; color: #fff; }
-.hero .tagline { font-size: 18px; color: #888; margin-top: 12px; max-width: 520px; }
-.hero .version { font-size: 13px; color: #555; margin-top: 8px; }
-.hero-actions { margin-top: 32px; display: flex; gap: 12px; }
+.hero::before {
+  content: '';
+  position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  width: 600px; height: 600px;
+  background: radial-gradient(circle, rgba(196,181,160,0.06) 0%, transparent 70%);
+  pointer-events: none;
+}
+.hero-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 14px; border-radius: 100px;
+  background: var(--bg-raised); border: 1px solid var(--border);
+  font-size: 12px; font-weight: 500; color: var(--fg-dim);
+  margin-bottom: 32px;
+}
+.hero-badge .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #6b8f71;
+  animation: pulse 2s ease infinite;
+}
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+.hero h1 {
+  font-size: clamp(42px, 6vw, 72px);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
+  color: var(--fg);
+  max-width: 680px;
+}
+.hero h1 em {
+  font-style: normal;
+  color: var(--accent);
+}
+.hero-sub {
+  font-size: 17px; color: var(--fg-dim);
+  margin-top: 20px; max-width: 460px; line-height: 1.65;
+  font-weight: 400;
+}
+.hero-actions {
+  margin-top: 36px;
+  display: flex; gap: 12px; align-items: center;
+}
 .btn {
-  padding: 12px 28px; border-radius: 8px; font-size: 14px;
-  font-weight: 600; transition: opacity 0.15s; display: inline-block;
+  padding: 11px 24px; border-radius: 8px;
+  font-size: 14px; font-weight: 600; font-family: var(--font);
+  cursor: pointer; transition: all 0.15s; border: none;
+  display: inline-flex; align-items: center; gap: 8px;
 }
-.btn-primary { background: #e0e0e0; color: #0a0a0a; }
-.btn-primary:hover { opacity: 0.85; color: #0a0a0a; }
-.btn-ghost { border: 1px solid #333; color: #ccc; }
-.btn-ghost:hover { border-color: #555; color: #fff; }
-.features {
-  max-width: 960px; margin: 0 auto; padding: 60px 24px;
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 24px;
+.btn-primary {
+  background: var(--fg); color: var(--bg);
 }
-.feature {
-  padding: 24px; border: 1px solid #ffffff08; border-radius: 12px; background: #0f0f0f;
+.btn-primary:hover { opacity: 0.88; }
+.btn-ghost {
+  background: transparent; color: var(--fg-dim);
+  border: 1px solid var(--border);
 }
-.feature-icon { font-size: 28px; margin-bottom: 12px; }
-.feature h3 { font-size: 15px; font-weight: 600; color: #fff; margin-bottom: 6px; }
-.feature p { font-size: 13px; color: #777; }
-.section { max-width: 640px; margin: 0 auto; padding: 60px 24px; }
-.section h2 {
-  font-size: 28px; font-weight: 700; color: #fff; margin-bottom: 24px; letter-spacing: -0.5px;
+.btn-ghost:hover { border-color: var(--border-hover); color: var(--fg); }
+.hero-meta {
+  margin-top: 16px;
+  font-size: 12px; color: var(--fg-faint); font-weight: 500;
 }
-.steps { display: flex; flex-direction: column; gap: 16px; }
-.step {
-  display: flex; gap: 16px; align-items: flex-start;
-  padding: 16px; border-radius: 8px; background: #0f0f0f;
+
+/* ── Features ── */
+.features-section {
+  max-width: 960px; margin: 0 auto;
+  padding: 80px 24px;
 }
+.features-section h2 {
+  font-size: 13px; font-weight: 600; color: var(--accent-dim);
+  letter-spacing: 0.08em; text-transform: uppercase;
+  margin-bottom: 48px; text-align: center;
+}
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.feat {
+  padding: 32px 28px;
+  background: var(--bg);
+  transition: background 0.2s;
+}
+.feat:hover { background: var(--bg-raised); }
+.feat-title {
+  font-size: 14px; font-weight: 600; color: var(--fg);
+  margin-bottom: 8px; letter-spacing: -0.01em;
+}
+.feat-desc {
+  font-size: 13px; color: var(--fg-dim); line-height: 1.6;
+}
+
+/* ── How it works ── */
+.how-section {
+  max-width: 580px; margin: 0 auto;
+  padding: 80px 24px;
+}
+.how-section h2 {
+  font-size: 28px; font-weight: 700; color: var(--fg);
+  letter-spacing: -0.03em; margin-bottom: 40px;
+}
+.steps { display: flex; flex-direction: column; gap: 0; }
+.step-item {
+  display: flex; gap: 20px; padding: 20px 0;
+  border-bottom: 1px solid var(--border);
+}
+.step-item:last-child { border-bottom: none; }
 .step-num {
-  width: 28px; height: 28px; border-radius: 50%; background: #1a1a1a;
-  color: #888; font-size: 13px; font-weight: 600;
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  font-family: var(--mono); font-size: 12px; font-weight: 500;
+  color: var(--accent-dim);
+  padding-top: 2px; flex-shrink: 0;
+  width: 24px;
 }
-.step-text h4 { font-size: 14px; color: #fff; font-weight: 600; }
-.step-text p { font-size: 13px; color: #666; margin-top: 2px; }
-.code-block {
-  background: #111; border: 1px solid #ffffff0d; border-radius: 8px;
-  padding: 16px 20px; font-family: 'SF Mono', monospace; font-size: 13px;
-  color: #999; overflow-x: auto; margin-top: 24px;
+.step-body h4 {
+  font-size: 14px; font-weight: 600; color: var(--fg);
+  margin-bottom: 4px;
 }
-.code-block .comment { color: #555; }
-.code-block .highlight { color: #e0e0e0; }
+.step-body p {
+  font-size: 13px; color: var(--fg-dim); line-height: 1.55;
+}
+
+/* ── Workspace structure ── */
+.workspace-section {
+  max-width: 580px; margin: 0 auto;
+  padding: 40px 24px 80px;
+}
+.ws-block {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px 28px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--fg-dim);
+}
+.ws-block .path { color: var(--fg); font-weight: 500; }
+.ws-block .comment { color: var(--fg-faint); }
+
+/* ── Footer ── */
 .footer {
-  text-align: center; padding: 40px 24px; color: #444; font-size: 13px;
-  border-top: 1px solid #ffffff08;
+  text-align: center;
+  padding: 40px 24px;
+  font-size: 12px; color: var(--fg-faint);
+  border-top: 1px solid var(--border);
 }
-.footer a { color: #666; }
+.footer a { color: var(--fg-dim); }
+.footer a:hover { color: var(--fg); }
+.footer-links { display: flex; gap: 20px; justify-content: center; margin-bottom: 12px; }
+
+/* ── Responsive ── */
+@media (max-width: 720px) {
+  .features-grid { grid-template-columns: 1fr; }
+  .nav-links { display: none; }
+  .hero-actions { flex-direction: column; }
+}
+@media (max-width: 480px) {
+  .hero h1 { font-size: 36px; }
+}
 </style>
 </head>
 <body>
 
-<div class="hero">
-  <div class="hero-icon">🐾</div>
-  <h1>Paw</h1>
-  <p class="tagline">Portable AI workspace. One folder, one assistant. Local-first, multi-agent, AI-native.</p>
-  <p class="version">v0.23.0 — macOS (Apple Silicon)</p>
+<nav class="nav">
+  <div class="nav-brand"><span>🐾</span> Paw</div>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#start">Get Started</a>
+    <a href="https://github.com/momomo-agent/paw">GitHub</a>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="hero-badge"><span class="dot"></span> v0.23.0 — macOS Apple Silicon</div>
+  <h1>Your folders,<br><em>your AI.</em></h1>
+  <p class="hero-sub">Turn any directory into an AI workspace. Multi-agent chat, coding assistants, skills, and memory — all local-first.</p>
   <div class="hero-actions">
-    <a href="https://github.com/momomo-agent/paw/releases" class="btn btn-primary">Download for Mac</a>
-    <a href="https://github.com/momomo-agent/paw" class="btn btn-ghost">GitHub</a>
+    <a href="https://github.com/momomo-agent/paw/releases/latest" class="btn btn-primary">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1v10M4 7l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      Download for Mac
+    </a>
+    <a href="https://github.com/momomo-agent/paw" class="btn btn-ghost">Source Code</a>
   </div>
-</div>
+  <p class="hero-meta">Signed & notarized · Free & open source</p>
+</section>
 
-<div class="features">
-  <div class="feature">
-    <div class="feature-icon">📁</div>
-    <h3>One Folder = One Workspace</h3>
-    <p>Config, skills, memory, sessions — all in one directory. Copy it anywhere and keep going.</p>
+<section class="features-section" id="features">
+  <h2>What's inside</h2>
+  <div class="features-grid">
+    <div class="feat">
+      <div class="feat-title">One Folder = One Workspace</div>
+      <div class="feat-desc">Config, skills, memory, sessions — all in one directory. Copy it anywhere and keep working.</div>
+    </div>
+    <div class="feat">
+      <div class="feat-title">Multi-Agent Chat</div>
+      <div class="feat-desc">Create agents with custom personalities. @mention routing, avatars, group conversations.</div>
+    </div>
+    <div class="feat">
+      <div class="feat-title">Coding Agents</div>
+      <div class="feat-desc">Claude Code, Codex, Gemini CLI as chat participants. Auto-detected, first-class streaming.</div>
+    </div>
+    <div class="feat">
+      <div class="feat-title">20+ Built-in Tools</div>
+      <div class="feat-desc">Search, code exec, file I/O, shell, MCP, cron, web fetch — autonomous multi-round loop.</div>
+    </div>
+    <div class="feat">
+      <div class="feat-title">File Preview</div>
+      <div class="feat-desc">Markdown rendering, syntax highlighting for 50+ languages, Mermaid diagrams, native Quick Look.</div>
+    </div>
+    <div class="feat">
+      <div class="feat-title">Skills & MCP</div>
+      <div class="feat-desc">SKILL.md injection + script execution. Native MCP client with dynamic tool registration.</div>
+    </div>
+    <div class="feat">
+      <div class="feat-title">Persistent Memory</div>
+      <div class="feat-desc">Shared memory/ directory with real-time file watching and full-text search index.</div>
+    </div>
+    <div class="feat">
+      <div class="feat-title">Multi-Provider</div>
+      <div class="feat-desc">Anthropic + OpenAI compatible. API key rotation on rate limits. Multiple keys supported.</div>
+    </div>
+    <div class="feat">
+      <div class="feat-title">5 Themes</div>
+      <div class="feat-desc">Dark, Light, Claude, Codex. Per-card status, frosted glass headers, AI-native menubar.</div>
+    </div>
   </div>
-  <div class="feature">
-    <div class="feature-icon">🤖</div>
-    <h3>Multi-Agent Chat</h3>
-    <p>Create agents with custom personalities. Discord-style UI with avatars and @mentions.</p>
-  </div>
-  <div class="feature">
-    <div class="feature-icon">💻</div>
-    <h3>Coding Agent</h3>
-    <p>Claude Code, Codex, Gemini CLI as first-class chat participants. Auto-detected from your system.</p>
-  </div>
-  <div class="feature">
-    <div class="feature-icon">🔧</div>
-    <h3>20+ Built-in Tools</h3>
-    <p>Search, code exec, file I/O, shell, MCP, skills, cron — autonomous multi-round tool loop.</p>
-  </div>
-  <div class="feature">
-    <div class="feature-icon">📄</div>
-    <h3>File Preview</h3>
-    <p>Markdown rendering, syntax-highlighted code, Mermaid diagrams, and native Quick Look for images.</p>
-  </div>
-  <div class="feature">
-    <div class="feature-icon">🧠</div>
-    <h3>Memory Sync</h3>
-    <p>Shared memory/ directory across sessions. Real-time file watching + full-text search index.</p>
-  </div>
-  <div class="feature">
-    <div class="feature-icon">🔌</div>
-    <h3>Skills & MCP</h3>
-    <p>Full SKILL.md injection + script execution. Native MCP client with dynamic tool registration.</p>
-  </div>
-  <div class="feature">
-    <div class="feature-icon">🎨</div>
-    <h3>5 Themes</h3>
-    <p>Dark, Light, Claude, Codex, and more. Per-card status lines and frosted glass headers.</p>
-  </div>
-  <div class="feature">
-    <div class="feature-icon">🐾</div>
-    <h3>AI-Native Menubar</h3>
-    <p>Paw lives in your menubar. Real-time status text, quick actions, always one click away.</p>
-  </div>
-</div>
+</section>
 
-<div class="section">
-  <h2>Get started in 30 seconds</h2>
+<section class="how-section" id="start">
+  <h2>Get started</h2>
   <div class="steps">
-    <div class="step">
-      <div class="step-num">1</div>
-      <div class="step-text">
-        <h4>Open Paw</h4>
-        <p>Download the signed & notarized DMG, drag to Applications, launch.</p>
+    <div class="step-item">
+      <div class="step-num">01</div>
+      <div class="step-body">
+        <h4>Download & install</h4>
+        <p>Grab the signed DMG, drag to Applications, launch. No Gatekeeper warnings.</p>
       </div>
     </div>
-    <div class="step">
-      <div class="step-num">2</div>
-      <div class="step-text">
-        <h4>Pick a folder</h4>
-        <p>Choose any directory as your workspace. Or point to an existing OpenClaw workspace.</p>
+    <div class="step-item">
+      <div class="step-num">02</div>
+      <div class="step-body">
+        <h4>Name your assistant</h4>
+        <p>Pick an avatar, give it a name. You'll set up your API key in the same flow.</p>
       </div>
     </div>
-    <div class="step">
-      <div class="step-num">3</div>
-      <div class="step-text">
-        <h4>Add your API key</h4>
-        <p>Click ⚙️, paste your Anthropic or OpenAI key. Start chatting.</p>
+    <div class="step-item">
+      <div class="step-num">03</div>
+      <div class="step-body">
+        <h4>Start chatting</h4>
+        <p>Your workspace is ready. Add skills, create agents, connect coding CLIs. Everything stays in one folder.</p>
       </div>
     </div>
   </div>
+</section>
 
-  <div class="code-block">
-    <span class="comment"># Your workspace structure</span><br>
-    <span class="highlight">~/my-workspace/</span><br>
-    ├── SOUL.md &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># personality</span><br>
-    ├── MEMORY.md &nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># long-term memory</span><br>
-    ├── agents/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># custom agents</span><br>
-    ├── memory/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># shared memory (real-time sync)</span><br>
-    ├── skills/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># capabilities (inject + execute)</span><br>
-    └── .paw/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># config, sessions, index</span>
+<section class="workspace-section">
+  <div class="ws-block">
+    <span class="path">~/my-workspace/</span><br>
+    ├── SOUL.md <span class="comment">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;# personality</span><br>
+    ├── MEMORY.md <span class="comment">&nbsp;&nbsp;&nbsp;# long-term memory</span><br>
+    ├── agents/ <span class="comment">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;# custom agents</span><br>
+    ├── memory/ <span class="comment">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;# shared context</span><br>
+    ├── skills/ <span class="comment">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;# capabilities</span><br>
+    └── .paw/ <span class="comment">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;# config & sessions</span>
   </div>
-</div>
+</section>
 
-<div class="footer">
-  <p>Built by <a href="https://github.com/momomo-agent">momomo-agent</a> · <a href="https://github.com/momomo-agent/paw">Source</a> · Signed & notarized for macOS</p>
-</div>
+<footer class="footer">
+  <div class="footer-links">
+    <a href="https://github.com/momomo-agent/paw">GitHub</a>
+    <a href="https://github.com/momomo-agent/paw/releases">Releases</a>
+    <a href="https://github.com/momomo-agent">momomo-agent</a>
+  </div>
+  <p>Built with care. Signed & notarized for macOS.</p>
+</footer>
 
 </body>
 </html>
