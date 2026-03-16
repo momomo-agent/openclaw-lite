@@ -540,6 +540,7 @@ app.whenReady().then(() => {
   tray = new Tray(trayIcon)
   tray.setToolTip('Paw - 空闲待命中')
   tray.on('click', () => { mainWindow?.show(); mainWindow?.focus() })
+  tray.on('right-click', () => { if (tray?._menu) tray.popUpContextMenu(tray._menu) })
   updateTrayMenu()
 
   // Sync all globals to core/state after initialization
@@ -1677,13 +1678,12 @@ function updateTrayTitle() {
 
 function updateTrayMenu() {
   if (!tray) return
-  const menu = Menu.buildFromTemplate([
+  tray._menu = Menu.buildFromTemplate([
     { label: '打开 Paw', click: () => { mainWindow?.show(); mainWindow?.focus() } },
     { label: '新建对话', click: () => { mainWindow?.show(); eventBus.dispatch('tray-new-chat', {}) } },
     { type: 'separator' },
     { label: '退出', click: () => app.quit() },
   ])
-  tray.setContextMenu(menu)
 }
 
 // requestId is optional - when provided, renderer routes to per-card status
