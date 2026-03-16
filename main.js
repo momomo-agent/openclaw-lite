@@ -987,14 +987,16 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
     webPreferences: { nodeIntegration: false, contextIsolation: true },
   })
 
-  const btnStyle = `-webkit-app-region:no-drag;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);color:#999;font-size:11px;padding:3px 10px;border-radius:6px;cursor:pointer;font-family:system-ui`
-  const btnHoverIn = `this.style.background='rgba(255,255,255,0.1)';this.style.borderColor='rgba(255,255,255,0.15)';this.style.color='#ccc'`
-  const btnHoverOut = `this.style.background='rgba(255,255,255,0.06)';this.style.borderColor='rgba(255,255,255,0.08)';this.style.color='#999'`
+  const btnStyle = `-webkit-app-region:no-drag;background:rgba(0,0,0,0.04);border:1px solid rgba(0,0,0,0.08);color:#555;font-size:11px;padding:3px 10px;border-radius:6px;cursor:pointer;font-family:system-ui`
+  const btnHoverIn = `this.style.background='rgba(0,0,0,0.08)';this.style.color='#333'`
+  const btnHoverOut = `this.style.background='rgba(0,0,0,0.04)';this.style.color='#555'`
   const titleBar = `
-    <div style="-webkit-app-region:drag;display:flex;align-items:center;padding:10px 16px 10px 78px;background:color-mix(in srgb, #0a0a0a 75%, transparent);-webkit-backdrop-filter:blur(16px) saturate(180%);backdrop-filter:blur(16px) saturate(180%);flex-shrink:0;gap:8px;border-bottom:1px solid rgba(255,255,255,0.06)">
-      <span style="font-size:14px;color:#e0e0e0;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${name}</span>
+    <div style="-webkit-app-region:drag;display:flex;align-items:center;padding:10px 16px 10px 78px;background:color-mix(in srgb, #ffffff 85%, transparent);-webkit-backdrop-filter:blur(16px) saturate(180%);backdrop-filter:blur(16px) saturate(180%);flex-shrink:0;gap:8px;border-bottom:1px solid rgba(0,0,0,0.08)">
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px">
+        <span style="font-size:14px;color:#111;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name}</span>
+        <a href="#" onclick="event.preventDefault();window.postMessage({action:'open-folder'})" style="-webkit-app-region:no-drag;font-size:11px;color:#999;font-weight:400;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" onmouseover="this.style.color='#555'" onmouseout="this.style.color='#999'">${dir}</a>
+      </div>
       <button onclick="window.postMessage({action:'open-file'})" style="${btnStyle}" onmouseover="${btnHoverIn}" onmouseout="${btnHoverOut}">Open</button>
-      <button onclick="window.postMessage({action:'open-folder'})" style="${btnStyle}" onmouseover="${btnHoverIn}" onmouseout="${btnHoverOut}">Folder</button>
     </div>
     <script>window.addEventListener('message',e=>{const a=e.data?.action;if(a)fetch('paw-action://'+a).catch(()=>{})})</script>
   `
@@ -1002,11 +1004,11 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
 
   let content = ''
   if (imgExts.includes(ext)) {
-    content = `<div style="flex:1;display:flex;align-items:center;justify-content:center;background:#111;overflow:hidden"><img src="${fileUri}" style="max-width:100%;max-height:100%;object-fit:contain"></div>`
+    content = `<div style="flex:1;display:flex;align-items:center;justify-content:center;background:#f7f7f6;overflow:hidden"><img src="${fileUri}" style="max-width:100%;max-height:100%;object-fit:contain"></div>`
   } else if (vidExts.includes(ext)) {
-    content = `<div style="flex:1;display:flex;align-items:center;justify-content:center;background:#111;overflow:hidden"><video src="${fileUri}" controls autoplay style="max-width:100%;max-height:100%"></video></div>`
+    content = `<div style="flex:1;display:flex;align-items:center;justify-content:center;background:#f7f7f6;overflow:hidden"><video src="${fileUri}" controls autoplay style="max-width:100%;max-height:100%"></video></div>`
   } else if (isAudio) {
-    content = `<div style="flex:1;display:flex;align-items:center;justify-content:center;background:#1a1a1a"><audio src="${fileUri}" controls autoplay style="width:90%"></audio></div>`
+    content = `<div style="flex:1;display:flex;align-items:center;justify-content:center;background:#fff"><audio src="${fileUri}" controls autoplay style="width:90%"></audio></div>`
   } else if (mdExts.includes(ext)) {
     // Use same marked + hljs as the main app for consistent rendering
     const markedPath = path.join(__dirname, 'renderer', 'lib', 'marked.js')
@@ -1021,21 +1023,21 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
       <script src="file://${encodeURI(markedPath)}"></script>
       <script src="file://${encodeURI(hljsPath)}"></script>
       <script src="file://${encodeURI(markedHighlightPath)}"></script>
-      <div id="md-body" style="flex:1;overflow-y:auto;padding:24px 32px;background:#1a1a1a" class="md-content"></div>
+      <div id="md-body" style="flex:1;overflow-y:auto;padding:24px 32px;background:#fff" class="md-content"></div>
       <style>
-        .md-content{color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif;line-height:1.7;font-size:14px}
-        .md-content h1,.md-content h2,.md-content h3{color:#fff;margin:1em 0 .3em}
-        .md-content h1{font-size:1.6em;border-bottom:1px solid #333;padding-bottom:.2em}
+        .md-content{color:#111;font-family:system-ui,-apple-system,sans-serif;line-height:1.7;font-size:14px}
+        .md-content h1,.md-content h2,.md-content h3{color:#000;margin:1em 0 .3em}
+        .md-content h1{font-size:1.6em;border-bottom:1px solid #dddcda;padding-bottom:.2em}
         .md-content h2{font-size:1.3em}.md-content h3{font-size:1.1em}
-        .md-content pre{background:#111;padding:14px;border-radius:6px;overflow-x:auto;font-size:13px}
-        .md-content code{background:#222;padding:2px 5px;border-radius:3px;font-size:13px}
-        .md-content pre code{background:none;padding:0}
-        .md-content a{color:#7aa2f7;text-decoration:none}.md-content a:hover{text-decoration:underline}
-        .md-content li{margin:3px 0}.md-content strong{color:#fff}
-        .md-content blockquote{border-left:3px solid #444;margin:8px 0;padding:4px 16px;color:#aaa}
+        .md-content pre{background:#f7f7f6;padding:14px;border-radius:6px;overflow-x:auto;font-size:13px}
+        .md-content code{background:#f0f0ef;padding:2px 5px;border-radius:3px;font-size:13px;color:#9a3412}
+        .md-content pre code{background:none;padding:0;color:inherit}
+        .md-content a{color:#1d4ed8;text-decoration:none}.md-content a:hover{text-decoration:underline}
+        .md-content li{margin:3px 0}.md-content strong{color:#000}
+        .md-content blockquote{border-left:3px solid #d4d3d1;margin:8px 0;padding:4px 16px;color:#555}
         .md-content table{border-collapse:collapse;width:100%;margin:12px 0}
-        .md-content th,.md-content td{border:1px solid #333;padding:8px 12px;text-align:left}
-        .md-content th{background:#222;color:#fff;font-weight:600}
+        .md-content th,.md-content td{border:1px solid #dddcda;padding:8px 12px;text-align:left}
+        .md-content th{background:#f0f0ef;color:#000;font-weight:600}
         .md-content img{max-width:100%;border-radius:6px}
       </style>
       <script>
@@ -1050,7 +1052,7 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
       </script>`
   }
 
-  const html = `<html><body style="margin:0;display:flex;flex-direction:column;height:100vh;font-family:system-ui,-apple-system,sans-serif;color:#e0e0e0;line-height:1.6;font-size:14px;background:#0a0a0a">${titleBar}${content}</body></html>`
+  const html = `<html><body style="margin:0;display:flex;flex-direction:column;height:100vh;font-family:system-ui,-apple-system,sans-serif;color:#111;line-height:1.6;font-size:14px;background:#fff">${titleBar}${content}</body></html>`
   
   // Write to temp file to avoid data URL length limits
   const tmpDir = path.join(__dirname, 'renderer', '.preview-tmp')
