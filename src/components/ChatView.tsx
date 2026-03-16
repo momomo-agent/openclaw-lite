@@ -146,7 +146,15 @@ export default function ChatView() {
         e.preventDefault()
         const filePath = rawPath.startsWith('file://') ? decodeURI(rawPath.replace('file://', '')) : rawPath
         const ext = filePath.split('.').pop()?.toLowerCase() || ''
-        const previewExts = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'pdf', 'mp4', 'mov', 'webm', 'mkv', 'avi', 'mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'md', 'markdown']
+        const previewExts = [
+          'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'pdf',
+          'mp4', 'mov', 'webm', 'mkv', 'avi', 'mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac',
+          'md', 'markdown',
+          'js', 'ts', 'jsx', 'tsx', 'py', 'swift', 'java', 'c', 'cpp', 'h', 'go', 'rs', 'rb', 'php', 'sh', 'bash', 'zsh', 'r', 'sql', 'lua', 'pl', 'scala', 'kt', 'dart', 'vue', 'svelte',
+          'txt', 'log', 'csv', 'env', 'conf', 'ini', 'cfg', 'toml', 'xml', 'plist',
+          'json', 'yaml', 'yml', 'jsonl', 'ndjson',
+          'css', 'html',
+        ]
         if (previewExts.includes(ext)) api.openFilePreview?.(filePath) || api.openFile?.(filePath)
         else api.openFile?.(filePath)
         return

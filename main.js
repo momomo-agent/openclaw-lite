@@ -963,6 +963,16 @@ ipcMain.handle('open-file', (_, filePath) => {
 })
 
 // Open image/video/audio/markdown in a new Electron window
+// Get default app name for a file (macOS only)
+function getDefaultAppName(filePath) {
+  try {
+    const { execSync } = require('child_process')
+    const escaped = filePath.replace(/"/g, '\\"')
+    const result = execSync(`swift -e 'import AppKit; if let url = NSWorkspace.shared.urlForApplication(toOpen: URL(fileURLWithPath: "${escaped}")) { print(url.deletingPathExtension().lastPathComponent) }'`, { timeout: 3000, encoding: 'utf8' }).trim()
+    return result || 'Finder'
+  } catch { return 'Finder' }
+}
+
 ipcMain.handle('open-file-preview', (_, filePath) => {
   console.log('[preview] filePath:', filePath, 'clawDir:', clawDir)
   const p = path.resolve(clawDir || '', filePath)
@@ -975,8 +985,12 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
   const vidExts = ['mp4','mov','webm','mkv','avi']
   const audExts = ['mp3','wav','ogg','m4a','flac','aac']
   const mdExts = ['md','markdown']
+  const codeExts = ['js','ts','jsx','tsx','py','swift','java','c','cpp','h','go','rs','rb','php','sh','bash','zsh','r','sql','lua','pl','scala','kt','dart','vue','svelte']
+  const textExts = ['txt','log','csv','env','conf','ini','cfg','toml','xml','plist']
+  const dataExts = ['json','yaml','yml','jsonl','ndjson']
 
   const isAudio = audExts.includes(ext)
+  const defaultApp = getDefaultAppName(p)
   const win = new BrowserWindow({
     width: isAudio ? 420 : 800,
     height: isAudio ? 180 : 600,
@@ -996,7 +1010,7 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
         <span style="font-size:14px;color:#111;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.3">${name}</span>
         <a href="#" onclick="event.preventDefault();window.postMessage({action:'open-folder'})" style="-webkit-app-region:no-drag;font-size:11px;color:#666;font-weight:400;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;line-height:1.3" onmouseover="this.style.color='#333'" onmouseout="this.style.color='#666'">${dir}</a>
       </div>
-      <button onclick="window.postMessage({action:'open-file'})" style="${btnStyle}" onmouseover="${btnHoverIn}" onmouseout="${btnHoverOut}">Open</button>
+      <button onclick="window.postMessage({action:'open-file'})" style="${btnStyle}" onmouseover="${btnHoverIn}" onmouseout="${btnHoverOut}">用 ${defaultApp} 打开</button>
     </div>
     <script>window.addEventListener('message',e=>{const a=e.data?.action;if(a)fetch('paw-action://'+a).catch(()=>{})})</script>
   `
@@ -1013,7 +1027,7 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
     // Use same marked + hljs as the main app for consistent rendering
     const markedPath = path.join(__dirname, 'renderer', 'lib', 'marked.js')
     const hljsPath = path.join(__dirname, 'renderer', 'lib', 'highlight.min.js')
-    const hljsCssPath = path.join(__dirname, 'renderer', 'lib', 'highlight-github-dark.css')
+    const hljsCssPath = path.join(__dirname, "renderer", "lib", "highlight-github-light.css")
     const markedHighlightPath = path.join(__dirname, 'renderer', 'lib', 'marked-highlight.js')
     const raw = fs.readFileSync(p, 'utf8')
     // Escape for embedding in template literal
@@ -1049,6 +1063,25 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
           }
         }));
         document.getElementById('md-body').innerHTML = marked.parse(raw);
+      </script>`
+  } else if (codeExts.includes(ext) || textExts.includes(ext) || dataExts.includes(ext)) {
+    // Code/text/data files: syntax highlighted read-only view
+    const hljsPath = path.join(__dirname, 'renderer', 'lib', 'highlight.min.js')
+    const hljsCssPath = path.join(__dirname, "renderer", "lib", "highlight-github-light.css")
+    const raw = fs.readFileSync(p, 'utf8')
+    const escaped = raw.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$')
+    const langMap = { js:'javascript', ts:'typescript', jsx:'javascript', tsx:'typescript', py:'python', swift:'swift', sh:'bash', bash:'bash', zsh:'bash', yml:'yaml', jsonl:'json', ndjson:'json', rb:'ruby', rs:'rust', kt:'kotlin', vue:'xml', svelte:'xml' }
+    const lang = langMap[ext] || ext
+    content = `
+      <link rel="stylesheet" href="file://${encodeURI(hljsCssPath)}">
+      <script src="file://${encodeURI(hljsPath)}"></script>
+      <div style="flex:1;overflow:auto;padding:16px 24px;background:#fff">
+        <pre style="margin:0;background:#f7f7f6;padding:16px;border-radius:8px;border:1px solid #dddcda;overflow-x:auto;font-size:13px;line-height:1.6;tab-size:4"><code id="code-body" class="language-${lang}"></code></pre>
+      </div>
+      <script>
+        const raw = \`${escaped}\`;
+        document.getElementById('code-body').textContent = raw;
+        hljs.highlightElement(document.getElementById('code-body'));
       </script>`
   }
 
