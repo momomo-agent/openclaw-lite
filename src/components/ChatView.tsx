@@ -145,7 +145,7 @@ export default function ChatView() {
       if (filePath) {
         e.preventDefault()
         const ext = filePath.split('.').pop()?.toLowerCase() || ''
-        const previewExts = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'pdf']
+        const previewExts = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'pdf', 'mp4', 'mov', 'webm', 'mkv', 'avi', 'mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'md', 'markdown']
         if (previewExts.includes(ext)) api.openFilePreview?.(filePath) || api.openFile?.(filePath)
         else api.openFile?.(filePath)
         return
