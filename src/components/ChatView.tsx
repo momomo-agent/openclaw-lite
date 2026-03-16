@@ -284,12 +284,7 @@ export default function ChatView() {
       }))
     }
 
-    setMessages(prev => {
-      // Only remove the trailing error (retry scenario), keep earlier errors
-      const last = prev[prev.length - 1]
-      const base = last?.isError ? prev.slice(0, -1) : prev
-      return [...base, userMsg]
-    })
+    setMessages(prev => [...prev, userMsg])
 
     const requestId = await api.chatPrepare?.() || Date.now().toString()
     const ss = getStreamState(currentSessionId)
