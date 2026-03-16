@@ -18,6 +18,7 @@ export default function ChatView() {
   const [showSettings, setShowSettings] = useState(false)
   const [showMembers, setShowMembers] = useState(false)
   const [streamingStatus, setStreamingStatus] = useState('')
+  const [quickLookSrc, setQuickLookSrc] = useState<string | null>(null)
 
   // Derive from sessions store
   const currentSession = sessions.find(s => s.id === currentSessionId)
@@ -140,14 +141,14 @@ export default function ChatView() {
     const handleClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement
 
-      // Click on image → Quick Look preview
+      // Click on image → built-in Quick Look overlay
       if (target.tagName === 'IMG') {
         const img = target as HTMLImageElement
         const src = img.src || img.getAttribute('src') || ''
-        if (src) {
+        // Skip avatars (small images)
+        if (src && img.width > 48) {
           e.preventDefault()
-          const filePath = src.startsWith('file://') ? decodeURI(src.replace('file://', '')) : src
-          api.openFilePreview?.(filePath)
+          setQuickLookSrc(src)
           return
         }
       }
@@ -492,6 +493,13 @@ export default function ChatView() {
           setWorkspaces(ws)
         }}
       />
+      {quickLookSrc && (
+        <div className="quick-look-overlay" onClick={() => setQuickLookSrc(null)}
+          onKeyDown={(e) => { if (e.key === 'Escape' || e.key === ' ') setQuickLookSrc(null) }}
+          tabIndex={0} ref={(el) => el?.focus()}>
+          <img src={quickLookSrc} onClick={(e) => e.stopPropagation()} />
+        </div>
+      )}
     </div>
   )
 }
