@@ -77,7 +77,7 @@ a:hover { color: #fff; }
   <div class="hero-icon">🐾</div>
   <h1>Paw</h1>
   <p class="tagline">Portable AI workspace. One folder, one assistant. Local-first, multi-agent, AI-native.</p>
-  <p class="version">v0.12.0 — macOS (Apple Silicon)</p>
+  <p class="version">v0.23.0 — macOS (Apple Silicon)</p>
   <div class="hero-actions">
     <a href="https://github.com/momomo-agent/paw/releases" class="btn btn-primary">Download for Mac</a>
     <a href="https://github.com/momomo-agent/paw" class="btn btn-ghost">GitHub</a>
@@ -96,34 +96,34 @@ a:hover { color: #fff; }
     <p>Create agents with custom personalities. Discord-style UI with avatars and @mentions.</p>
   </div>
   <div class="feature">
+    <div class="feature-icon">💻</div>
+    <h3>Coding Agent</h3>
+    <p>Claude Code, Codex, Gemini CLI as first-class chat participants. Auto-detected from your system.</p>
+  </div>
+  <div class="feature">
     <div class="feature-icon">🔧</div>
-    <h3>8 Built-in Tools</h3>
-    <p>Search, code exec, file I/O, shell, notifications, skill exec, Watson status. Autonomous tool loop.</p>
+    <h3>20+ Built-in Tools</h3>
+    <p>Search, code exec, file I/O, shell, MCP, skills, cron — autonomous multi-round tool loop.</p>
   </div>
   <div class="feature">
-    <div class="feature-icon">🪟</div>
-    <h3>Multi-Window</h3>
-    <p>Each window is an independent workspace. Cmd+Shift+N to open a new one.</p>
-  </div>
-  <div class="feature">
-    <div class="feature-icon">💓</div>
-    <h3>Heartbeat</h3>
-    <p>Configurable periodic check-ins. Your agent works in the background and notifies you when needed.</p>
+    <div class="feature-icon">📄</div>
+    <h3>File Preview</h3>
+    <p>Markdown rendering, syntax-highlighted code, Mermaid diagrams, and native Quick Look for images.</p>
   </div>
   <div class="feature">
     <div class="feature-icon">🧠</div>
     <h3>Memory Sync</h3>
-    <p>Shared memory/ directory across sessions. Real-time file watching for cross-conversation sync.</p>
+    <p>Shared memory/ directory across sessions. Real-time file watching + full-text search index.</p>
   </div>
   <div class="feature">
     <div class="feature-icon">🔌</div>
-    <h3>Skills & OpenClaw</h3>
-    <p>Full SKILL.md injection + script execution. Drop in an OpenClaw workspace and it just works.</p>
+    <h3>Skills & MCP</h3>
+    <p>Full SKILL.md injection + script execution. Native MCP client with dynamic tool registration.</p>
   </div>
   <div class="feature">
-    <div class="feature-icon">👁️</div>
-    <h3>Watson Status</h3>
-    <p>AI-native glanceable status — per-card and menubar. The LLM writes its own status line in real-time.</p>
+    <div class="feature-icon">🎨</div>
+    <h3>5 Themes</h3>
+    <p>Dark, Light, Claude, Codex, and more. Per-card status lines and frosted glass headers.</p>
   </div>
   <div class="feature">
     <div class="feature-icon">🐾</div>
@@ -163,11 +163,10 @@ a:hover { color: #fff; }
     <span class="highlight">~/my-workspace/</span><br>
     ├── SOUL.md &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># personality</span><br>
     ├── MEMORY.md &nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># long-term memory</span><br>
-    ├── config.json &nbsp;&nbsp;&nbsp;<span class="comment"># provider + api key</span><br>
     ├── agents/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># custom agents</span><br>
-    ├── sessions/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># chat history</span><br>
     ├── memory/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># shared memory (real-time sync)</span><br>
-    └── skills/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># capabilities (inject + execute)</span>
+    ├── skills/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># capabilities (inject + execute)</span><br>
+    └── .paw/ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># config, sessions, index</span>
   </div>
 </div>
 
