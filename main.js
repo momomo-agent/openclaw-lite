@@ -989,11 +989,18 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
   const textExts = ['txt','log','csv','env','conf','ini','cfg','toml','xml','plist']
   const dataExts = ['json','yaml','yml','jsonl','ndjson']
 
-  const isAudio = audExts.includes(ext)
+  // Images, videos, PDFs, audio → macOS Quick Look (native experience)
+  const qlExts = [...imgExts, ...vidExts, ...audExts, 'pdf']
+  if (qlExts.includes(ext)) {
+    const { spawn } = require('child_process')
+    spawn('qlmanage', ['-p', p], { detached: true, stdio: 'ignore' }).unref()
+    return
+  }
+
   const defaultApp = getDefaultAppName(p)
   const win = new BrowserWindow({
-    width: isAudio ? 420 : 800,
-    height: isAudio ? 180 : 600,
+    width: 800,
+    height: 600,
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 21, y: 21 },
     transparent: false,
@@ -1017,13 +1024,7 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
   const fileUri = `file://${encodeURI(p)}`
 
   let content = ''
-  if (imgExts.includes(ext)) {
-    content = `<div style="flex:1;display:flex;align-items:center;justify-content:center;background:#f7f7f6;overflow:hidden"><img src="${fileUri}" style="max-width:100%;max-height:100%;object-fit:contain"></div>`
-  } else if (vidExts.includes(ext)) {
-    content = `<div style="flex:1;display:flex;align-items:center;justify-content:center;background:#f7f7f6;overflow:hidden"><video src="${fileUri}" controls autoplay style="max-width:100%;max-height:100%"></video></div>`
-  } else if (isAudio) {
-    content = `<div style="flex:1;display:flex;align-items:center;justify-content:center;background:#fff"><audio src="${fileUri}" controls autoplay style="width:90%"></audio></div>`
-  } else if (mdExts.includes(ext)) {
+  if (mdExts.includes(ext)) {
     // Use same marked + hljs as the main app for consistent rendering
     const markedPath = path.join(__dirname, 'renderer', 'lib', 'marked.js')
     const hljsPath = path.join(__dirname, 'renderer', 'lib', 'highlight.min.js')
