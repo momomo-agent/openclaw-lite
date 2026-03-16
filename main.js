@@ -72,7 +72,6 @@ const { buildMemoryIndex: coreBuildMemoryIndex, startMemoryWatch: coreStartMemor
 const { buildSystemPrompt: coreBuildSystemPrompt } = require('./core/prompt-builder')
 const { routeMessage: coreRouteMessage } = require('./core/router')
 const { streamAnthropicRaw: coreLlmAnthropicRaw, streamOpenAIRaw: coreLlmOpenAIRaw } = require('./core/llm-raw')
-const acpx = require('./core/acpx')
 const codingAgents = require('./core/coding-agents')
 // coding-agent-registry.js removed — coding agents are now workspace records
 // M39 extracted modules
@@ -484,8 +483,7 @@ if (E2E_PORT) {
 }
 
 app.whenReady().then(() => {
-  // Initialize acpx + coding agents
-  acpx.init()
+  // Initialize coding agents
   codingAgents.init()
 
   // Initialize workspace registry
