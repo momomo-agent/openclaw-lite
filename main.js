@@ -1047,7 +1047,13 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
   }
 
   const html = `<html><body style="margin:0;display:flex;flex-direction:column;height:100vh;font-family:system-ui,-apple-system,sans-serif;color:#e0e0e0;line-height:1.6;font-size:14px;background:#1a1a1a">${titleBar}${content}</body></html>`
-  win.loadURL(`data:text/html,${encodeURIComponent(html)}`)
+  
+  // Write to temp file to avoid data URL length limits
+  const tmpDir = path.join(require('os').tmpdir(), 'paw-preview')
+  fs.mkdirSync(tmpDir, { recursive: true })
+  const tmpFile = path.join(tmpDir, `preview-${Date.now()}.html`)
+  fs.writeFileSync(tmpFile, html, 'utf8')
+  win.loadFile(tmpFile)
 
   // Handle button actions
   win.webContents.on('will-navigate', (e, url) => {
@@ -1055,6 +1061,9 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
     if (url.includes('open-file')) shell.openPath(p)
     else if (url.includes('open-folder')) shell.showItemInFolder(p)
   })
+  
+  // Clean up temp file when window closes
+  win.on('closed', () => { try { fs.unlinkSync(tmpFile) } catch {} })
 })
 
 ipcMain.handle('open-external', (_, url) => {
