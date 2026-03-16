@@ -452,7 +452,7 @@ button:hover { background: var(--border-muted); }
 .md-content blockquote { border-left: 3px solid var(--border-focus); padding-left: 14px; color: var(--text-tertiary); margin: 10px 0; font-style: italic; }
 .md-content strong { color: var(--md-strong); }
 .md-content table {
-  border-collapse: separate; border-spacing: 0; margin: 12px 0; min-width: 50%; max-width: 100%; width: auto;
+  border-collapse: separate; border-spacing: 0; margin: 12px 0; width: 100%;
   border: 1px solid var(--border-default); border-radius: 8px; overflow: hidden;
   display: block; overflow-x: auto;
 }
