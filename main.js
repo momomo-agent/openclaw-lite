@@ -973,6 +973,14 @@ function getDefaultAppName(filePath) {
   } catch { return 'Finder' }
 }
 
+// Native Quick Look for images (click on img in chat)
+ipcMain.handle('quick-look', (_, filePath) => {
+  const p = path.resolve(clawDir || '', filePath)
+  if (!fs.existsSync(p)) return
+  const focusedWin = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
+  if (focusedWin) focusedWin.previewFile(p, path.basename(p))
+})
+
 ipcMain.handle('open-file-preview', (_, filePath) => {
   console.log('[preview] filePath:', filePath, 'clawDir:', clawDir)
   const p = path.resolve(clawDir || '', filePath)
@@ -989,11 +997,11 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
   const textExts = ['txt','log','csv','env','conf','ini','cfg','toml','xml','plist']
   const dataExts = ['json','yaml','yml','jsonl','ndjson']
 
-  // Images, videos, PDFs, audio → macOS Quick Look (native experience)
+  // Images, videos, PDFs, audio → native Quick Look (BrowserWindow.previewFile)
   const qlExts = [...imgExts, ...vidExts, ...audExts, 'pdf']
   if (qlExts.includes(ext)) {
-    const { spawn } = require('child_process')
-    spawn('qlmanage', ['-p', p], { detached: true, stdio: 'ignore' }).unref()
+    const focusedWin = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
+    if (focusedWin) focusedWin.previewFile(p, name)
     return
   }
 

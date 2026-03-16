@@ -91,6 +91,7 @@ contextBridge.exposeInMainWorld('api', {
   // File operations
   openFile: (p) => ipcRenderer.invoke('open-file', p),
   openFilePreview: (p) => ipcRenderer.invoke('open-file-preview', p),
+  quickLook: (p) => ipcRenderer.invoke('quick-look', p),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   readFile: (p) => ipcRenderer.invoke('read-file', p),
   // Memory watch
