@@ -1,6 +1,34 @@
 // core/coding-agents.js — Coding Agent CLI adapter layer
 // Unified interface for CLI coding agents (claude, codex, gemini, kiro)
 const { spawn, execSync } = require('child_process')
+const fs = require('fs')
+const home = require('os').homedir()
+
+// Common CLI install locations (Electron .app may not inherit shell PATH)
+const COMMON_DIRS = [
+  `${home}/.npm-global/bin`,
+  `${home}/.volta/bin`,
+  `${home}/.bun/bin`,
+  '/usr/local/bin',
+  '/opt/homebrew/bin',
+  `${home}/.local/bin`,
+  `${home}/Library/pnpm`,
+  `${home}/.local/share/pnpm`,
+]
+
+function detectBin(name) {
+  // Try PATH first
+  try {
+    const which = execSync(`which ${name} 2>/dev/null`, { encoding: 'utf8' }).trim()
+    if (which && fs.existsSync(which)) return which
+  } catch {}
+  // Fallback: common locations
+  for (const dir of COMMON_DIRS) {
+    const p = `${dir}/${name}`
+    if (fs.existsSync(p)) return p
+  }
+  return null
+}
 
 const agents = {
   claude: {
@@ -10,13 +38,8 @@ const agents = {
     bin: 'claude',
     _path: null,
     detect() {
-      try {
-        const which = execSync('which claude 2>/dev/null', { encoding: 'utf8' }).trim()
-        if (which && require('fs').existsSync(which)) {
-          this._path = which
-          return true
-        }
-      } catch {}
+      const p = detectBin('claude')
+      if (p) { this._path = p; return true }
       return false
     },
     run(prompt, { cwd, session, onOutput, onProcess }) {
@@ -55,16 +78,7 @@ const agents = {
     avatar: '../avatars/codex.png',
     bin: 'codex',
     _path: null,
-    detect() {
-      try {
-        const which = execSync('which codex 2>/dev/null', { encoding: 'utf8' }).trim()
-        if (which && require('fs').existsSync(which)) {
-          this._path = which
-          return true
-        }
-      } catch {}
-      return false
-    },
+    detect() { const p = detectBin('codex'); if (p) { this._path = p; return true }; return false },
     run(prompt, { cwd, session, onOutput, onProcess }) {
       const args = [prompt]
       return _spawnAgent(this._path, args, { cwd, onOutput, onProcess })
@@ -76,16 +90,7 @@ const agents = {
     avatar: '../avatars/gemini.png',
     bin: 'gemini',
     _path: null,
-    detect() {
-      try {
-        const which = execSync('which gemini 2>/dev/null', { encoding: 'utf8' }).trim()
-        if (which && require('fs').existsSync(which)) {
-          this._path = which
-          return true
-        }
-      } catch {}
-      return false
-    },
+    detect() { const p = detectBin('gemini'); if (p) { this._path = p; return true }; return false },
     run(prompt, { cwd, session, onOutput, onProcess }) {
       const args = [prompt]
       return _spawnAgent(this._path, args, { cwd, onOutput, onProcess })
@@ -97,16 +102,7 @@ const agents = {
     avatar: '../avatars/kiro.png',
     bin: 'kiro',
     _path: null,
-    detect() {
-      try {
-        const which = execSync('which kiro 2>/dev/null', { encoding: 'utf8' }).trim()
-        if (which && require('fs').existsSync(which)) {
-          this._path = which
-          return true
-        }
-      } catch {}
-      return false
-    },
+    detect() { const p = detectBin('kiro'); if (p) { this._path = p; return true }; return false },
     run(prompt, { cwd, session, onOutput, onProcess }) {
       const args = [prompt]
       return _spawnAgent(this._path, args, { cwd, onOutput, onProcess })
