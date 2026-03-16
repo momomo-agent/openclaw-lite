@@ -967,30 +967,45 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
   const p = path.resolve(clawDir || '', filePath)
   if (!fs.existsSync(p)) return
   const ext = path.extname(p).toLowerCase().slice(1)
+  const name = path.basename(p)
   const imgExts = ['png','jpg','jpeg','gif','webp','svg']
   const vidExts = ['mp4','mov','webm','mkv','avi']
   const audExts = ['mp3','wav','ogg','m4a','flac','aac']
   const mdExts = ['md','markdown']
 
+  const isAudio = audExts.includes(ext)
   const win = new BrowserWindow({
-    width: 800, height: 600,
-    title: path.basename(p),
+    width: isAudio ? 420 : 800,
+    height: isAudio ? 180 : 600,
+    frame: false,
+    titleBarStyle: 'hidden',
+    trafficLightPosition: { x: -100, y: -100 }, // hide native buttons
+    transparent: false,
+    vibrancy: 'under-window',
     webPreferences: { nodeIntegration: false, contextIsolation: true },
   })
 
+  // Custom title bar + open button
+  const titleBar = `
+    <div style="-webkit-app-region:drag;display:flex;align-items:center;height:38px;padding:0 12px;background:#1a1a1a;border-bottom:1px solid #2a2a2a;flex-shrink:0;gap:8px">
+      <span style="font-size:12px;color:#888;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${name}</span>
+      <button onclick="window.postMessage({action:'open'})" style="-webkit-app-region:no-drag;background:#2a2a2a;border:none;color:#aaa;font-size:11px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:system-ui" onmouseover="this.style.background='#333'" onmouseout="this.style.background='#2a2a2a'">Open</button>
+      <button onclick="window.close()" style="-webkit-app-region:no-drag;background:#2a2a2a;border:none;color:#aaa;font-size:14px;padding:2px 8px;border-radius:4px;cursor:pointer;font-family:system-ui;line-height:1" onmouseover="this.style.background='#e53935';this.style.color='#fff'" onmouseout="this.style.background='#2a2a2a';this.style.color='#aaa'">×</button>
+    </div>
+    <script>window.addEventListener('message',e=>{if(e.data?.action==='open'){fetch('paw://open-in-finder').catch(()=>{})}})</script>
+  `
+  const fileUri = `file://${encodeURI(p)}`
+
+  let content = ''
   if (imgExts.includes(ext)) {
-    win.loadURL(`data:text/html,<html><body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;height:100vh"><img src="file://${encodeURI(p)}" style="max-width:100%;max-height:100%;object-fit:contain"></body></html>`)
+    content = `<div style="flex:1;display:flex;align-items:center;justify-content:center;background:#111;overflow:hidden"><img src="${fileUri}" style="max-width:100%;max-height:100%;object-fit:contain"></div>`
   } else if (vidExts.includes(ext)) {
-    win.loadURL(`data:text/html,<html><body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;height:100vh"><video src="file://${encodeURI(p)}" controls autoplay style="max-width:100%;max-height:100%"></video></body></html>`)
-  } else if (audExts.includes(ext)) {
-    const name = path.basename(p)
-    win.setSize(400, 160)
-    win.loadURL(`data:text/html,<html><body style="margin:0;background:#1a1a1a;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:system-ui;color:#e0e0e0"><p style="margin:0 0 16px;font-size:14px;opacity:.7">${name}</p><audio src="file://${encodeURI(p)}" controls autoplay style="width:320px"></audio></body></html>`)
+    content = `<div style="flex:1;display:flex;align-items:center;justify-content:center;background:#111;overflow:hidden"><video src="${fileUri}" controls autoplay style="max-width:100%;max-height:100%"></video></div>`
+  } else if (isAudio) {
+    content = `<div style="flex:1;display:flex;align-items:center;justify-content:center;background:#1a1a1a"><audio src="${fileUri}" controls autoplay style="width:90%"></audio></div>`
   } else if (mdExts.includes(ext)) {
     const raw = fs.readFileSync(p, 'utf8')
-    // Render markdown with a simple built-in stylesheet
     const escaped = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    // Basic markdown → HTML (headers, bold, italic, code blocks, inline code, lists, links)
     const rendered = escaped
       .replace(/^### (.+)$/gm, '<h3>$1</h3>')
       .replace(/^## (.+)$/gm, '<h2>$1</h2>')
@@ -1003,9 +1018,17 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
       .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
       .replace(/\n\n/g, '<br><br>')
-    const css = `body{margin:40px auto;max-width:720px;background:#1a1a1a;color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif;line-height:1.7;font-size:15px}h1,h2,h3{color:#fff;margin:1.2em 0 .4em}h1{font-size:1.8em;border-bottom:1px solid #333;padding-bottom:.3em}h2{font-size:1.4em}h3{font-size:1.15em}pre{background:#111;padding:16px;border-radius:8px;overflow-x:auto;font-size:13px}code{background:#222;padding:2px 6px;border-radius:4px;font-size:13px}pre code{background:none;padding:0}a{color:#7aa2f7;text-decoration:none}a:hover{text-decoration:underline}li{margin:4px 0}strong{color:#fff}`
-    win.loadURL(`data:text/html,<html><head><style>${css}</style></head><body>${rendered}</body></html>`)
+    content = `<div style="flex:1;overflow-y:auto;padding:24px 32px;background:#1a1a1a"><style>h1,h2,h3{color:#fff;margin:1em 0 .3em}h1{font-size:1.6em;border-bottom:1px solid #333;padding-bottom:.2em}h2{font-size:1.3em}h3{font-size:1.1em}pre{background:#111;padding:14px;border-radius:6px;overflow-x:auto;font-size:13px}code{background:#222;padding:2px 5px;border-radius:3px;font-size:13px}pre code{background:none;padding:0}a{color:#7aa2f7;text-decoration:none}a:hover{text-decoration:underline}li{margin:3px 0}strong{color:#fff}</style>${rendered}</div>`
   }
+
+  const html = `<html><body style="margin:0;display:flex;flex-direction:column;height:100vh;font-family:system-ui,-apple-system,sans-serif;color:#e0e0e0;line-height:1.6;font-size:14px;background:#1a1a1a">${titleBar}${content}</body></html>`
+  win.loadURL(`data:text/html,${encodeURIComponent(html)}`)
+
+  // Handle "Open" button → open in Finder/default app
+  win.webContents.on('will-navigate', (e, url) => {
+    e.preventDefault()
+    if (url.includes('open-in-finder')) shell.openPath(p)
+  })
 })
 
 ipcMain.handle('open-external', (_, url) => {
