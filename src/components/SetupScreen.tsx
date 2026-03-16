@@ -8,7 +8,7 @@ interface SetupScreenProps {
   onEnterChat: () => void
 }
 
-type Step = 'user' | 'assistant'
+type Step = 'user' | 'assistant' | 'apikey'
 
 /** Strip characters that break @mention, folder names, or path handling */
 function sanitizeName(v: string): string {
@@ -39,6 +39,10 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
   const [assistantName, setAssistantName] = useState('')
   const [assistantAvatar, setAssistantAvatar] = useState(Math.floor(Math.random() * AVATAR_COUNT))
   const [creating, setCreating] = useState(false)
+
+  // API key
+  const [apiKey, setApiKey] = useState('')
+  const [provider, setProvider] = useState<'anthropic' | 'openai'>('anthropic')
 
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -76,7 +80,14 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
       if (ws?.id) {
         await api.setWorkspaceAvatar({ id: ws.id, presetIndex: assistantAvatar })
       }
-      onEnterChat()
+      // Load existing config to check if API key already set
+      const cfg = await api.loadConfig?.() || {}
+      if (cfg.apiKey) {
+        onEnterChat()
+      } else {
+        setCreating(false)
+        setStep('apikey')
+      }
     } else {
       setCreating(false)
     }
@@ -88,10 +99,25 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
     }
     const result = await api.addWorkspace()
     if (result?.ok) {
-      onEnterChat()
+      // Check if API key exists
+      const cfg = await api.loadConfig?.() || {}
+      if (cfg.apiKey) {
+        onEnterChat()
+      } else {
+        setStep('apikey')
+      }
     } else if (result?.error === 'not_a_workspace') {
       alert('该文件夹不是 Paw workspace。\n\n请选择包含 SOUL.md 或 .paw/config.json 的文件夹。')
     }
+  }
+
+  const handleSaveApiKey = async () => {
+    if (!apiKey.trim()) return
+    const cfg = await api.loadConfig?.() || {}
+    cfg.provider = provider
+    cfg.apiKey = apiKey.trim()
+    await api.saveConfig?.(cfg)
+    onEnterChat()
   }
 
   return (
@@ -142,7 +168,7 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
               下一步
             </button>
           </>
-        ) : (
+        ) : step === 'assistant' ? (
           <>
             <div style={{ textAlign: 'center' }}>
               <h1 style={{ fontSize: 21, fontWeight: 600, margin: '0 0 8px', letterSpacing: '-0.01em' }}>
@@ -189,6 +215,60 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
                 我已有 workspace
               </button>
             </div>
+          </>
+        ) : (
+          <>
+            <div style={{ textAlign: 'center' }}>
+              <h1 style={{ fontSize: 21, fontWeight: 600, margin: '0 0 8px', letterSpacing: '-0.01em' }}>
+                最后一步 — API Key
+              </h1>
+              <p style={{ color: 'var(--text-faint)', fontSize: 13, margin: 0, lineHeight: 1.5 }}>
+                选择 AI 服务商，粘贴你的 API Key。
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+              {(['anthropic', 'openai'] as const).map(p => (
+                <button
+                  key={p}
+                  onClick={() => setProvider(p)}
+                  style={{
+                    flex: 1, padding: '9px 0', fontSize: 13, fontWeight: 500,
+                    borderRadius: 8, border: '1px solid',
+                    borderColor: provider === p ? 'var(--text-primary)' : 'var(--border-muted)',
+                    background: provider === p ? 'var(--text-primary)' : 'transparent',
+                    color: provider === p ? 'var(--bg-primary)' : 'var(--text-secondary)',
+                    cursor: 'pointer', transition: 'all 0.15s',
+                  }}
+                >
+                  {p === 'anthropic' ? 'Anthropic' : 'OpenAI'}
+                </button>
+              ))}
+            </div>
+
+            <TextInput
+              ref={inputRef}
+              value={apiKey}
+              onChange={e => setApiKey(e.target.value)}
+              onSubmit={handleSaveApiKey}
+              placeholder={provider === 'anthropic' ? 'sk-ant-...' : 'sk-...'}
+              style={{ ...inputStyle, textAlign: 'left', fontFamily: "'SF Mono', monospace", fontSize: 13 }}
+              onFocus={e => e.target.style.borderColor = 'var(--border-focus)'}
+              onBlur={e => e.target.style.borderColor = 'var(--border-muted)'}
+            />
+
+            <button
+              className="primary-btn"
+              onClick={handleSaveApiKey}
+              disabled={!apiKey.trim()}
+              style={btnStyle}
+            >
+              开始使用
+            </button>
+
+            <button onClick={onEnterChat} style={linkStyle}>
+              稍后设置
+            </button>
           </>
         )}
       </div>
