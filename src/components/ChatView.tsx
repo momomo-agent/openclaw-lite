@@ -139,6 +139,19 @@ export default function ChatView() {
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement
+
+      // Click on image → Quick Look preview
+      if (target.tagName === 'IMG') {
+        const img = target as HTMLImageElement
+        const src = img.src || img.getAttribute('src') || ''
+        if (src) {
+          e.preventDefault()
+          const filePath = src.startsWith('file://') ? decodeURI(src.replace('file://', '')) : src
+          api.openFilePreview?.(filePath)
+          return
+        }
+      }
+
       const link = target.closest('a') as HTMLAnchorElement | null
       if (!link) return
       const rawPath = link.dataset?.path || link.getAttribute('data-path')
