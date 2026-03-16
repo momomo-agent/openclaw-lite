@@ -968,6 +968,7 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
   if (!fs.existsSync(p)) return
   const ext = path.extname(p).toLowerCase().slice(1)
   const name = path.basename(p)
+  const dir = path.dirname(p)
   const imgExts = ['png','jpg','jpeg','gif','webp','svg']
   const vidExts = ['mp4','mov','webm','mkv','avi']
   const audExts = ['mp3','wav','ogg','m4a','flac','aac']
@@ -979,20 +980,21 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
     height: isAudio ? 180 : 600,
     frame: false,
     titleBarStyle: 'hidden',
-    trafficLightPosition: { x: -100, y: -100 }, // hide native buttons
+    trafficLightPosition: { x: -100, y: -100 },
     transparent: false,
     vibrancy: 'under-window',
     webPreferences: { nodeIntegration: false, contextIsolation: true },
   })
 
-  // Custom title bar + open button
+  const btnStyle = `-webkit-app-region:no-drag;background:#2a2a2a;border:none;color:#aaa;font-size:11px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:system-ui`
   const titleBar = `
-    <div style="-webkit-app-region:drag;display:flex;align-items:center;height:38px;padding:0 12px;background:#1a1a1a;border-bottom:1px solid #2a2a2a;flex-shrink:0;gap:8px">
+    <div style="-webkit-app-region:drag;display:flex;align-items:center;height:38px;padding:0 12px;background:#1a1a1a;border-bottom:1px solid #2a2a2a;flex-shrink:0;gap:6px">
       <span style="font-size:12px;color:#888;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${name}</span>
-      <button onclick="window.postMessage({action:'open'})" style="-webkit-app-region:no-drag;background:#2a2a2a;border:none;color:#aaa;font-size:11px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:system-ui" onmouseover="this.style.background='#333'" onmouseout="this.style.background='#2a2a2a'">Open</button>
-      <button onclick="window.close()" style="-webkit-app-region:no-drag;background:#2a2a2a;border:none;color:#aaa;font-size:14px;padding:2px 8px;border-radius:4px;cursor:pointer;font-family:system-ui;line-height:1" onmouseover="this.style.background='#e53935';this.style.color='#fff'" onmouseout="this.style.background='#2a2a2a';this.style.color='#aaa'">×</button>
+      <button onclick="window.postMessage({action:'open-file'})" style="${btnStyle}" onmouseover="this.style.background='#333'" onmouseout="this.style.background='#2a2a2a'">Open</button>
+      <button onclick="window.postMessage({action:'open-folder'})" style="${btnStyle}" onmouseover="this.style.background='#333'" onmouseout="this.style.background='#2a2a2a'">Folder</button>
+      <button onclick="window.close()" style="${btnStyle};font-size:14px;padding:2px 8px;line-height:1" onmouseover="this.style.background='#e53935';this.style.color='#fff'" onmouseout="this.style.background='#2a2a2a';this.style.color='#aaa'">×</button>
     </div>
-    <script>window.addEventListener('message',e=>{if(e.data?.action==='open'){fetch('paw://open-in-finder').catch(()=>{})}})</script>
+    <script>window.addEventListener('message',e=>{const a=e.data?.action;if(a)fetch('paw-action://'+a).catch(()=>{})})</script>
   `
   const fileUri = `file://${encodeURI(p)}`
 
@@ -1004,30 +1006,56 @@ ipcMain.handle('open-file-preview', (_, filePath) => {
   } else if (isAudio) {
     content = `<div style="flex:1;display:flex;align-items:center;justify-content:center;background:#1a1a1a"><audio src="${fileUri}" controls autoplay style="width:90%"></audio></div>`
   } else if (mdExts.includes(ext)) {
+    // Use same marked + hljs as the main app for consistent rendering
+    const markedPath = path.join(__dirname, 'renderer', 'lib', 'marked.js')
+    const hljsPath = path.join(__dirname, 'renderer', 'lib', 'highlight.min.js')
+    const hljsCssPath = path.join(__dirname, 'renderer', 'lib', 'highlight-github-dark.css')
+    const markedHighlightPath = path.join(__dirname, 'renderer', 'lib', 'marked-highlight.js')
     const raw = fs.readFileSync(p, 'utf8')
-    const escaped = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    const rendered = escaped
-      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-      .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.+?)\*/g, '<em>$1</em>')
-      .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="lang-$1">$2</code></pre>')
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
-      .replace(/^\- (.+)$/gm, '<li>$1</li>')
-      .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
-      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
-      .replace(/\n\n/g, '<br><br>')
-    content = `<div style="flex:1;overflow-y:auto;padding:24px 32px;background:#1a1a1a"><style>h1,h2,h3{color:#fff;margin:1em 0 .3em}h1{font-size:1.6em;border-bottom:1px solid #333;padding-bottom:.2em}h2{font-size:1.3em}h3{font-size:1.1em}pre{background:#111;padding:14px;border-radius:6px;overflow-x:auto;font-size:13px}code{background:#222;padding:2px 5px;border-radius:3px;font-size:13px}pre code{background:none;padding:0}a{color:#7aa2f7;text-decoration:none}a:hover{text-decoration:underline}li{margin:3px 0}strong{color:#fff}</style>${rendered}</div>`
+    // Escape for embedding in template literal
+    const escaped = raw.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$')
+    content = `
+      <link rel="stylesheet" href="file://${encodeURI(hljsCssPath)}">
+      <script src="file://${encodeURI(markedPath)}"></script>
+      <script src="file://${encodeURI(hljsPath)}"></script>
+      <script src="file://${encodeURI(markedHighlightPath)}"></script>
+      <div id="md-body" style="flex:1;overflow-y:auto;padding:24px 32px;background:#1a1a1a" class="md-content"></div>
+      <style>
+        .md-content{color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif;line-height:1.7;font-size:14px}
+        .md-content h1,.md-content h2,.md-content h3{color:#fff;margin:1em 0 .3em}
+        .md-content h1{font-size:1.6em;border-bottom:1px solid #333;padding-bottom:.2em}
+        .md-content h2{font-size:1.3em}.md-content h3{font-size:1.1em}
+        .md-content pre{background:#111;padding:14px;border-radius:6px;overflow-x:auto;font-size:13px}
+        .md-content code{background:#222;padding:2px 5px;border-radius:3px;font-size:13px}
+        .md-content pre code{background:none;padding:0}
+        .md-content a{color:#7aa2f7;text-decoration:none}.md-content a:hover{text-decoration:underline}
+        .md-content li{margin:3px 0}.md-content strong{color:#fff}
+        .md-content blockquote{border-left:3px solid #444;margin:8px 0;padding:4px 16px;color:#aaa}
+        .md-content table{border-collapse:collapse;width:100%;margin:12px 0}
+        .md-content th,.md-content td{border:1px solid #333;padding:8px 12px;text-align:left}
+        .md-content th{background:#222;color:#fff;font-weight:600}
+        .md-content img{max-width:100%;border-radius:6px}
+      </style>
+      <script>
+        const raw = \`${escaped}\`;
+        marked.use(markedHighlight.markedHighlight({
+          highlight: (code, lang) => {
+            if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, {language: lang}).value;
+            return hljs.highlightAuto(code).value;
+          }
+        }));
+        document.getElementById('md-body').innerHTML = marked.parse(raw);
+      </script>`
   }
 
   const html = `<html><body style="margin:0;display:flex;flex-direction:column;height:100vh;font-family:system-ui,-apple-system,sans-serif;color:#e0e0e0;line-height:1.6;font-size:14px;background:#1a1a1a">${titleBar}${content}</body></html>`
   win.loadURL(`data:text/html,${encodeURIComponent(html)}`)
 
-  // Handle "Open" button → open in Finder/default app
+  // Handle button actions
   win.webContents.on('will-navigate', (e, url) => {
     e.preventDefault()
-    if (url.includes('open-in-finder')) shell.openPath(p)
+    if (url.includes('open-file')) shell.openPath(p)
+    else if (url.includes('open-folder')) shell.showItemInFolder(p)
   })
 })
 
