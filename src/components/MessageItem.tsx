@@ -29,9 +29,9 @@ export default function MessageItem({ message, isStreaming, statusText, ownerWor
   }, [message.content, isUser])
 
   // Dynamic workspace identity resolution — always use live identity, never stale history
-  // Priority: workspaceId/senderWorkspaceId → workspacePath → ownerWorkspaceId → first workspace
-  // Note: DB stores delegate sender as `senderWorkspaceId` in metadata
-  const msgWsId = message.workspaceId || (message as any).senderWorkspaceId
+  // Priority: senderWorkspaceId (from metadata/delegate) → workspaceId → workspacePath → ownerWorkspaceId → first workspace
+  // Note: DB stores delegate sender as `senderWorkspaceId` in metadata — this must take priority
+  const msgWsId = (message as any).senderWorkspaceId || message.workspaceId
   const ws = msgWsId
     ? workspaces.find(w => w.id === msgWsId)
     : (message.workspacePath

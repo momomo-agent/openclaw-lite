@@ -139,7 +139,10 @@ export function useChatEvents(refs: Refs, router: StreamRouter) {
         if (data.agentName) ss.streamingMsg.sender = data.agentName
         if (data.avatar) ss.streamingMsg.avatar = data.avatar
         if (data.wsPath) ss.streamingMsg.workspacePath = data.wsPath
-        if (data.workspaceId) ss.streamingMsg.workspaceId = data.workspaceId
+        if (data.workspaceId) {
+          ss.streamingMsg.workspaceId = data.workspaceId
+          ;(ss.streamingMsg as any).senderWorkspaceId = data.workspaceId
+        }
         router.routeStatus(sid, ss.status || 'Thinking...')
         router.routeUpdate(sid, ss.streamingMsg)
         return
@@ -156,6 +159,7 @@ export function useChatEvents(refs: Refs, router: StreamRouter) {
         avatar: data.avatar,
         workspacePath: data.wsPath,
         workspaceId: data.workspaceId,
+        senderWorkspaceId: data.workspaceId,
       }
       router.routeStatus(sid, 'Thinking...')
       ss.statusIsAiAuthored = false
@@ -286,6 +290,7 @@ export function useChatEvents(refs: Refs, router: StreamRouter) {
         avatar: data.avatar,
         workspacePath: wsPath,
         workspaceId: data.workspaceId,
+        senderWorkspaceId: data.workspaceId,
         toolSteps: [],
       }
       router.routeAdd(sid, ss.delegateMsg)
