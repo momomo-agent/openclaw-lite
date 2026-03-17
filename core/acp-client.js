@@ -22,7 +22,16 @@ const WHITELIST = {
     acpArgs: ['--acp'],
     useAcp: true,
   },
-  // codex: { id: 'codex', name: 'Codex', bin: 'codex', acpArgs: ['mcp-server'], useAcp: true },
+  codex: {
+    id: 'codex',
+    name: 'Codex',
+    avatar: '../avatars/codex.png',
+    // codex-acp is a standalone ACP binary (from @zed-industries/codex-acp)
+    // Not the codex CLI itself — this is a dedicated ACP adapter
+    bundledBin: true, // resolve from node_modules instead of PATH
+    acpArgs: [],
+    useAcp: true,
+  },
 }
 
 let _sdk = null

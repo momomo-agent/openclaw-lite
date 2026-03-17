@@ -2,6 +2,7 @@
 // Unified interface for CLI coding agents (claude, codex, gemini, kiro)
 const { spawn, execSync } = require('child_process')
 const fs = require('fs')
+const path = require('path')
 const home = require('os').homedir()
 const { WHITELIST } = require('./acp-client')
 
@@ -148,10 +149,28 @@ function _spawnAgent(bin, args, { cwd, onOutput, onProcess, timeout = 600000 }) 
 let _available = []
 let _acpPaths = {} // id -> detected bin path for ACP agents
 
+// Resolve codex-acp bundled binary from node_modules
+function resolveCodexAcpBin() {
+  const platformMap = { darwin: 'darwin', linux: 'linux', win32: 'win32' }
+  const archMap = { arm64: 'arm64', x64: 'x64' }
+  const platform = platformMap[process.platform]
+  const arch = archMap[process.arch]
+  if (!platform || !arch) return null
+  const pkgName = `@zed-industries/codex-acp-${platform}-${arch}`
+  const binName = process.platform === 'win32' ? 'codex-acp.exe' : 'codex-acp'
+  // Try relative to this file (works in .app bundle and dev)
+  const candidate = path.resolve(__dirname, '..', 'node_modules', pkgName, 'bin', binName)
+  if (fs.existsSync(candidate)) return candidate
+  // Fallback: require.resolve
+  try {
+    return require.resolve(`${pkgName}/bin/${binName}`)
+  } catch {}
+  return null
+}
+
 function init() {
   _available = []
   _acpPaths = {}
-  // Only detect agents in the whitelist
   for (const [id, entry] of Object.entries(WHITELIST)) {
     if (!entry.useAcp && agents[id]) {
       // Non-ACP agent (e.g., Claude Code via SDK)
@@ -160,8 +179,13 @@ function init() {
         console.log(`[coding-agents] ${id} available at ${agents[id]._path}`)
       }
     } else if (entry.useAcp) {
-      // ACP agent — detect binary
-      const binPath = detectBin(entry.bin)
+      let binPath = null
+      if (entry.bundledBin) {
+        // Bundled binary (e.g., codex-acp from node_modules)
+        binPath = resolveCodexAcpBin()
+      } else if (entry.bin) {
+        binPath = detectBin(entry.bin)
+      }
       if (binPath) {
         _acpPaths[id] = binPath
         _available.push(id)
