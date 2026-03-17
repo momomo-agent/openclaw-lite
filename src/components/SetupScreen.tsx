@@ -44,7 +44,11 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
 
   // API key
   const [apiKey, setApiKey] = useState('')
+  const [baseUrl, setBaseUrl] = useState('')
+  const [tavilyKey, setTavilyKey] = useState('')
   const [provider, setProvider] = useState<'anthropic' | 'openai'>('anthropic')
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
 
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -113,12 +117,58 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
     }
   }
 
+  const handleTestConnection = async () => {
+    if (!apiKey.trim()) return
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const result = await api.testApiConnection?.({
+        provider,
+        apiKey: apiKey.trim(),
+        baseUrl: baseUrl.trim() || undefined,
+      })
+      setTestResult(result?.ok
+        ? { ok: true, msg: '连接成功 ✓' }
+        : { ok: false, msg: result?.error || '连接失败' }
+      )
+    } catch (err: any) {
+      setTestResult({ ok: false, msg: err?.message || '连接失败' })
+    } finally {
+      setTesting(false)
+    }
+  }
+
   const handleSaveApiKey = async () => {
     if (!apiKey.trim()) return
+    setTesting(true)
+    setTestResult(null)
+
+    // Test connection first
+    try {
+      const result = await api.testApiConnection?.({
+        provider,
+        apiKey: apiKey.trim(),
+        baseUrl: baseUrl.trim() || undefined,
+      })
+      if (!result?.ok) {
+        setTestResult({ ok: false, msg: result?.error || '连接失败，请检查 API Key' })
+        setTesting(false)
+        return
+      }
+    } catch (err: any) {
+      setTestResult({ ok: false, msg: err?.message || '连接失败' })
+      setTesting(false)
+      return
+    }
+
+    // Save config
     const cfg = await api.loadConfig?.() || {}
     cfg.provider = provider
     cfg.apiKey = apiKey.trim()
+    if (baseUrl.trim()) cfg.baseUrl = baseUrl.trim()
+    if (tavilyKey.trim()) cfg.tavilyApiKey = tavilyKey.trim()
     await api.saveConfig?.(cfg)
+    setTesting(false)
     onEnterChat()
   }
 
@@ -231,13 +281,13 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
               {(['anthropic', 'openai'] as const).map(p => (
                 <button
                   key={p}
-                  onClick={() => setProvider(p)}
+                  onClick={() => { setProvider(p); setTestResult(null) }}
                   style={{
                     flex: 1, padding: '9px 0', fontSize: 13, fontWeight: 500,
                     borderRadius: 8, border: '1px solid',
-                    borderColor: provider === p ? 'var(--text-primary)' : 'var(--border-muted)',
-                    background: provider === p ? 'var(--text-primary)' : 'transparent',
-                    color: provider === p ? 'var(--bg-primary)' : 'var(--text-secondary)',
+                    borderColor: provider === p ? '#111' : 'var(--border-muted)',
+                    background: provider === p ? '#111' : 'transparent',
+                    color: provider === p ? '#fff' : 'var(--text-secondary)',
                     cursor: 'pointer', transition: 'all 0.15s',
                   }}
                 >
@@ -249,7 +299,7 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
             <TextInput
               ref={inputRef}
               value={apiKey}
-              onChange={e => setApiKey(e.target.value)}
+              onChange={e => { setApiKey(e.target.value); setTestResult(null) }}
               onSubmit={handleSaveApiKey}
               placeholder={provider === 'anthropic' ? 'sk-ant-...' : 'sk-...'}
               style={{ ...inputStyle, textAlign: 'left', fontFamily: "'SF Mono', monospace", fontSize: 13 }}
@@ -257,13 +307,45 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
               onBlur={e => e.target.style.borderColor = 'var(--border-muted)'}
             />
 
+            <TextInput
+              value={baseUrl}
+              onChange={e => { setBaseUrl(e.target.value); setTestResult(null) }}
+              placeholder="Base URL（可选，默认官方地址）"
+              style={{ ...inputStyle, textAlign: 'left', fontFamily: "'SF Mono', monospace", fontSize: 12 }}
+              onFocus={e => e.target.style.borderColor = 'var(--border-focus)'}
+              onBlur={e => e.target.style.borderColor = 'var(--border-muted)'}
+            />
+
+            <div style={{ width: '100%', borderTop: '1px solid var(--border-muted)', paddingTop: 16 }}>
+              <p style={{ color: 'var(--text-faint)', fontSize: 12, margin: '0 0 8px' }}>
+                联网搜索（可选）
+              </p>
+              <TextInput
+                value={tavilyKey}
+                onChange={e => setTavilyKey(e.target.value)}
+                placeholder="Tavily API Key（tvly-...）"
+                style={{ ...inputStyle, textAlign: 'left', fontFamily: "'SF Mono', monospace", fontSize: 12 }}
+                onFocus={e => e.target.style.borderColor = 'var(--border-focus)'}
+                onBlur={e => e.target.style.borderColor = 'var(--border-muted)'}
+              />
+            </div>
+
+            {testResult && (
+              <p style={{
+                fontSize: 12, margin: 0,
+                color: testResult.ok ? '#22c55e' : '#ef4444',
+              }}>
+                {testResult.msg}
+              </p>
+            )}
+
             <button
               className="primary-btn"
               onClick={handleSaveApiKey}
-              disabled={!apiKey.trim()}
+              disabled={!apiKey.trim() || testing}
               style={btnStyle}
             >
-              开始使用
+              {testing ? '检测中...' : '开始使用'}
             </button>
 
             <button onClick={onEnterChat} style={linkStyle}>

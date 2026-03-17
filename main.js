@@ -711,6 +711,34 @@ ipcMain.handle('get-token-usage', (_, sessionId) => {
 
 ipcMain.handle('save-config', (_, config) => saveGlobalConfig(config))
 
+ipcMain.handle('test-api-connection', async (_, { provider, apiKey, baseUrl }) => {
+  try {
+    const url = provider === 'anthropic'
+      ? (baseUrl || 'https://api.anthropic.com') + '/v1/messages'
+      : (baseUrl || 'https://api.openai.com') + '/v1/chat/completions'
+    const headers = provider === 'anthropic'
+      ? { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }
+      : { 'Authorization': `Bearer ${apiKey}`, 'content-type': 'application/json' }
+    const body = provider === 'anthropic'
+      ? { model: 'claude-sonnet-4-20250514', max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }
+      : { model: 'gpt-4o-mini', max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15000),
+    })
+    if (res.ok || res.status === 200) return { ok: true }
+    const text = await res.text().catch(() => '')
+    if (res.status === 401) return { ok: false, error: 'API Key 无效' }
+    if (res.status === 403) return { ok: false, error: '权限不足' }
+    if (res.status === 429) return { ok: true } // Rate limited = key works
+    return { ok: false, error: `HTTP ${res.status}: ${text.slice(0, 100)}` }
+  } catch (err) {
+    return { ok: false, error: err.message?.includes('timeout') ? '连接超时' : (err.message || '网络错误') }
+  }
+})
+
 ipcMain.handle('get-coding-agent', () => {
   const config = loadConfig()
   return config.defaultCodingAgent || 'claude'

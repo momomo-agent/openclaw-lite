@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('api', {
   getTokenUsage: (sessionId) => ipcRenderer.invoke('get-token-usage', sessionId),
   chatCancel: () => ipcRenderer.invoke('chat-cancel'),
   saveConfig: (c) => ipcRenderer.invoke('save-config', c),
+  testApiConnection: (opts) => ipcRenderer.invoke('test-api-connection', opts),
   buildSystemPrompt: () => ipcRenderer.invoke('build-system-prompt'),
   chat: (msg) => ipcRenderer.invoke('chat', msg),
   chatPrepare: () => ipcRenderer.invoke('chat-prepare'),
