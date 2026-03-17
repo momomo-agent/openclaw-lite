@@ -1,6 +1,21 @@
 # Kanban — Paw 全局看板
 
-## 进行中：M38 — Coding Agent 作为对话参与者 ✅ 完成
+## 进行中：M39 — Onboarding 重构 + 术语统一
+
+### 目标
+Paw 的用户面术语全面品牌化：助手→Claw，workspace→Claw 文件夹。Onboarding 从"填配置"变为"解锁能力"。
+
+| Feature | 状态 | 说明 |
+|---------|------|------|
+| F272 术语统一 | 🔲 待做 | 助手→Claw，workspace→Claw 文件夹，全 UI 文案替换 |
+| F273 Anthropic 按钮 CSS | 🔲 待做 | 黑背景黑字 bug 修复 |
+| F274 Step 3 能力解锁 | 🔲 待做 | "思考"(API Key) / "联网"(Tavily) / "代码"(默认开) |
+| F275 Tavily 配置入口 | 🔲 待做 | 联网能力需要 Tavily API Key |
+| F276 Step 2 文案优化 | 🔲 待做 | "创建你的第一个 Claw" + "选一个文件夹" |
+
+---
+
+## 已完成：M38 — Coding Agent 作为对话参与者 ✅ 完成
 
 ### P0 核心功能
 | Feature | 状态 | 说明 |

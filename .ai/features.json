@@ -1189,5 +1189,40 @@
     "milestone": "m2",
     "passes": true,
     "auto": true
+  },
+  {
+    "id": "F272",
+    "category": "onboarding",
+    "description": "术语统一：助手→Claw，workspace→Claw 文件夹（全 UI 文案替换）",
+    "passes": false,
+    "milestone": "M39"
+  },
+  {
+    "id": "F273",
+    "category": "onboarding",
+    "description": "Anthropic 按钮 CSS 修复（黑背景黑字）",
+    "passes": false,
+    "milestone": "M39"
+  },
+  {
+    "id": "F274",
+    "category": "onboarding",
+    "description": "Step 3 重构：能力解锁视角（思考/联网/代码）替代配置填写",
+    "passes": false,
+    "milestone": "M39"
+  },
+  {
+    "id": "F275",
+    "category": "onboarding",
+    "description": "Tavily API Key 配置入口（联网能力）",
+    "passes": false,
+    "milestone": "M39"
+  },
+  {
+    "id": "F276",
+    "category": "onboarding",
+    "description": "Step 2 文案优化：创建你的第一个 Claw + 选文件夹",
+    "passes": false,
+    "milestone": "M39"
   }
 ]
