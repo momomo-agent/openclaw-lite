@@ -185,10 +185,57 @@ function buildFailoverList(model, provider, config, failoverManager) {
   return modelsToTry
 }
 
+/**
+ * Inject cross-session memory: when chatting with an agent in a 1:1 session,
+ * pull recent messages from OTHER sessions this agent participated in (e.g. group chats).
+ * This lets the agent "remember" things discussed elsewhere.
+ */
+function injectCrossSessionContext(systemPrompt, { workspaceId, currentSessionId, sessionDb, sessionStore }) {
+  if (!workspaceId || !currentSessionId || !sessionDb) return systemPrompt
+
+  try {
+    // Find other sessions this workspace participates in (excluding current)
+    const allSessions = sessionStore.listSessions(sessionDb, { workspaceId })
+    const otherSessions = allSessions
+      .filter(s => s.id !== currentSessionId)
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+      .slice(0, 3) // At most 3 recent sessions
+
+    if (otherSessions.length === 0) return systemPrompt
+
+    const contextLines = []
+    for (const s of otherSessions) {
+      const session = sessionStore.loadSession(sessionDb, s.id)
+      if (!session?.messages?.length) continue
+      // Take last 10 messages, skip tool-only entries
+      const recent = session.messages
+        .filter(m => m.content?.trim())
+        .slice(-10)
+        .map(m => {
+          const sender = m.role === 'user' ? 'User' : (m.sender || 'Assistant')
+          return `  [${sender}]: ${m.content.slice(0, 300)}`
+        })
+      if (recent.length) {
+        const label = s.title || (s.participants?.length > 2 ? '群聊' : '对话')
+        contextLines.push(`### ${label}\n${recent.join('\n')}`)
+      }
+    }
+
+    if (contextLines.length) {
+      systemPrompt += '\n\n---\n\n## Recent conversations you participated in\nYou discussed the following in other sessions. Use this context when relevant.\n\n' + contextLines.join('\n\n')
+    }
+  } catch (err) {
+    console.warn('[chat-pipeline] cross-session context error:', err.message)
+  }
+
+  return systemPrompt
+}
+
 module.exports = {
   buildConversationHistory,
   buildUserContent,
   injectGroupChatContext,
   injectTeammateContext,
+  injectCrossSessionContext,
   buildFailoverList,
 }

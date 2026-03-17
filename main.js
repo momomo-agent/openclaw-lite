@@ -79,7 +79,7 @@ const { streamAnthropic } = require('./core/stream-anthropic')
 const { streamOpenAI } = require('./core/stream-openai')
 const { handleDelegateTo } = require('./core/delegate')
 const { loadCCSessions: _loadCCSessions, routeToCodingAgent, streamCodingAgent } = require('./core/coding-agent-router')
-const { buildConversationHistory, buildUserContent, injectGroupChatContext, injectTeammateContext, buildFailoverList } = require('./core/chat-pipeline')
+const { buildConversationHistory, buildUserContent, injectGroupChatContext, injectTeammateContext, injectCrossSessionContext, buildFailoverList } = require('./core/chat-pipeline')
 
 // Legacy globals - kept for backward compat, synced to state via syncState()
 let mainWindow
@@ -1410,6 +1410,16 @@ async function _runChat({ prompt, files, agentId, sessionId, requestId, focus, t
 
   // F046: Inject other agents' recent messages for visibility (M36: extracted)
   systemPrompt = injectTeammateContext(systemPrompt, { agent, sessionId, sessionDb: _sessionDb, sessionStore })
+
+  // Cross-session memory: let agent recall discussions from other sessions (e.g. group chats)
+  if (!_isGroupChat && _wsIdentity?.workspaceId) {
+    systemPrompt = injectCrossSessionContext(systemPrompt, {
+      workspaceId: _wsIdentity.workspaceId,
+      currentSessionId: sessionId,
+      sessionDb: _sessionDb,
+      sessionStore,
+    })
+  }
 
   // Build messages (M36: extracted to chat-pipeline)
   const messages = buildConversationHistory({
