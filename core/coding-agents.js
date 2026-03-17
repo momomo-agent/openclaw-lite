@@ -3,6 +3,7 @@
 const { spawn, execSync } = require('child_process')
 const fs = require('fs')
 const home = require('os').homedir()
+const { WHITELIST } = require('./acp-client')
 
 // Common CLI install locations (Electron .app may not inherit shell PATH)
 const COMMON_DIRS = [
@@ -55,7 +56,7 @@ function detectBin(name) {
 const agents = {
   claude: {
     id: 'claude',
-    name: 'Claude',
+    name: 'Claude Code',
     avatar: '../avatars/claude.png',
     bin: 'claude',
     _path: null,
@@ -94,42 +95,7 @@ const agents = {
       return _spawnAgent(this._path, args, { cwd, onOutput: streamOnOutput, onProcess })
     },
   },
-  codex: {
-    id: 'codex',
-    name: 'Codex',
-    avatar: '../avatars/codex.png',
-    bin: 'codex',
-    _path: null,
-    detect() { const p = detectBin('codex'); if (p) { this._path = p; return true }; return false },
-    run(prompt, { cwd, session, onOutput, onProcess }) {
-      const args = [prompt]
-      return _spawnAgent(this._path, args, { cwd, onOutput, onProcess })
-    },
-  },
-  gemini: {
-    id: 'gemini',
-    name: 'Gemini CLI',
-    avatar: '../avatars/gemini.png',
-    bin: 'gemini',
-    _path: null,
-    detect() { const p = detectBin('gemini'); if (p) { this._path = p; return true }; return false },
-    run(prompt, { cwd, session, onOutput, onProcess }) {
-      const args = [prompt]
-      return _spawnAgent(this._path, args, { cwd, onOutput, onProcess })
-    },
-  },
-  kiro: {
-    id: 'kiro',
-    name: 'Kiro',
-    avatar: '../avatars/kiro.png',
-    bin: 'kiro',
-    _path: null,
-    detect() { const p = detectBin('kiro'); if (p) { this._path = p; return true }; return false },
-    run(prompt, { cwd, session, onOutput, onProcess }) {
-      const args = [prompt]
-      return _spawnAgent(this._path, args, { cwd, onOutput, onProcess })
-    },
-  },
+  // Codex, Gemini, Kiro removed — will be re-added via ACP after E2E verification
 }
 
 // Shared spawn helper with streaming + process exposure
@@ -183,21 +149,29 @@ let _available = []
 
 function init() {
   _available = []
-  for (const [id, agent] of Object.entries(agents)) {
-    if (agent.detect()) {
-      _available.push(id)
-      console.log(`[coding-agents] ${id} available at ${agent._path}`)
+  // Only detect agents in the whitelist
+  for (const [id, whitelistEntry] of Object.entries(WHITELIST)) {
+    if (!whitelistEntry.useAcp && agents[id]) {
+      // Non-ACP agent (e.g., Claude Code via SDK)
+      if (agents[id].detect()) {
+        _available.push(id)
+        console.log(`[coding-agents] ${id} available at ${agents[id]._path}`)
+      }
     }
+    // ACP agents will be added here after F279/F280 implementation
   }
   console.log(`[coding-agents] available: ${_available.length ? _available.join(', ') : 'none'}`)
 }
 
 function listAvailable() {
-  return _available.map(id => ({
-    id,
-    name: agents[id].name,
-    avatar: agents[id].avatar
-  }))
+  return _available.map(id => {
+    const whitelistEntry = WHITELIST[id]
+    return {
+      id,
+      name: whitelistEntry?.name || agents[id]?.name || id,
+      avatar: whitelistEntry?.avatar || agents[id]?.avatar || '../avatars/default.png'
+    }
+  })
 }
 
 function isAvailable(agentId) {
