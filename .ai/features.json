@@ -1229,14 +1229,14 @@
     "id": "F277",
     "category": "coding-agent",
     "description": "ACP 协议层：接入 Agent Client Protocol，替代 codex/gemini/kiro 的直接 spawn",
-    "passes": false,
+    "passes": true,
     "milestone": "M39"
   },
   {
     "id": "F278",
     "category": "coding-agent",
     "description": "白名单机制：只显示验证通过的 coding agent（Claude Code 默认白名单）",
-    "passes": false,
+    "passes": true,
     "milestone": "M39"
   },
   {
