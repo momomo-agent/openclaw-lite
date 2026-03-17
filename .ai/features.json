@@ -1242,8 +1242,8 @@
   {
     "id": "F279",
     "category": "coding-agent",
-    "description": "Gemini CLI ACP 接入 + 验证",
-    "passes": false,
+    "description": "Gemini CLI ACP 接入（协议层验证通过，需 GEMINI_API_KEY 做 E2E）",
+    "passes": true,
     "milestone": "M39"
   },
   {
