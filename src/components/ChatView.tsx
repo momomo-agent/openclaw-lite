@@ -11,6 +11,12 @@ import SettingsPanel from './SettingsPanel'
 
 const CHARS_PER_TOKEN = 3.5
 
+// Unique ID generator (prevents concurrent ID collisions)
+let _msgIdCounter = 0
+function generateMessageId(): string {
+  return `msg-${Date.now()}-${++_msgIdCounter}`
+}
+
 export default function ChatView() {
   const { currentSessionId, setCurrentSessionId, sessions, setSessions, setActivity, setStatus, workspaces, setWorkspaces, userProfile, sidebarVisible, setSidebarVisible } = useAppState()
   const api = useIPC()
@@ -60,8 +66,14 @@ export default function ChatView() {
   const routeUpdate = (sid: string, msg: Message) => {
     const updater = (prev: Message[]) => {
       const idx = prev.findIndex(m => m.id === msg.id)
-      if (idx >= 0) { const next = [...prev]; next[idx] = { ...msg }; return next }
-      return [...prev.slice(0, -1), { ...msg }]
+      if (idx >= 0) {
+        const next = [...prev]
+        next[idx] = { ...msg }
+        return next
+      }
+      // Message not found — add it instead of replacing last message
+      console.warn(`[routeUpdate] msg.id=${msg.id} not found, adding instead`)
+      return [...prev, msg]
     }
     if (sid === currentSidRef.current) setMessages(updater)
     else {
@@ -195,7 +207,7 @@ export default function ChatView() {
 
     const addSystemMsg = (content: string) => {
       setMessages(prev => [...prev, {
-        id: 'sys-' + Date.now(), role: 'assistant', content, timestamp: Date.now(), sender: 'System'
+        id: generateMessageId(), role: 'assistant', content, timestamp: Date.now(), sender: 'System'
       }])
     }
 
@@ -292,7 +304,7 @@ export default function ChatView() {
     }))
 
     const userMsg: Message = {
-      id: Date.now().toString(),
+      id: generateMessageId(),
       role: 'user',
       content: text,
       timestamp: Date.now(),
@@ -345,7 +357,7 @@ export default function ChatView() {
       setMessages(prev => {
         const cleaned = prev.filter(m => m.id !== streamingId)
         return cleaned.concat({
-          id: 'error-' + Date.now(),
+          id: generateMessageId(),
           role: 'assistant',
           content: errMsg,
           timestamp: Date.now(),
@@ -405,7 +417,7 @@ export default function ChatView() {
       setMessages(prev => {
         const cleaned = prev.filter(m => m.id !== streamingId)
         return cleaned.concat({
-          id: 'error-' + Date.now(),
+          id: generateMessageId(),
           role: 'assistant',
           content: errMsg,
           timestamp: Date.now(),

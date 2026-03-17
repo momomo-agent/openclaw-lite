@@ -12,6 +12,12 @@ const dbg = (...args: any[]) => {
   if ((window as any).__PAW_DEBUG__) console.log('[Paw🐾]', ...args)
 }
 
+// Unique ID generator for streaming messages
+let _streamingIdCounter = 0
+function generateStreamingId(): string {
+  return `streaming-${Date.now()}-${++_streamingIdCounter}`
+}
+
 /** Per-session streaming state */
 export interface StreamState {
   requestId: string | null
@@ -112,7 +118,7 @@ export function useChatEvents(refs: Refs, router: StreamRouter) {
         const split = ss.pendingSplit
         ss.pendingSplit = null
         ss.streamingMsg = {
-          id: 'streaming-' + Date.now(),
+          id: generateStreamingId(),
           role: 'assistant',
           content: '',
           timestamp: Date.now(),
@@ -141,7 +147,7 @@ export function useChatEvents(refs: Refs, router: StreamRouter) {
 
       // Create new card
       ss.streamingMsg = {
-        id: 'streaming-' + Date.now(),
+        id: generateStreamingId(),
         role: 'assistant',
         content: '',
         timestamp: Date.now(),
@@ -272,7 +278,7 @@ export function useChatEvents(refs: Refs, router: StreamRouter) {
         ? refs.workspaces.current.find(w => w.id === data.workspaceId)?.path
         : undefined
       ss.delegateMsg = {
-        id: 'delegate-' + Date.now(),
+        id: generateStreamingId(),
         role: 'assistant',
         content: '',
         timestamp: Date.now(),
