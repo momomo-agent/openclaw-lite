@@ -1224,5 +1224,33 @@
     "description": "Step 2 文案优化：创建你的第一个 Claw + 选文件夹",
     "passes": false,
     "milestone": "M39"
+  },
+  {
+    "id": "F277",
+    "category": "coding-agent",
+    "description": "ACP 协议层：接入 Agent Client Protocol，替代 codex/gemini/kiro 的直接 spawn",
+    "passes": false,
+    "milestone": "M39"
+  },
+  {
+    "id": "F278",
+    "category": "coding-agent",
+    "description": "白名单机制：只显示验证通过的 coding agent（Claude Code 默认白名单）",
+    "passes": false,
+    "milestone": "M39"
+  },
+  {
+    "id": "F279",
+    "category": "coding-agent",
+    "description": "Gemini CLI ACP 接入 + 验证",
+    "passes": false,
+    "milestone": "M39"
+  },
+  {
+    "id": "F280",
+    "category": "coding-agent",
+    "description": "Codex ACP 接入 + 验证",
+    "passes": false,
+    "milestone": "M39"
   }
 ]
