@@ -3,13 +3,16 @@ import { useRef, forwardRef, useImperativeHandle } from 'react'
 interface TextInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onKeyDown'> {
   /** Called on Enter key press (not during IME composition) */
   onSubmit?: () => void
+  onCompositionStart?: React.CompositionEventHandler<HTMLInputElement>
+  onCompositionEnd?: React.CompositionEventHandler<HTMLInputElement>
 }
 
 /**
  * Input with IME composition awareness.
  * Prevents Enter from firing onSubmit while composing (e.g. Chinese input).
+ * Merges external onCompositionStart/End with internal composing ref.
  */
-const TextInput = forwardRef<HTMLInputElement, TextInputProps>(({ onSubmit, ...props }, ref) => {
+const TextInput = forwardRef<HTMLInputElement, TextInputProps>(({ onSubmit, onCompositionStart, onCompositionEnd, ...props }, ref) => {
   const innerRef = useRef<HTMLInputElement>(null)
   const composing = useRef(false)
 
@@ -28,8 +31,8 @@ const TextInput = forwardRef<HTMLInputElement, TextInputProps>(({ onSubmit, ...p
       ref={innerRef}
       {...props}
       onKeyDown={handleKeyDown}
-      onCompositionStart={() => { composing.current = true }}
-      onCompositionEnd={() => { composing.current = false }}
+      onCompositionStart={(e) => { composing.current = true; onCompositionStart?.(e) }}
+      onCompositionEnd={(e) => { composing.current = false; onCompositionEnd?.(e) }}
     />
   )
 })

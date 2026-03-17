@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useIPC } from '../hooks/useIPC'
+import { useSanitizedInput } from '../hooks/useSanitizedInput'
 import TextInput from './TextInput'
 
 const AVATAR_COUNT = 6 // 0.png through 5.png
@@ -20,8 +21,9 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
 
   const [step, setStep] = useState<Step>('user')
 
-  // User profile
-  const [userName, setUserName] = useState('')
+  // User profile — IME-safe sanitized input
+  const sanitize = useCallback(sanitizeName, [])
+  const [userName, setUserName, userNameProps] = useSanitizedInput(sanitize)
   const [userAvatar, setUserAvatar] = useState(0)
 
   // Check if user profile already exists (skip user step on re-entry)
@@ -35,8 +37,8 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
     }).catch(() => {})
   }, [])
 
-  // Assistant
-  const [assistantName, setAssistantName] = useState('')
+  // Assistant — IME-safe sanitized input
+  const [assistantName, setAssistantName, assistantNameProps] = useSanitizedInput(sanitize)
   const [assistantAvatar, setAssistantAvatar] = useState(Math.floor(Math.random() * AVATAR_COUNT))
   const [creating, setCreating] = useState(false)
 
@@ -149,8 +151,7 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
 
             <TextInput
               ref={inputRef}
-              value={userName}
-              onChange={e => setUserName(sanitizeName(e.target.value))}
+              {...userNameProps}
               onSubmit={handleUserNext}
               placeholder="你的名字"
               maxLength={32}
@@ -187,8 +188,7 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
 
             <TextInput
               ref={inputRef}
-              value={assistantName}
-              onChange={e => setAssistantName(sanitizeName(e.target.value))}
+              {...assistantNameProps}
               onSubmit={handleCreate}
               placeholder="比如 Momo、小助手、Alice"
               maxLength={32}

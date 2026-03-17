@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { Workspace } from '../types'
 import { useIPC } from '../hooks/useIPC'
+import { useSanitizedInput } from '../hooks/useSanitizedInput'
 import { Avatar } from './Avatar'
 import TextInput from './TextInput'
 
@@ -167,7 +168,8 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
 
   // Editor overlay state
   const [editorMode, setEditorMode] = useState<'create' | 'edit' | null>(null)
-  const [editorName, setEditorName] = useState('')
+  const sanitize = useCallback(sanitizeName, [])
+  const [editorName, setEditorName, editorNameProps] = useSanitizedInput(sanitize)
   const [editorAvatar, setEditorAvatar] = useState(0) // -1 = custom image
   const [editorCustomSrc, setEditorCustomSrc] = useState<string | null>(null)
   const [editorWsId, setEditorWsId] = useState<string | null>(null)
@@ -440,8 +442,7 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
 
             <TextInput
               ref={editorInputRef}
-              value={editorName}
-              onChange={e => setEditorName(sanitizeName(e.target.value))}
+              {...editorNameProps}
               onSubmit={handleEditorSave}
               placeholder="助手名称"
               maxLength={32}
