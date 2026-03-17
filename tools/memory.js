@@ -106,3 +106,39 @@ registerTool({
     return JSON.stringify({ text: slice.join('\n'), path: relPath, from: start, lines: slice.length });
   }
 });
+
+registerTool({
+  name: 'memory_write',
+  description: 'Write or append to memory files (MEMORY.md or memory/*.md). Use to record important decisions, user preferences, project context, or anything worth remembering across sessions.',
+  parameters: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: 'Relative path within claw directory (e.g. MEMORY.md, memory/notes.md)' },
+      content: { type: 'string', description: 'Content to write' },
+      mode: { type: 'string', enum: ['append', 'overwrite'], description: 'append (default) or overwrite' }
+    },
+    required: ['path', 'content']
+  },
+  handler: async (args, context) => {
+    const { clawDir } = context;
+    if (!clawDir) return 'Error: No claw directory';
+    const relPath = (args.path || '').trim();
+    if (!relPath) return 'Error: path required';
+    if (!relPath.endsWith('.md')) return 'Error: only .md files allowed';
+    const absPath = path.resolve(clawDir, relPath);
+    if (!absPath.startsWith(clawDir)) return 'Error: path outside claw directory';
+    // Ensure parent directory exists
+    const dir = path.dirname(absPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const content = args.content || '';
+    if (args.mode === 'overwrite') {
+      fs.writeFileSync(absPath, content, 'utf8');
+    } else {
+      // Append with newline separator
+      const existing = fs.existsSync(absPath) ? fs.readFileSync(absPath, 'utf8') : '';
+      const separator = existing && !existing.endsWith('\n') ? '\n' : '';
+      fs.writeFileSync(absPath, existing + separator + content + '\n', 'utf8');
+    }
+    return JSON.stringify({ ok: true, path: relPath, mode: args.mode || 'append' });
+  }
+});

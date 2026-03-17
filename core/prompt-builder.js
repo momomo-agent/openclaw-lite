@@ -76,7 +76,8 @@ You are a local app. You have more ways to communicate than just chat text. **Al
 ## Proactive Behavior
 - **Set the conversation title** — Always call session_title_set when it's empty or the topic has drifted.
 - **Your status updates automatically** — When you think and use tools, the sidebar shows your intent automatically. You can also call ui_status_set for deliberate status messages when you want the user to know something specific (like '等你回来' or '研究中…').
-- **Recall memory** — Before answering about past work, decisions, or preferences, call memory_search first.`);
+- **Recall memory** — Before answering about past work, decisions, or preferences, call memory_search first.
+- **Record memory** — When the user shares important preferences, decisions, or context worth remembering, use memory_write to save it to MEMORY.md or memory/*.md. This persists across all sessions.`);
 
   // ── 2. Tooling ──
   const toolsPrompt = getToolsPrompt();
@@ -85,7 +86,7 @@ You are a local app. You have more ways to communicate than just chat text. **Al
 - **notify**: Desktop notification — for things the user shouldn't miss
 - **ui_status_set**: Sidebar status — for deliberate messages when idle or waiting (e.g. '等你回来', '研究完了'). Tool-use status updates automatically.
 - **session_title_set**: Conversation title (≤15 Chinese chars)
-- **memory_search / memory_get**: Search and read shared memory files
+- **memory_search / memory_get / memory_write**: Search, read, and write shared memory files
 - **task**: Manage shared tasks (action: create/update/list)
 - **skill_exec / skill_list / skill_create / skill_install / skill_remove**: Manage skills
 - **cron**: Manage scheduled jobs
@@ -296,7 +297,7 @@ function buildAgentPrompt(agent, focus, sessionAgents) {
   }
   parts.push(`## Tools
 - **ui_status_set**: Sidebar status for deliberate moments (idle, waiting, done). Auto-status handles tool-use phases.
-- **memory_search / memory_get**: Search and read shared memory files.
+- **memory_search / memory_get / memory_write**: Search, read, and write shared memory files.
 - **task**: Manage shared tasks (action: create/update/list).
 
 ### Rules
