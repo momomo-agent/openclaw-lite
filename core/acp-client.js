@@ -14,8 +14,14 @@ const WHITELIST = {
     // Claude Code uses direct SDK, not ACP — handled by coding-agents.js
     useAcp: false,
   },
-  // Gemini and Codex will be added here after ACP E2E verification passes.
-  // gemini: { id: 'gemini', name: 'Gemini CLI', bin: 'gemini', acpArgs: ['--acp'], useAcp: true },
+  gemini: {
+    id: 'gemini',
+    name: 'Gemini CLI',
+    avatar: '../avatars/gemini.png',
+    bin: 'gemini',
+    acpArgs: ['--acp'],
+    useAcp: true,
+  },
   // codex: { id: 'codex', name: 'Codex', bin: 'codex', acpArgs: ['mcp-server'], useAcp: true },
 }
 

@@ -146,19 +146,28 @@ function _spawnAgent(bin, args, { cwd, onOutput, onProcess, timeout = 600000 }) 
 }
 
 let _available = []
+let _acpPaths = {} // id -> detected bin path for ACP agents
 
 function init() {
   _available = []
+  _acpPaths = {}
   // Only detect agents in the whitelist
-  for (const [id, whitelistEntry] of Object.entries(WHITELIST)) {
-    if (!whitelistEntry.useAcp && agents[id]) {
+  for (const [id, entry] of Object.entries(WHITELIST)) {
+    if (!entry.useAcp && agents[id]) {
       // Non-ACP agent (e.g., Claude Code via SDK)
       if (agents[id].detect()) {
         _available.push(id)
         console.log(`[coding-agents] ${id} available at ${agents[id]._path}`)
       }
+    } else if (entry.useAcp) {
+      // ACP agent — detect binary
+      const binPath = detectBin(entry.bin)
+      if (binPath) {
+        _acpPaths[id] = binPath
+        _available.push(id)
+        console.log(`[coding-agents] ${id} (ACP) available at ${binPath}`)
+      }
     }
-    // ACP agents will be added here after F279/F280 implementation
   }
   console.log(`[coding-agents] available: ${_available.length ? _available.join(', ') : 'none'}`)
 }
@@ -179,6 +188,22 @@ function isAvailable(agentId) {
 }
 
 function run(agentId, prompt, opts) {
+  const entry = WHITELIST[agentId]
+  // ACP agent
+  if (entry?.useAcp) {
+    const binPath = _acpPaths[agentId]
+    if (!binPath) throw new Error(`Coding agent '${agentId}' not available`)
+    const { runAcp } = require('./acp-client')
+    return runAcp({
+      bin: binPath,
+      acpArgs: entry.acpArgs || [],
+      prompt,
+      cwd: opts.cwd,
+      onOutput: opts.onOutput,
+      onProcess: opts.onProcess,
+    })
+  }
+  // Non-ACP agent (Claude Code via SDK)
   const agent = agents[agentId]
   if (!agent || !agent._path) throw new Error(`Coding agent '${agentId}' not available`)
   return agent.run(prompt, opts)
