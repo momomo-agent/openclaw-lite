@@ -366,7 +366,7 @@ export function useChatEvents(refs: Refs, router: StreamRouter) {
           let errMsg = data.error
           errMsg = errMsg.replace(/^Error invoking remote method '[^']+': Error: /i, '')
           errMsg = errMsg.replace(/^Error: /i, '')
-          dbMessages.push({ id: 'error-' + Date.now(), role: 'assistant', content: errMsg, timestamp: Date.now(), isError: true })
+          dbMessages.push({ id: generateStreamingId(), role: 'assistant', content: errMsg, timestamp: Date.now(), isError: true })
         }
         router.routeSet(sid, dbMessages)
 
@@ -385,7 +385,7 @@ export function useChatEvents(refs: Refs, router: StreamRouter) {
       errMsg = errMsg.replace(/^Error invoking remote method '[^']+': Error: /i, '')
       errMsg = errMsg.replace(/^Error: /i, '')
       router.routeAdd(sid, {
-        id: 'error-' + Date.now(),
+        id: generateStreamingId(),
         role: 'assistant' as any,
         content: errMsg,
         timestamp: Date.now(),

@@ -1219,6 +1219,7 @@ function finishChat(sessionId, requestId, assistantText, wsIdentity, toolSteps, 
     const merged = chatQueue.drainAndMerge(sessionId)
     if (merged) {
       console.log(`[Paw] Draining queued message(s) for session ${sessionId.slice(0, 8)}`)
+      chatQueue.markActive(sessionId)  // Re-activate before async start
       _runChat(merged).catch(err => console.error('[Paw] Queue drain error:', err))
     }
   }
@@ -1245,13 +1246,14 @@ ipcMain.handle('chat', async (_, { prompt, message, history, rawMessages, agentI
   }
 
   // Start _runChat async — don't await (streaming events go via eventBus, not IPC return)
+  if (sessionId) { chatQueue.markActive(sessionId) }  // Mark active BEFORE async start to prevent race
   _runChat({ prompt, files, agentId, sessionId, requestId, focus, targetWorkspaceId, rawMessages, history })
     .catch(err => console.error('[Paw] _runChat error:', err))
   return { started: true }
 })
 
 async function _runChat({ prompt, files, agentId, sessionId, requestId, focus, targetWorkspaceId, userMessageSaved, rawMessages, history }) {
-  if (sessionId) { chatQueue.markActive(sessionId) }
+  // chatQueue.markActive(sessionId) already called by IPC handler before async start
 
   const config = (() => {
     const p = configPath()

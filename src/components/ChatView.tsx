@@ -218,7 +218,7 @@ export default function ChatView() {
         const sessions = await api.listSessions()
         setSessions(sessions)
         if (arg) {
-          const reqId = await api.chatPrepare?.() || Date.now().toString()
+          const reqId = await api.chatPrepare?.() || generateMessageId()
           await api.chat({ sessionId: result.id, message: arg, requestId: reqId })
         }
       }
@@ -253,7 +253,7 @@ export default function ChatView() {
     }
     if (cmd === '/compact' && currentSessionId) {
       addSystemMsg('正在压缩对话历史...')
-      await api.chat({ sessionId: currentSessionId, message: '/compact', requestId: Date.now().toString() })
+      await api.chat({ sessionId: currentSessionId, message: '/compact', requestId: generateMessageId() })
       return true
     }
     if (cmd === '/reset' && currentSessionId) {
@@ -320,11 +320,11 @@ export default function ChatView() {
 
     setMessages(prev => [...prev, userMsg])
 
-    const requestId = await api.chatPrepare?.() || Date.now().toString()
+    const requestId = await api.chatPrepare?.() || generateMessageId()
     const ss = getStreamState(currentSessionId)
     ss.requestId = requestId
 
-    const streamingId = 'streaming-' + Date.now()
+    const streamingId = generateMessageId()
     ss.streamingMsg = {
       id: streamingId,
       role: 'assistant',
@@ -375,11 +375,11 @@ export default function ChatView() {
     if (lastUserIdx < 0) return
     const retryContent = messages[lastUserIdx].content
 
-    const requestId = await api.chatPrepare?.() || Date.now().toString()
+    const requestId = await api.chatPrepare?.() || generateMessageId()
     const ss = getStreamState(currentSessionId)
     ss.requestId = requestId
 
-    const streamingId = 'streaming-' + Date.now()
+    const streamingId = generateMessageId()
     const retryOwnerWs = sessionParticipants[0] ? workspaces.find((w: any) => w.id === sessionParticipants[0]) : undefined
     ss.streamingMsg = {
       id: streamingId,
