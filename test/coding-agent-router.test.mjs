@@ -20,7 +20,14 @@ function makeCtx(overrides = {}) {
     _activeAbortController: null,
     _activeCodingProcess: null,
     pushStatus: vi.fn(),
-    loadConfig: vi.fn(() => ({ provider: 'anthropic', apiKey: 'k', model: 'claude-sonnet-4-20250514' })),
+    loadConfig: vi.fn(() => ({
+      provider: 'anthropic',
+      apiKey: 'sk-test',
+      model: 'claude-sonnet-4-20250514',
+      codingAgents: {
+        claude: { apiKey: 'sk-test-claude', baseUrl: 'https://api.anthropic.com' },
+      },
+    })),
     ...overrides,
   }
 }
@@ -53,17 +60,23 @@ describe('coding-agent-router', () => {
 
     it('sets ctx._activeRequestId for claude engine', async () => {
       // Claude engine routes to SDK path, which will fail in test env
-      // but we can verify the routing logic runs
+      // (either "not available" or "API key not configured")
       const workspace = { id: 'ws-ca', engine: 'claude', path: '/nonexistent', identity: { name: 'Bot' } }
       const ctx = makeCtx()
-      const result = await routeToCodingAgent(
-        workspace, 'hello',
-        { sessionId: 's1', requestId: 'r1', senderName: 'User', senderAvatar: '👤' },
-        ctx
-      )
+      let result
+      try {
+        result = await routeToCodingAgent(
+          workspace, 'hello',
+          { sessionId: 's1', requestId: 'r1', senderName: 'User', senderAvatar: '👤' },
+          ctx
+        )
+      } catch (err) {
+        result = err.message
+      }
 
-      // Should return error (SDK not available in test) or result
+      // Should return/throw error string (SDK not available or config issue in test)
       expect(typeof result).toBe('string')
+      expect(result.toLowerCase()).toMatch(/error|not configured|not available/)
     })
   })
 

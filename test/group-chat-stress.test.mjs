@@ -43,7 +43,17 @@ const mockCtx = {
     { name: 'search', description: 'Search' },
     { name: 'delegate_to', description: 'Delegate' },
   ]),
+  streamAnthropic: vi.fn(async (msgs, prompt, config, rid, tools, sid) => ({
+    answer: `Response from ${prompt.match(/\*\*(\w+)\*\*/)?.[1] || 'Agent'}`,
+    toolSteps: [],
+  })),
+  streamOpenAI: vi.fn(async (msgs, prompt, config, rid, tools, sid) => ({
+    answer: `Response from ${prompt.match(/\*\*(\w+)\*\*/)?.[1] || 'Agent'}`,
+    toolSteps: [],
+  })),
+  configPath: vi.fn(() => '/tmp/fake-config.json'),
   _activeRequestId: null,
+  _activeAbortController: null,
   _pendingDelegateMessages: new Map(),
   streamToLLM: vi.fn(async function* (params) {
     yield { type: 'text', text: `Response from ${params.systemPrompt.slice(0, 20)}` }
