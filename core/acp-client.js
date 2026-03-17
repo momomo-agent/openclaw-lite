@@ -10,9 +10,12 @@ const WHITELIST = {
     id: 'claude',
     name: 'Claude Code',
     avatar: '../avatars/claude.png',
-    bin: 'claude',
-    // Claude Code uses direct SDK, not ACP — handled by coding-agents.js
+    // Claude Code uses @anthropic-ai/claude-agent-sdk — no local CLI needed.
+    // Availability determined by whether API key is configured, not local install.
     useAcp: false,
+    useSdk: true,
+    provider: 'anthropic',
+    configKey: 'codingAgents.claude', // settings.json path
   },
   gemini: {
     id: 'gemini',
@@ -21,16 +24,19 @@ const WHITELIST = {
     bin: 'gemini',
     acpArgs: ['--acp'],
     useAcp: true,
+    provider: 'google',
+    configKey: 'codingAgents.gemini',
   },
   codex: {
     id: 'codex',
     name: 'Codex',
     avatar: '../avatars/codex.png',
     // codex-acp is a standalone ACP binary (from @zed-industries/codex-acp)
-    // Not the codex CLI itself — this is a dedicated ACP adapter
-    bundledBin: true, // resolve from node_modules instead of PATH
+    bundledBin: true,
     acpArgs: [],
     useAcp: true,
+    provider: 'openai',
+    configKey: 'codingAgents.codex',
   },
 }
 

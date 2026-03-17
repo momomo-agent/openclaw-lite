@@ -107,7 +107,7 @@ async function routeToCodingAgent(workspace, message, { sessionId, requestId, se
 
 async function routeToCodingAgentSDK(workspace, message, { sessionId, requestId, senderName, senderAvatar }, ctx) {
   const { ClaudeCodeSession } = require('./claude-code-sdk')
-  const { getApiKey } = require('./api-keys')
+  const { getAgentConfig } = require('./coding-agents')
 
   const { engine, path: workdir, identity } = workspace
   const agentName = identity?.name || engine
@@ -124,11 +124,14 @@ async function routeToCodingAgentSDK(workspace, message, { sessionId, requestId,
   const ccSessionKey = `${sessionId}-${engine}-${workdir}`
   const existingSessionId = sessionCCSessions.get(ccSessionKey)
 
-  // Get API key, base URL, and model from config
-  const config = ctx.loadConfig()
-  const apiKey = getApiKey(config)
-  const baseUrl = config.baseUrl
-  const model = config.model || 'claude-opus-4-6'
+  // Get agent-specific config (or fallback to main config)
+  const agentConf = getAgentConfig('claude')
+  if (!agentConf?.apiKey) {
+    throw new Error('Claude Code API key not configured. Set it in Settings → Coding Agents.')
+  }
+  const apiKey = agentConf.apiKey
+  const baseUrl = agentConf.baseUrl
+  const model = agentConf.model || 'claude-opus-4-6'
 
   const session = new ClaudeCodeSession({
     cwd: workdir,

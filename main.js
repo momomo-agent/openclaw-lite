@@ -483,8 +483,8 @@ if (E2E_PORT) {
 }
 
 app.whenReady().then(() => {
-  // Initialize coding agents
-  codingAgents.init()
+  // Initialize coding agents (pass config for API key detection)
+  codingAgents.init(loadConfig())
 
   // Initialize workspace registry
   workspaceRegistry.initRegistry()
