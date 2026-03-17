@@ -40,10 +40,12 @@ async function streamChat({ messages, systemPrompt, config, requestId, tools, se
   let totalUsage = { inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0 }
   let lastUsage = { inputTokens: 0, cacheRead: 0, cacheWrite: 0 }
 
-  // Agent-level timeout
-  const timeoutMs = (config.timeoutSeconds || 600) * 1000
+  // Agent-level timeout — scale with participant count for group chats
+  const participantCount = config._participantCount || 1
+  const baseTimeout = (config.timeoutSeconds || 600) * 1000
+  const timeoutMs = Math.max(baseTimeout, participantCount * 120_000) // 120s per participant
   const timeoutId = setTimeout(() => {
-    console.warn(`[Paw] Agent timeout after ${timeoutMs / 1000}s`)
+    console.warn(`[Paw] Agent timeout after ${timeoutMs / 1000}s (${participantCount} participants)`)
     ctx._activeAbortController?.abort(new Error('Agent timeout'))
     ipc('chat-status', { text: '超时', requestId })
   }, timeoutMs)

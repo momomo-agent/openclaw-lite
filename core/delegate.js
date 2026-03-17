@@ -37,12 +37,17 @@ async function handleDelegateTo(input, config, sessionId, ctx) {
   const participantIds = ctx.sessionStore.getSessionParticipants(delegateDb, sessionId)
   const allWs = participantIds.map(pid => getWorkspace(pid)).filter(Boolean)
 
-  // Match by name (case-insensitive, partial)
+  // Match by name (case-insensitive, exact first then partial)
   const q = participant_name.toLowerCase()
-  const targetWs = allWs.find(w => {
-    const n = (w.identity?.name || '').toLowerCase()
-    return n === q || n.startsWith(q) || q.startsWith(n)
-  })
+  // 1. Exact match
+  let targetWs = allWs.find(w => (w.identity?.name || '').toLowerCase() === q)
+  // 2. Partial match
+  if (!targetWs) {
+    targetWs = allWs.find(w => {
+      const n = (w.identity?.name || '').toLowerCase()
+      return n.startsWith(q) || q.startsWith(n)
+    })
+  }
 
   if (!targetWs) return `Error: participant "${participant_name}" not found in group. Available: ${allWs.map(w => w.identity?.name).join(', ')}`
 

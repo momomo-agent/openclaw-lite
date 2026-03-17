@@ -1496,7 +1496,15 @@ async function _runChat({ prompt, files, agentId, sessionId, requestId, focus, t
     try {
       console.log(`[Paw] chat handler: provider=${target.provider} model=${target.model} msgs=${finalMessages.length} tools=${chatTools.length} reqId=${requestId}`)
       let result
-      const streamConfig = { apiKey, baseUrl, model: target.model, tavilyKey: config.tavilyKey, maxToolRounds: config.maxToolRounds, maxTokens: config.maxTokens }
+      // Get participant count for timeout scaling
+      const participantCount = sessionId && _sessionDb
+        ? sessionStore.getSessionParticipants(_sessionDb, sessionId).length
+        : 1
+      const streamConfig = {
+        apiKey, baseUrl, model: target.model, tavilyKey: config.tavilyKey,
+        maxToolRounds: config.maxToolRounds, maxTokens: config.maxTokens,
+        _participantCount: participantCount,
+      }
       if (target.provider === 'anthropic') {
         result = await streamAnthropic(finalMessages, systemPrompt, streamConfig, requestId, chatTools, sessionId, _wsIdentity, ctx)
         _lastAnthropicCallTime = Date.now()
