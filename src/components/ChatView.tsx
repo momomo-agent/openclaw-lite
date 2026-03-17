@@ -29,6 +29,13 @@ export default function ChatView() {
   const currentSession = sessions.find(s => s.id === currentSessionId)
   const sessionParticipants = currentSession?.participants || []
   const isGroup = sessionParticipants.length > 1
+  
+  // Debug: log participants when __PAW_DEBUG__ is on
+  useEffect(() => {
+    if ((window as any).__PAW_DEBUG__) {
+      console.log('[ChatView] sessionParticipants:', sessionParticipants, 'isGroup:', isGroup)
+    }
+  }, [sessionParticipants, isGroup])
   const ownerWs = sessionParticipants[0] ? workspaces.find(w => w.id === sessionParticipants[0]) : workspaces[0]
   const isCodingAgentChat = !isGroup && ownerWs?.type === 'coding-agent'
   const sessionTitle = currentSession?.title || (isGroup ? '群聊' : (ownerWs?.identity?.name || ''))
