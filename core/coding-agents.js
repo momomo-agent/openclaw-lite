@@ -65,7 +65,7 @@ const agents = {
       return false
     },
     run(prompt, { cwd, session, onOutput, onProcess }) {
-      const args = ['--print', '--output-format', 'stream-json', '--permission-mode', 'bypassPermissions']
+      const args = ['--print', '--verbose', '--output-format', 'stream-json', '--permission-mode', 'bypassPermissions']
       if (session) args.push('--resume', session)
       args.push(prompt)
       // Wrap onOutput to parse NDJSON and extract text tokens
