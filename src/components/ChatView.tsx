@@ -295,7 +295,16 @@ export default function ChatView() {
 
   // === Send message ===
   const handleSend = async (text: string, files: File[]) => {
-    if (!currentSessionId) return
+    let sid = currentSessionId
+    if (!sid) {
+      // Auto-create session when user sends first message with no active session
+      const result = await api.createSession({})
+      if (!result?.id) return
+      sid = result.id
+      setCurrentSessionId(sid)
+      const updated = await api.listSessions()
+      setSessions(updated)
+    }
     if (await handleSlashCommand(text)) return
 
     const serializedFiles = await Promise.all(files.map(async (f) => {
@@ -328,7 +337,7 @@ export default function ChatView() {
     setMessages(prev => [...prev, userMsg])
 
     const requestId = await api.chatPrepare?.() || generateMessageId()
-    const ss = getStreamState(currentSessionId)
+    const ss = getStreamState(sid)
     ss.requestId = requestId
 
     const streamingId = generateMessageId()
@@ -347,11 +356,11 @@ export default function ChatView() {
     setStreamingStatus('Thinking...')
     ss.status = 'Thinking...'
     ss.statusIsAiAuthored = false
-    setActivity(currentSessionId, 'thinking')
-    setStatus(currentSessionId, '')
+    setActivity(sid, 'thinking')
+    setStatus(sid, '')
 
     try {
-      await api.chat({ sessionId: currentSessionId, message: text, requestId, attachments: serializedFiles })
+      await api.chat({ sessionId: sid, message: text, requestId, attachments: serializedFiles })
     } catch (err: any) {
       console.error('[ChatView] chat error:', err)
       clearStreamState(currentSessionId)

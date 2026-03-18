@@ -22,9 +22,14 @@ function loadGlobalConfig() {
 }
 
 function saveGlobalConfig(config) {
-  fs.mkdirSync(GLOBAL_DIR, { recursive: true })
-  fs.writeFileSync(GLOBAL_CONFIG, JSON.stringify(config, null, 2) + '\n', 'utf8')
-  return true
+  try {
+    fs.mkdirSync(GLOBAL_DIR, { recursive: true })
+    fs.writeFileSync(GLOBAL_CONFIG, JSON.stringify(config, null, 2) + '\n', 'utf8')
+    return true
+  } catch (err) {
+    console.error('[config] saveGlobalConfig failed:', err.message)
+    return false
+  }
 }
 
 // ── Workspace config (per-workspace, identity only) ──

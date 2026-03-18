@@ -941,7 +941,17 @@ ipcMain.handle('workspace-add', async (_, wsPath) => {
 })
 
 ipcMain.handle('workspace-remove', (_, id) => {
+  const ws = workspaceRegistry.getWorkspace(id)
   const res = workspaceRegistry.removeWorkspace(id)
+  // Clean up sessions belonging to this workspace
+  if (ws?.path) {
+    try {
+      const sessions = sessionStore.listSessions(ws.path)
+      for (const s of sessions) {
+        sessionStore.deleteSession(ws.path, s.id)
+      }
+    } catch {}
+  }
   eventBus.emit('workspace-changed')
   return res
 })
