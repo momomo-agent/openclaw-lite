@@ -135,7 +135,7 @@ export default function ChatView() {
   // === Streaming events (via hook) ===
   useChatEvents(
     { currentSessionId: currentSidRef, api: apiRef, workspaces: workspacesRef, messages: messagesRef, store: storeRef },
-    { getStreamState, clearStreamState, ensureCardAdded, routeUpdate, routeAdd, routeRemove, routeSet, routeStatus, streamStates }
+    { getStreamState, clearStreamState, ensureCardAdded, routeUpdate, routeAdd, routeRemove, routeSet, routeStatus, streamStates, sessionCache }
   )
 
   // === Session switch ===
@@ -334,25 +334,9 @@ export default function ChatView() {
     setMessages(prev => [...prev, userMsg])
 
     const requestId = await api.chatPrepare?.() || generateMessageId()
-    const ss = getStreamState(currentSessionId)
-    ss.requestId = requestId
 
-    const streamingId = generateMessageId()
-    ss.streamingMsg = {
-      id: streamingId,
-      role: 'assistant',
-      content: '',
-      timestamp: Date.now(),
-      toolSteps: [],
-      sender: ownerWs?.identity?.name,
-      avatar: ownerWs?.identity?.avatar,
-      workspacePath: ownerWs?.path,
-      workspaceId: ownerWs?.id,
-    }
-    setMessages(prev => [...prev, ss.streamingMsg!])
-    setStreamingStatus('Thinking...')
-    ss.status = 'Thinking...'
-    ss.statusIsAiAuthored = false
+    // Streaming card creation is driven by backend text-start events (allowAdopt in useChatEvents).
+    // handleSend only sets optimistic sidebar status. This prevents requestId clobbering on rapid sends.
     setActivity(currentSessionId, 'thinking')
     setStatus(currentSessionId, '')
 
@@ -367,16 +351,13 @@ export default function ChatView() {
       errMsg = errMsg.replace(/^Error invoking remote method '[^']+': Error: /i, '')
       errMsg = errMsg.replace(/^Error: /i, '')
 
-      setMessages(prev => {
-        const cleaned = prev.filter(m => m.id !== streamingId)
-        return cleaned.concat({
-          id: generateMessageId(),
-          role: 'assistant',
-          content: errMsg,
-          timestamp: Date.now(),
-          isError: true,
-        })
-      })
+      setMessages(prev => prev.concat({
+        id: generateMessageId(),
+        role: 'assistant',
+        content: errMsg,
+        timestamp: Date.now(),
+        isError: true,
+      }))
     }
   }
 

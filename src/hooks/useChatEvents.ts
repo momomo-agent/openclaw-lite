@@ -55,6 +55,7 @@ interface StreamRouter {
   routeSet: (sid: string, msgs: Message[] | ((prev: Message[]) => Message[])) => void
   routeStatus: (sid: string, status: string) => void
   streamStates: React.MutableRefObject<Map<string, StreamState>>
+  sessionCache: React.MutableRefObject<Map<string, Message[]>>
 }
 
 // ── Thinking management ──────────────────────────────────────

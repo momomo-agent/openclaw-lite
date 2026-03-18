@@ -1296,7 +1296,12 @@ ipcMain.handle('chat', async (_, { prompt, message, history, rawMessages, agentI
   // Start _runChat async — don't await (streaming events go via eventBus, not IPC return)
   if (sessionId) { chatQueue.markActive(sessionId) }  // Mark active BEFORE async start to prevent race
   _runChat({ prompt, files, agentId, sessionId, requestId, focus, targetWorkspaceId, rawMessages, history })
-    .catch(err => console.error('[Paw] _runChat error:', err))
+    .catch(err => {
+      console.error('[Paw] _runChat error:', err)
+      // Surface error to UI and release chatQueue — prevents permanent session lockup
+      const fe = friendlyError(err)
+      finishChat(sessionId, requestId, `${fe.short}\n\n${fe.detail}`, null, null, true)
+    })
   return { started: true }
 })
 

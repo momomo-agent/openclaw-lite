@@ -121,11 +121,18 @@ async function streamChat({ messages, systemPrompt, config, requestId, tools, se
     const req = adapter.prepareRequest(round, msgs, systemPrompt, activeTools, config, ctx)
     console.log(`[Paw] stream ${adapter.name} round=${round} model=${config.model} msgs=${msgs.length} tools=${activeTools.length}`)
 
+    // Fetch with per-request timeout (30s connect + response start)
+    // Uses AbortSignal.any to combine agent-level abort with per-request timeout
+    const fetchTimeoutMs = config.fetchTimeoutMs || 30_000
+    const fetchTimeout = AbortSignal.timeout(fetchTimeoutMs)
+    const combinedSignal = ctx._activeAbortController?.signal
+      ? AbortSignal.any([ctx._activeAbortController.signal, fetchTimeout])
+      : fetchTimeout
     const res = await fetchWithRetry(req.url, {
       method: 'POST',
       headers: req.headers,
       body: JSON.stringify(req.body),
-      signal: ctx._activeAbortController?.signal,
+      signal: combinedSignal,
     })
 
     if (!res.ok) {
