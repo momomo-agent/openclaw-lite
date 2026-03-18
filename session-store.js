@@ -446,4 +446,39 @@ function removeSessionParticipant(clawDir, sessionId, workspaceId) {
   return true
 }
 
-module.exports = { getDb, listSessions, loadSession, saveSession, appendMessage, deleteMessage, deleteMessagesByMeta, deleteSession, renameSession, getSessionTitle, createSession, closeDb, updateSessionStatus, getSessionStatus, getSessionMode, setSessionMode, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, addSessionParticipant, removeSessionParticipant, getSessionParticipants, findSessionWorkspace, listAllSessions, updateMessageMeta, findLastMessage }
+// Update a message found by msgId (in metadata), used by ConversationStream.finalize()
+// Updates content and merges fields into metadata.
+function updateMessageByMsgId(clawDir, sessionId, msgId, fields) {
+  const d = getDb(clawDir)
+  if (!d) return false
+  // Find row by msgId stored in metadata
+  const row = d.prepare(
+    `SELECT id, metadata FROM messages WHERE session_id = ? AND json_extract(metadata, '$.msgId') = ?`
+  ).get(sessionId, msgId)
+  if (!row) {
+    console.warn(`[session-store] updateMessageByMsgId: msgId=${msgId} not found`)
+    return false
+  }
+  let meta = {}
+  if (row.metadata) try { meta = JSON.parse(row.metadata) } catch {}
+
+  // Extract content update (goes to content column)
+  const { content, toolSteps, ...rest } = fields
+  if (toolSteps !== undefined) meta.toolSteps = toolSteps
+  for (const [k, v] of Object.entries(rest)) {
+    if (v === null || v === undefined) delete meta[k]
+    else meta[k] = v
+  }
+  const metaStr = Object.keys(meta).length ? JSON.stringify(meta) : null
+
+  if (content !== undefined) {
+    d.prepare('UPDATE messages SET content = ?, metadata = ? WHERE id = ?').run(
+      typeof content === 'string' ? content : JSON.stringify(content), metaStr, row.id
+    )
+  } else {
+    d.prepare('UPDATE messages SET metadata = ? WHERE id = ?').run(metaStr, row.id)
+  }
+  return true
+}
+
+module.exports = { getDb, listSessions, loadSession, saveSession, appendMessage, deleteMessage, deleteMessagesByMeta, deleteSession, renameSession, getSessionTitle, createSession, closeDb, updateSessionStatus, getSessionStatus, getSessionMode, setSessionMode, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, addSessionParticipant, removeSessionParticipant, getSessionParticipants, findSessionWorkspace, listAllSessions, updateMessageMeta, findLastMessage, updateMessageByMsgId }

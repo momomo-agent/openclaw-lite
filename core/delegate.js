@@ -123,11 +123,19 @@ async function handleDelegateTo(input, config, sessionId, ctx) {
       senderName: myName,
       senderAvatar: targetWs.identity?.avatar || '🤖'
     })
-    // Accumulate delegate message in memory — finishChat writes to DB in correct order
+    // Persist delegate message via ConversationStream or legacy accumulator
     if (parentRequestId && (responseText || '').trim()) {
-      const dmsg = { sender: myName, senderWorkspaceId: targetWs.id, content: responseText, timestamp: Date.now() }
-      if (!ctx._pendingDelegateMessages.has(parentRequestId)) ctx._pendingDelegateMessages.set(parentRequestId, [])
-      ctx._pendingDelegateMessages.get(parentRequestId).push(dmsg)
+      const stream = ctx._activeStream
+      if (stream) {
+        stream.append({
+          role: 'assistant', content: responseText, timestamp: Date.now(),
+          sender: myName, senderWorkspaceId: targetWs.id,
+        })
+      } else {
+        const dmsg = { sender: myName, senderWorkspaceId: targetWs.id, content: responseText, timestamp: Date.now() }
+        if (!ctx._pendingDelegateMessages.has(parentRequestId)) ctx._pendingDelegateMessages.set(parentRequestId, [])
+        ctx._pendingDelegateMessages.get(parentRequestId).push(dmsg)
+      }
     }
     console.log(`[delegate_to] ${myName} (coding-agent) responded (${(responseText||'').length} chars), accumulated`)
     return responseText
@@ -158,10 +166,12 @@ The message labeled [${ownerName} to you] is your actual task. Answer ONLY what 
 - Just answer your part directly and concisely.`
   const fullPrompt = targetPrompt + groupContext
 
-  // Build curated delegate context — IM model: delegate sees the full conversation,
-  // but user messages are labeled as group context (not direct instructions to them).
-  // The only direct instruction is the final [ownerName to you]: message.
-  const delegateMessages = buildDelegateContext(sessionId, delegateDb, ownerName, myName, message, ctx)
+  // Build curated delegate context — use ConversationStream if available (Phase 2),
+  // otherwise fall back to buildDelegateContext (Phase 1).
+  const stream = ctx._activeStream
+  const delegateMessages = stream
+    ? stream.readForDelegate(ownerName, myName, message)
+    : buildDelegateContext(sessionId, delegateDb, ownerName, myName, message, ctx)
 
   // Full agent config
   const llmConfig = (() => { try { return JSON.parse(fs.readFileSync(ctx.configPath(), 'utf8')) } catch { return {} } })()
@@ -229,15 +239,25 @@ The message labeled [${ownerName} to you] is your actual task. Answer ONLY what 
       eventBus.dispatch('chat-delegate-end', { requestId: parentRequestId, sender: myName, workspaceId: targetWs.id, fullText: responseText, sessionId })
     }
 
-    // Accumulate delegate message in memory — finishChat writes to DB in correct order
+    // Persist delegate message via ConversationStream or legacy accumulator
     if (parentRequestId && responseText.trim()) {
-      const dmsg = {
-        sender: myName, senderWorkspaceId: targetWs.id,
-        content: responseText, timestamp: Date.now(),
-        toolSteps: result?.toolSteps || undefined,
+      if (stream) {
+        // ConversationStream path: write to DB immediately in correct position
+        stream.append({
+          role: 'assistant', content: responseText, timestamp: Date.now(),
+          sender: myName, senderWorkspaceId: targetWs.id,
+          toolSteps: result?.toolSteps || undefined,
+        })
+      } else {
+        // Legacy path: accumulate for finishChat
+        const dmsg = {
+          sender: myName, senderWorkspaceId: targetWs.id,
+          content: responseText, timestamp: Date.now(),
+          toolSteps: result?.toolSteps || undefined,
+        }
+        if (!ctx._pendingDelegateMessages.has(parentRequestId)) ctx._pendingDelegateMessages.set(parentRequestId, [])
+        ctx._pendingDelegateMessages.get(parentRequestId).push(dmsg)
       }
-      if (!ctx._pendingDelegateMessages.has(parentRequestId)) ctx._pendingDelegateMessages.set(parentRequestId, [])
-      ctx._pendingDelegateMessages.get(parentRequestId).push(dmsg)
     }
 
     console.log(`[delegate_to] ${myName} responded (${responseText.length} chars), accumulated`)

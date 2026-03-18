@@ -80,6 +80,7 @@ const { streamOpenAI } = require('./core/stream-openai')
 const { handleDelegateTo } = require('./core/delegate')
 const { loadCCSessions: _loadCCSessions, routeToCodingAgent, streamCodingAgent } = require('./core/coding-agent-router')
 const { buildConversationHistory, buildUserContent, injectGroupChatContext, injectTeammateContext, injectCrossSessionContext, buildFailoverList } = require('./core/chat-pipeline')
+const { ConversationStream } = require('./core/conversation-stream')
 
 // Legacy globals - kept for backward compat, synced to state via syncState()
 let mainWindow
@@ -335,6 +336,7 @@ const ctx = {
   get _activeCodingProcess() { return _activeCodingProcess },
   set _activeCodingProcess(v) { _activeCodingProcess = v },
   _pendingDelegateMessages,
+  _activeStream: null, // ConversationStream instance for group chat (set per _runChat call)
   // Functions
   pushStatus,
   executeTool,
@@ -1192,6 +1194,37 @@ function finishChat(sessionId, requestId, assistantText, wsIdentity, toolSteps, 
   // Gather accumulated delegate messages (always clean up, even on error)
   const delegateMsgs = _pendingDelegateMessages.get(requestId) || []
   _pendingDelegateMessages.delete(requestId)
+
+  // ── ConversationStream path: messages already written during streaming ──
+  const stream = ctx._activeStream
+  if (stream && stream.sessionId === sessionId) {
+    console.log(`[Paw] finishChat (stream): sessionId=${sessionId} isError=${isError}`)
+    stream.finalizeAll()
+    ctx._activeStream = null
+    if (wsPath && isError && assistantText) {
+      sessionStore.appendMessage(wsPath, sessionId, {
+        role: 'assistant', content: assistantText, timestamp: Date.now(), isError: true,
+      })
+    }
+    eventBus.dispatch('chat-done', { requestId, sessionId, error: isError ? assistantText : undefined })
+    if (!isError && mainWindow && !mainWindow.isFocused()) {
+      _unreadCount++
+      updateTrayTitle()
+    }
+    // Queue drain
+    if (sessionId) {
+      chatQueue.markIdle(sessionId)
+      const merged = chatQueue.drainAndMerge(sessionId)
+      if (merged) {
+        console.log(`[Paw] Draining queued message(s) for session ${sessionId.slice(0, 8)}`)
+        chatQueue.markActive(sessionId)
+        _runChat(merged).catch(err => console.error('[Paw] Queue drain error:', err))
+      }
+    }
+    return
+  }
+
+  // ── Legacy path: non-stream sessions ──
   console.log(`[Paw] finishChat: sessionId=${sessionId} isError=${isError} textLen=${(assistantText||'').length} saveLen=${saveText.length} steps=${toolSteps?.length || 0} delegates=${delegateMsgs.length}`)
 
   if (wsPath && !isError) {
@@ -1542,6 +1575,14 @@ async function _runChat({ prompt, files, agentId, sessionId, requestId, focus, t
 
   // Persist user message BEFORE streaming — crash-safe (skip if already saved by queue)
   if (!userMessageSaved) persistUserMessage(sessionId, prompt)
+
+  // ── ConversationStream: create for group chat sessions ──
+  // The stream provides unified message management for orchestrator + delegates.
+  let stream = null
+  if (_isGroupChat && sessionId && _sessionDb) {
+    stream = new ConversationStream(sessionId, _sessionDb)
+    ctx._activeStream = stream
+  }
 
   let lastError = null
   for (const target of modelsToTry) {
