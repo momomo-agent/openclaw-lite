@@ -75,6 +75,11 @@ async function streamChat({ messages, systemPrompt, config, requestId, tools, se
 
       if (roundThinking) flowSteps.push({ name: '__thinking__', output: roundThinking })
 
+      // Record text produced in this round BEFORE tool calls —
+      // finishChat uses __text__ markers to place orchestrator text in correct visual order
+      // (e.g. "好，让我把这个问题转给 Alice。" must appear BEFORE delegate's response)
+      if (roundText) flowSteps.push({ name: '__text__', output: roundText })
+
       // No tool calls → maybe follow-up, otherwise done
       if (!toolCalls.length) {
         if (hooks.getFollowUpMessages) {

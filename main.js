@@ -1204,21 +1204,32 @@ function finishChat(sessionId, requestId, assistantText, wsIdentity, toolSteps, 
       // ── Group chat: split orchestrator toolSteps at delegate_to boundaries ──
       // Write in visual order: orch-segment → delegate → orch-segment → delegate → ...
       // No immediate writes to clean up — all messages written here in one pass.
+      //
+      // Text placement: flowSteps contains __text__ markers that record which text
+      // was produced BEFORE each tool call. This ensures "好，让我转给 Alice" appears
+      // before Alice's response, not after.
       let currentSteps = []
+      let currentText = ''
       let delegateIdx = 0
       for (const step of steps) {
+        if (step.name === '__text__') {
+          // Text produced before the next tool call — accumulate for this segment
+          currentText += (currentText ? '\n' : '') + (step.output || '')
+          continue
+        }
         currentSteps.push(step)
         if (step.name === 'delegate_to' && delegateIdx < delegateMsgs.length) {
-          // Flush orchestrator segment (thinking + tools + delegate_to call)
-          // Only write if there are visible tool steps (skip empty segments)
+          // Flush orchestrator segment (text + thinking + tools + delegate_to call)
+          // Only write if there's text or visible tool steps
           const visibleSteps = currentSteps.filter(s => s.name !== '__thinking__')
-          if (visibleSteps.length) {
+          if (currentText.trim() || visibleSteps.length) {
             sessionStore.appendMessage(wsPath, sessionId, {
-              role: 'assistant', content: '', timestamp: Date.now(),
-              toolSteps: currentSteps, ...orchMeta,
+              role: 'assistant', content: currentText.trim(), timestamp: Date.now(),
+              toolSteps: currentSteps.length ? currentSteps : undefined, ...orchMeta,
             })
           }
           currentSteps = []
+          currentText = ''
           // Write delegate message
           const dm = delegateMsgs[delegateIdx]
           if (dm) {
@@ -1232,11 +1243,13 @@ function finishChat(sessionId, requestId, assistantText, wsIdentity, toolSteps, 
         }
       }
       // Final orchestrator segment (post-delegation text, if any)
-      if (saveText || currentSteps.length) {
+      // Combine any remaining __text__ segments with saveText
+      const finalText = [currentText, saveText].filter(t => t.trim()).join('\n').trim()
+      if (finalText || currentSteps.length) {
         const finalMeta = { ...orchMeta }
         if (currentSteps.length) finalMeta.toolSteps = currentSteps
         sessionStore.appendMessage(wsPath, sessionId, {
-          role: 'assistant', content: saveText, timestamp: Date.now(), ...finalMeta,
+          role: 'assistant', content: finalText, timestamp: Date.now(), ...finalMeta,
         })
       }
     } else {
