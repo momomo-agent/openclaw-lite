@@ -138,7 +138,11 @@ export default function ChatView() {
 
   // === Session switch ===
   useEffect(() => {
-    if (!currentSessionId) return
+    if (!currentSessionId) {
+      setMessages([])
+      setStreamingStatus('')
+      return
+    }
     const ss = streamStates.current.get(currentSessionId)
     setStreamingStatus(ss?.status || '')
     const cached = sessionCache.current.get(currentSessionId)
