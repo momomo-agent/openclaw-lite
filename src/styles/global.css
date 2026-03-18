@@ -452,9 +452,8 @@ button:hover { background: var(--border-muted); }
 .md-content blockquote { border-left: 3px solid var(--border-focus); padding-left: 14px; color: var(--text-tertiary); margin: 10px 0; font-style: italic; }
 .md-content strong { color: var(--md-strong); }
 .md-content table {
-  border-collapse: separate; border-spacing: 0; margin: 12px 0; width: 100%;
+  border-collapse: separate; border-spacing: 0; margin: 12px 0; min-width: 100%;
   border: 1px solid var(--border-default); border-radius: 8px; overflow: hidden;
-  display: block; overflow-x: auto;
 }
 .md-content th, .md-content td { border-bottom: 1px solid var(--border-default); border-right: 1px solid var(--border-default); padding: 8px 12px; font-size: 14px; text-align: left; }
 .md-content th:last-child, .md-content td:last-child { border-right: none; }

@@ -1202,12 +1202,8 @@ function finishChat(sessionId, requestId, assistantText, wsIdentity, toolSteps, 
 
     if (delegateMsgs.length > 0) {
       // ── Group chat: split orchestrator toolSteps at delegate_to boundaries ──
-      // Save in visual order: orch-segment → delegate → orch-segment → delegate → ...
-      // Delegate messages were persisted immediately during streaming (crash-safe),
-      // but their DB row IDs are earlier than orchestrator segments written here.
-      // Clean them up and re-write everything in correct visual order.
-      const cleaned = sessionStore.deleteMessagesByMeta(wsPath, sessionId, '_delegateImmediate')
-      if (cleaned) console.log(`[Paw] finishChat: cleaned ${cleaned} delegate immediate write(s) for re-ordering`)
+      // Write in visual order: orch-segment → delegate → orch-segment → delegate → ...
+      // No immediate writes to clean up — all messages written here in one pass.
       let currentSteps = []
       let delegateIdx = 0
       for (const step of steps) {
@@ -1223,7 +1219,7 @@ function finishChat(sessionId, requestId, assistantText, wsIdentity, toolSteps, 
             })
           }
           currentSteps = []
-          // Write delegate message in correct order (immediate writes already cleaned above)
+          // Write delegate message
           const dm = delegateMsgs[delegateIdx]
           if (dm) {
             const dmMeta = { sender: dm.sender, senderWorkspaceId: dm.senderWorkspaceId }

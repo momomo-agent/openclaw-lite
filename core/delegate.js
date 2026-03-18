@@ -22,6 +22,52 @@ function _getBuildSystemPrompt() {
   return _buildSystemPrompt
 }
 
+/**
+ * Build curated context for a delegate participant.
+ *
+ * IM group chat model: everyone sees the full conversation, but:
+ * - User messages are labeled [User to group] — context, not a directive
+ * - Assistant messages show their sender label
+ * - The delegation instruction is [ownerName to you] — the only direct instruction
+ *
+ * This prevents delegates from acting on user instructions meant for the owner
+ * (e.g. "搞成表格" is the owner's job, not the delegate's).
+ */
+function buildDelegateContext(sessionId, delegateDb, ownerName, myName, message, ctx) {
+  const messages = []
+
+  try {
+    const fullSession = ctx.sessionStore.loadSession(delegateDb, sessionId)
+    if (fullSession?.messages?.length) {
+      const recent = fullSession.messages.slice(-20)
+      for (const m of recent) {
+        if (m.role === 'user') {
+          // User messages: labeled as group context, NOT a direct instruction
+          messages.push({
+            role: 'user',
+            content: `[User to group]: ${m.content}`
+          })
+        } else if (m.role === 'assistant') {
+          // Other participants' messages: show with sender labels
+          const sender = m.sender || ownerName
+          messages.push({
+            role: 'assistant',
+            content: `[${sender}]: ${m.content || ''}`
+          })
+        }
+      }
+    }
+  } catch {}
+
+  // The actual delegation instruction — clearly from the owner, directed at this delegate
+  messages.push({
+    role: 'user',
+    content: `[${ownerName} to you]: ${message}`
+  })
+
+  return messages
+}
+
 async function handleDelegateTo(input, config, sessionId, ctx) {
   const { participant_name, message } = input
   if (!participant_name || !message) return 'Error: participant_name and message are required'
@@ -62,22 +108,13 @@ async function handleDelegateTo(input, config, sessionId, ctx) {
       senderName: myName,
       senderAvatar: targetWs.identity?.avatar || '🤖'
     })
-    // Persist delegate message immediately (crash-safe) + accumulate for finishChat ordering
+    // Accumulate delegate message in memory — finishChat writes to DB in correct order
     if (parentRequestId && (responseText || '').trim()) {
-      const dmsg = { sender: myName, senderWorkspaceId: targetWs.id, content: responseText, timestamp: Date.now(), _persisted: false }
+      const dmsg = { sender: myName, senderWorkspaceId: targetWs.id, content: responseText, timestamp: Date.now() }
       if (!ctx._pendingDelegateMessages.has(parentRequestId)) ctx._pendingDelegateMessages.set(parentRequestId, [])
       ctx._pendingDelegateMessages.get(parentRequestId).push(dmsg)
-      // Immediate DB write — survives app crash
-      try {
-        const sessionStore = require('../session-store')
-        sessionStore.appendMessage(delegateDb, sessionId, {
-          role: 'assistant', content: responseText, timestamp: dmsg.timestamp,
-          sender: myName, senderWorkspaceId: targetWs.id, _delegateImmediate: true,
-        })
-        dmsg._persisted = true
-      } catch (e) { console.error('[delegate_to] immediate persist failed:', e.message) }
     }
-    console.log(`[delegate_to] ${myName} (coding-agent) responded (${(responseText||'').length} chars), persisted + accumulated`)
+    console.log(`[delegate_to] ${myName} (coding-agent) responded (${(responseText||'').length} chars), accumulated`)
     return responseText
   }
 
@@ -95,34 +132,21 @@ async function handleDelegateTo(input, config, sessionId, ctx) {
   const groupContext = `\n\n---\n\n## Group Chat Context
 You are **${myName}** in a group chat with: ${otherNames.join(', ')}.
 **${ownerName}** is the group owner and decides who speaks.
-${ownerName} is now asking you to respond.
+
+You can see the conversation history above. Messages labeled [User to group] are what the user said to the whole group — treat them as context, not as instructions to you.
+The message labeled [${ownerName} to you] is your actual task. Answer ONLY what is asked there.
 
 **Important rules:**
-- Only do what ${ownerName} asks YOU to do in the message below. Ignore instructions the user gave to ${ownerName} (like "整理成表格") — that is ${ownerName}'s job, not yours.
+- Only do what ${ownerName} asks YOU to do. Ignore instructions the user gave to ${ownerName} (like "整理成表格") — that is ${ownerName}'s job, not yours.
 - Do NOT assign tasks to, wait for, or direct other participants.
 - Do NOT offer to compile, summarize, or organize others' work.
 - Just answer your part directly and concisely.`
   const fullPrompt = targetPrompt + groupContext
 
-  // Build conversation context — load recent messages from session
-  const delegateMessages = []
-  try {
-    const fullSession = ctx.sessionStore.loadSession(delegateDb, sessionId)
-    if (fullSession?.messages?.length) {
-      const recent = fullSession.messages.slice(-20)
-      for (const m of recent) {
-        if (m.role === 'user') {
-          delegateMessages.push({ role: 'user', content: m.content })
-        } else if (m.role === 'assistant') {
-          const senderLabel = m.sender && m.sender !== 'Assistant' ? `[${m.sender}]: ` : ''
-          delegateMessages.push({ role: 'assistant', content: senderLabel + (m.content || '') })
-        }
-      }
-    }
-  } catch {}
-
-  // Add the delegation message — from the group owner, not the end user
-  delegateMessages.push({ role: 'user', content: `[${ownerName}]: ${message}` })
+  // Build curated delegate context — IM model: delegate sees the full conversation,
+  // but user messages are labeled as group context (not direct instructions to them).
+  // The only direct instruction is the final [ownerName to you]: message.
+  const delegateMessages = buildDelegateContext(sessionId, delegateDb, ownerName, myName, message, ctx)
 
   // Full agent config
   const llmConfig = (() => { try { return JSON.parse(fs.readFileSync(ctx.configPath(), 'utf8')) } catch { return {} } })()
@@ -190,28 +214,18 @@ ${ownerName} is now asking you to respond.
       eventBus.dispatch('chat-delegate-end', { requestId: parentRequestId, sender: myName, workspaceId: targetWs.id, fullText: responseText, sessionId })
     }
 
-    // Persist delegate message immediately (crash-safe) + accumulate for finishChat ordering
+    // Accumulate delegate message in memory — finishChat writes to DB in correct order
     if (parentRequestId && responseText.trim()) {
       const dmsg = {
         sender: myName, senderWorkspaceId: targetWs.id,
         content: responseText, timestamp: Date.now(),
         toolSteps: result?.toolSteps || undefined,
-        _persisted: false,
       }
       if (!ctx._pendingDelegateMessages.has(parentRequestId)) ctx._pendingDelegateMessages.set(parentRequestId, [])
       ctx._pendingDelegateMessages.get(parentRequestId).push(dmsg)
-      // Immediate DB write — survives app crash
-      try {
-        const sessionStore = require('../session-store')
-        sessionStore.appendMessage(delegateDb, sessionId, {
-          role: 'assistant', content: responseText, timestamp: dmsg.timestamp,
-          sender: myName, senderWorkspaceId: targetWs.id, _delegateImmediate: true,
-        })
-        dmsg._persisted = true
-      } catch (e) { console.error('[delegate_to] immediate persist failed:', e.message) }
     }
 
-    console.log(`[delegate_to] ${myName} responded (${responseText.length} chars), persisted + accumulated`)
+    console.log(`[delegate_to] ${myName} responded (${responseText.length} chars), accumulated`)
     // Return delegate's FULL response to the orchestrator — they need complete content
     // to make informed decisions (delegate again, add context, or stay silent).
     // Token budget is managed by truncateToolResult() in stream-orchestrator.
@@ -231,4 +245,4 @@ ${ownerName} is now asking you to respond.
   }
 }
 
-module.exports = { handleDelegateTo }
+module.exports = { handleDelegateTo, buildDelegateContext }
