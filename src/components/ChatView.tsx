@@ -141,6 +141,15 @@ export default function ChatView() {
     if (!currentSessionId) {
       setMessages([])
       setStreamingStatus('')
+      // Auto-create a session if workspaces exist but no session is selected
+      if (workspaces.length > 0) {
+        api.createSession({}).then(result => {
+          if (result?.id) {
+            setCurrentSessionId(result.id)
+            api.listSessions().then(s => setSessions(s))
+          }
+        })
+      }
       return
     }
     const ss = streamStates.current.get(currentSessionId)
