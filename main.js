@@ -1193,7 +1193,7 @@ function finishChat(sessionId, requestId, assistantText, wsIdentity, toolSteps, 
     if (delegateMsgs.length > 0) {
       // ── Group chat: split orchestrator toolSteps at delegate_to boundaries ──
       // Save in visual order: orch-segment → delegate → orch-segment → delegate → ...
-      // This matches how cards appear during streaming (pendingSplit creates new cards)
+      // Delegate messages are already persisted immediately (crash-safe) — skip them here
       let currentSteps = []
       let delegateIdx = 0
       for (const step of steps) {
@@ -1207,13 +1207,8 @@ function finishChat(sessionId, requestId, assistantText, wsIdentity, toolSteps, 
             })
           }
           currentSteps = []
-          // Save delegate response
-          const dm = delegateMsgs[delegateIdx++]
-          const dmMeta = { sender: dm.sender, senderWorkspaceId: dm.senderWorkspaceId }
-          if (dm.toolSteps?.length) dmMeta.toolSteps = dm.toolSteps
-          sessionStore.appendMessage(wsPath, sessionId, {
-            role: 'assistant', content: dm.content, timestamp: dm.timestamp, ...dmMeta,
-          })
+          // Skip delegate response — already written to DB by delegate.js
+          delegateIdx++
         }
       }
       // Final orchestrator segment (post-delegation text, if any)

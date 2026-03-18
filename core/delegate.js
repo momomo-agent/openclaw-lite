@@ -62,15 +62,21 @@ async function handleDelegateTo(input, config, sessionId, ctx) {
       senderName: myName,
       senderAvatar: targetWs.identity?.avatar || '🤖'
     })
-    // Accumulate delegate message for finishChat (same as non-coding-agent path)
+    // Persist delegate message immediately (crash-safe) + accumulate for finishChat ordering
     if (parentRequestId && (responseText || '').trim()) {
+      const dmsg = { sender: myName, senderWorkspaceId: targetWs.id, content: responseText, timestamp: Date.now() }
       if (!ctx._pendingDelegateMessages.has(parentRequestId)) ctx._pendingDelegateMessages.set(parentRequestId, [])
-      ctx._pendingDelegateMessages.get(parentRequestId).push({
-        sender: myName, senderWorkspaceId: targetWs.id,
-        content: responseText, timestamp: Date.now(),
-      })
+      ctx._pendingDelegateMessages.get(parentRequestId).push(dmsg)
+      // Immediate DB write — survives app crash
+      try {
+        const sessionStore = require('../session-store')
+        sessionStore.appendMessage(delegateDb, sessionId, {
+          role: 'assistant', content: responseText, timestamp: dmsg.timestamp,
+          sender: myName, senderWorkspaceId: targetWs.id, _delegateImmediate: true,
+        })
+      } catch (e) { console.error('[delegate_to] immediate persist failed:', e.message) }
     }
-    console.log(`[delegate_to] ${myName} (coding-agent) responded (${(responseText||'').length} chars), accumulated for finishChat`)
+    console.log(`[delegate_to] ${myName} (coding-agent) responded (${(responseText||'').length} chars), persisted + accumulated`)
     return responseText
   }
 
@@ -171,17 +177,26 @@ async function handleDelegateTo(input, config, sessionId, ctx) {
       eventBus.dispatch('chat-delegate-end', { requestId: parentRequestId, sender: myName, workspaceId: targetWs.id, fullText: responseText, sessionId })
     }
 
-    // Accumulate delegate message — finishChat saves all messages in correct visual order
+    // Persist delegate message immediately (crash-safe) + accumulate for finishChat ordering
     if (parentRequestId && responseText.trim()) {
-      if (!ctx._pendingDelegateMessages.has(parentRequestId)) ctx._pendingDelegateMessages.set(parentRequestId, [])
-      ctx._pendingDelegateMessages.get(parentRequestId).push({
+      const dmsg = {
         sender: myName, senderWorkspaceId: targetWs.id,
         content: responseText, timestamp: Date.now(),
         toolSteps: result?.toolSteps || undefined,
-      })
+      }
+      if (!ctx._pendingDelegateMessages.has(parentRequestId)) ctx._pendingDelegateMessages.set(parentRequestId, [])
+      ctx._pendingDelegateMessages.get(parentRequestId).push(dmsg)
+      // Immediate DB write — survives app crash
+      try {
+        const sessionStore = require('../session-store')
+        sessionStore.appendMessage(delegateDb, sessionId, {
+          role: 'assistant', content: responseText, timestamp: dmsg.timestamp,
+          sender: myName, senderWorkspaceId: targetWs.id, _delegateImmediate: true,
+        })
+      } catch (e) { console.error('[delegate_to] immediate persist failed:', e.message) }
     }
 
-    console.log(`[delegate_to] ${myName} responded (${responseText.length} chars), accumulated for finishChat`)
+    console.log(`[delegate_to] ${myName} responded (${responseText.length} chars), persisted + accumulated`)
     // Return delegate's response to the orchestrator so they can make informed decisions
     const preview = responseText.length > 300 ? responseText.slice(0, 300) + '…' : responseText
     return `[${myName} responded directly to the user]\nContent: ${preview}\n\nThe response is already visible to the user. Reply NO_REPLY unless you need to delegate further or add genuine value.`
