@@ -1214,7 +1214,9 @@ function finishChat(sessionId, requestId, assistantText, wsIdentity, toolSteps, 
         currentSteps.push(step)
         if (step.name === 'delegate_to' && delegateIdx < delegateMsgs.length) {
           // Flush orchestrator segment (thinking + tools + delegate_to call)
-          if (currentSteps.length) {
+          // Only write if there are visible tool steps (skip empty segments)
+          const visibleSteps = currentSteps.filter(s => s.name !== '__thinking__')
+          if (visibleSteps.length) {
             sessionStore.appendMessage(wsPath, sessionId, {
               role: 'assistant', content: '', timestamp: Date.now(),
               toolSteps: currentSteps, ...orchMeta,
