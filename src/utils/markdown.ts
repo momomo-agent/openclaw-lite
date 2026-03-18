@@ -36,9 +36,13 @@ function fileNameFromHref(href: string): string {
 }
 
 function resolveLocalHref(href: string): string {
-  if (href && !href.startsWith('http') && !href.startsWith('file://') && !href.startsWith('data:') && _clawDir) {
-    return `file://${_clawDir}/${href}`
-  }
+  if (!href) return href
+  // Already absolute URL or data URI
+  if (href.startsWith('http') || href.startsWith('file://') || href.startsWith('data:')) return href
+  // Absolute filesystem path — just add file:// protocol
+  if (href.startsWith('/')) return `file://${href}`
+  // Relative path — resolve against workspace
+  if (_clawDir) return `file://${_clawDir}/${href}`
   return href
 }
 
