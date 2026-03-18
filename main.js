@@ -1302,6 +1302,7 @@ ipcMain.handle('chat', async (_, { prompt, message, history, rawMessages, agentI
 
 async function _runChat({ prompt, files, agentId, sessionId, requestId, focus, targetWorkspaceId, userMessageSaved, rawMessages, history }) {
   // chatQueue.markActive(sessionId) already called by IPC handler before async start
+  console.log('[_runChat] START', { sessionId: sessionId?.slice(0,8), requestId: requestId?.slice(0,8), prompt: prompt?.slice(0,30) })
 
   const config = (() => {
     const p = configPath()
@@ -1406,6 +1407,7 @@ async function _runChat({ prompt, files, agentId, sessionId, requestId, focus, t
   const apiKey = config.apiKey
   const baseUrl = config.baseUrl
   const model = agent?.model || config.model
+  console.log('[_runChat] config check', { provider, hasApiKey: !!apiKey, model })
   if (!apiKey) throw new Error('No API key configured. Open Settings to set up.')
 
   // Build system prompt + select tools
