@@ -100,6 +100,9 @@ export default function MessageItem({ message, isStreaming, statusText, ownerWor
                     </div>
                   )
                 }
+              } else if (step.name === '__text__') {
+                // Internal orchestrator marker — skip (content already in message body)
+                flushTools()
               } else {
                 toolBatch.push(step)
               }

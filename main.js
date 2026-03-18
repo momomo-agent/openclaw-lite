@@ -458,7 +458,7 @@ const EVENT_CHANNELS = [
   'agent-status', 'watson-status',
   'session-agents-changed', 'session-expired', 'tasks-changed',
   'heartbeat-result', 'tray-new-chat', 'memory-changed',
-  'auto-rotate', 'workspace-changed',
+  'auto-rotate', 'workspace-changed', 'session-summary',
 ]
 
 function bridgeEventBus(win) {
@@ -1598,7 +1598,7 @@ async function _runChat({ prompt, files, agentId, sessionId, requestId, focus, t
         maxToolRounds: config.maxToolRounds, maxTokens: config.maxTokens,
         _participantCount: participantCount,
         // Group chats have larger context (multi-agent history + tools), need more time for first token
-        fetchTimeoutMs: participantCount > 1 ? 90_000 : 30_000,
+        fetchTimeoutMs: participantCount > 1 ? 120_000 : 30_000,
       }
       if (target.provider === 'anthropic') {
         result = await streamAnthropic(finalMessages, systemPrompt, streamConfig, requestId, chatTools, sessionId, _wsIdentity, ctx)

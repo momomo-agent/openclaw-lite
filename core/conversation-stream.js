@@ -37,6 +37,10 @@ class ConversationStream {
     this._inflight = new Map()
     // Ordered list of msgIds appended this turn (for readForDelegate)
     this._turnMessages = []
+    // Session status — single source of truth (Phase 3)
+    this._status = { sender: null, text: '', level: 'idle' }
+    // Last message tracking — replaces SQL subquery for sidebar (Phase 3)
+    this._lastMsg = { content: '', sender: '', senderWsId: '' }
   }
 
   /**
@@ -64,6 +68,17 @@ class ConversationStream {
     })
 
     this._turnMessages.push(msgId)
+
+    // Track last message for sidebar summary (Phase 3)
+    if ((content || '').trim()) {
+      this._lastMsg = {
+        content: (content || '').slice(0, 60),
+        sender: sender || '',
+        senderWsId: senderWorkspaceId || '',
+      }
+      this._emitSummary()
+    }
+
     console.log(`[ConversationStream] append: msgId=${msgId} role=${role} sender=${sender || '-'} len=${(content || '').length}`)
     return msgId
   }
@@ -188,6 +203,41 @@ class ConversationStream {
     })
 
     return result
+  }
+
+  // ── Phase 3: Status + Summary ──────────────────────────────
+
+  /**
+   * Set session status (who's doing what).
+   * Single source of truth — replaces pushStatus/pushWatsonStatus for stream sessions.
+   */
+  setStatus(sender, text, level) {
+    this._status = { sender: sender || null, text: text || '', level: level || 'idle' }
+    this._emitSummary()
+  }
+
+  clearStatus() { this.setStatus(null, '', 'idle') }
+
+  getStatus() { return { ...this._status } }
+
+  /**
+   * Get sidebar summary — replaces SQL subquery + scattered events.
+   */
+  getSummary() {
+    return {
+      sessionId: this._sessionId,
+      lastMessage: this._lastMsg.content,
+      lastSender: this._lastMsg.sender,
+      lastSenderWsId: this._lastMsg.senderWsId,
+      statusText: this._status.text,
+      statusSender: this._status.sender,
+      activity: this._status.level,
+    }
+  }
+
+  _emitSummary() {
+    const eventBus = require('./event-bus')
+    eventBus.dispatch('session-summary', this.getSummary())
   }
 
   /**

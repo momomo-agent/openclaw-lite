@@ -72,7 +72,7 @@ interface SessionItemProps {
   onRenameCancel?: () => void
 }
 
-function SessionItem({ session, workspaces, isActive, onClick, onContextMenu, onDoubleClick, renaming, renameText, onRenameChange, onRenameSubmit, onRenameCancel }: SessionItemProps) {
+function SessionItem({ session, workspaces, isActive, onClick, onContextMenu, onDoubleClick, renaming, renameText, onRenameChange, onRenameSubmit, onRenameCancel, summary }: SessionItemProps & { summary?: any }) {
   const { activityState, aiStatus } = useAppState()
   const activity = activityState.get(session.id) || 'idle'
   const statusText = aiStatus.get(session.id) || ''
@@ -98,23 +98,44 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu, on
     )
   }
 
-  // Status line + dot: only when there's active AI status text AND not idle/done
-  const showStatus = !!statusText && activity !== 'idle' && activity !== 'done'
+  // Status line + dot: use summary activity or fall back to scattered sources
+  const summaryActive = summary?.activity && summary.activity !== 'idle' && summary.activity !== 'done'
+  const showStatus = summaryActive
+    ? !!summary.statusText
+    : (!!statusText && activity !== 'idle' && activity !== 'done')
 
-  // F251: Sender prefix for group chat + stripMd (main parity: deep reverse lookup)
+  // F251: Prefer session-summary (Phase 3) over scattered sources
   let subtitle = ''
-  if (showStatus) {
+  if (summary?.statusText && summaryActive) {
+    // Real-time status from ConversationStream
+    subtitle = summary.statusSender
+      ? `${summary.statusSender}: ${summary.statusText}`
+      : summary.statusText
+  } else if (showStatus) {
+    // Legacy: scattered status for non-stream sessions
     subtitle = statusText
+  } else if (summary?.lastMessage) {
+    // Real-time lastMessage from stream (no SQL needed)
+    const stripped = stripMarkdown(summary.lastMessage)
+    if (isGroup && (summary.lastSender || summary.lastSenderWsId)) {
+      let senderName = summary.lastSender || ''
+      if (summary.lastSenderWsId) {
+        const senderWs = workspaces.find(w => w.id === summary.lastSenderWsId)
+        if (senderWs?.identity?.name) senderName = senderWs.identity.name
+      }
+      subtitle = senderName ? `${senderName}: ${stripped}` : stripped
+    } else {
+      subtitle = stripped
+    }
   } else if (session.lastMessage) {
+    // Fallback: SQL data (cold boot / non-stream sessions)
     const stripped = stripMarkdown(session.lastMessage)
     if (isGroup && (session.lastSender || session.lastSenderWsId) && stripped) {
       let senderName = session.lastSender || ''
-      // Resolve from lastSenderWsId → current workspace identity name
       if (session.lastSenderWsId) {
         const senderWs = workspaces.find(w => w.id === session.lastSenderWsId)
         if (senderWs?.identity?.name) senderName = senderWs.identity.name
       } else if (senderName) {
-        // Reverse lookup: find ws whose current name matches lastSender
         const match = workspaces.find(w => w.identity?.name === senderName)
         if (match?.identity?.name) senderName = match.identity.name
       }
@@ -123,6 +144,9 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu, on
       subtitle = stripped
     }
   }
+
+  // Use summary activity when available, fall back to scattered activityState
+  const effectiveActivity = summaryActive ? summary.activity : activity
 
   return (
     <div
@@ -155,7 +179,7 @@ function SessionItem({ session, workspaces, isActive, onClick, onContextMenu, on
         </div>
         <div className="session-row-bottom">
           <span className={`session-subtitle ${showStatus ? 'active-status' : ''}`}>{subtitle}</span>
-          {activity !== 'idle' && activity !== 'done' && <span className={`session-dot ${activity}`}></span>}
+          {effectiveActivity !== 'idle' && effectiveActivity !== 'done' && <span className={`session-dot ${effectiveActivity}`}></span>}
         </div>
       </div>
     </div>
@@ -190,6 +214,20 @@ export default function Sidebar() {
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameText, setRenameText] = useState('')
   const [showNewChat, setShowNewChat] = useState(false)
+
+  // Phase 3: session-summary from ConversationStream — real-time sidebar updates
+  const [summaries, setSummaries] = useState<Map<string, any>>(new Map())
+  useEffect(() => {
+    const cleanup = (api as any).onSessionSummary?.((data: any) => {
+      if (!data?.sessionId) return
+      setSummaries(prev => {
+        const next = new Map(prev)
+        next.set(data.sessionId, data)
+        return next
+      })
+    })
+    return () => { if (typeof cleanup === 'function') cleanup() }
+  }, [])
 
   // Open new chat selector when triggered by Cmd+N or tray
   useEffect(() => {
@@ -356,6 +394,7 @@ export default function Sidebar() {
               onRenameChange={setRenameText}
               onRenameSubmit={submitRename}
               onRenameCancel={() => setRenaming(null)}
+              summary={summaries.get(s.id)}
             />
         ))}
       </div>

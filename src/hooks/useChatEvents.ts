@@ -196,7 +196,9 @@ export function useChatEvents(refs: Refs, router: StreamRouter) {
       flushThinking(ss, target)
       const step: ToolStep = { name: data.name || data.tool || 'unknown', input: data.input, output: String(data.output || '').slice(0, 500) }
       target.toolSteps = [...(target.toolSteps || []), step]
-      if (!ss.statusIsAiAuthored) router.routeStatus(sid, `${step.name}...`)
+      if (!ss.statusIsAiAuthored) {
+        router.routeStatus(sid, `${step.name}...`)
+      }
       router.routeUpdate(sid, target)
       refs.store.current.setActivity(sid, 'running')
     }
@@ -362,6 +364,17 @@ export function useChatEvents(refs: Refs, router: StreamRouter) {
       router.clearStreamState(sid)
       refs.store.current.setActivity(sid, 'idle')
       refs.store.current.setStatus(sid, '')
+
+      // Remove empty streaming/deferred cards left over from orchestrator
+      router.routeSet(sid, (prev: Message[]) => prev.filter(m => {
+        if (typeof m.id !== 'string' || !m.id.startsWith('streaming-')) return true
+        // Keep streaming cards that have content or visible tool steps
+        if (m.content?.trim()) return true
+        const steps = m.toolSteps || []
+        if (steps.some((s: any) => s.name !== '__thinking__' && s.name !== '__text__')) return true
+        if (steps.some((s: any) => s.name === '__thinking__' && (s.output || '').trim())) return true
+        return false
+      }))
 
       try {
         const session = await refs.api.current.loadSession(sid)

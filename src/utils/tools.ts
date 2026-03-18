@@ -118,9 +118,9 @@ export function extractArgPreview(name: string, input?: any, maxLen = 60): strin
   return null
 }
 
-/** Check if a tool step is visible (not hidden and not __thinking__) */
+/** Check if a tool step is visible (not hidden and not __thinking__/__text__) */
 export function isVisibleToolStep(step: ToolStep): boolean {
-  if (step.name === '__thinking__') return false
+  if (step.name === '__thinking__' || step.name === '__text__') return false
   const h = humanizeToolStep(step.name, step.input)
   return !h.hidden
 }

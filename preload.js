@@ -88,6 +88,7 @@ contextBridge.exposeInMainWorld('api', {
   onStatus: (cb) => onIpc('agent-status', cb),
   onWatsonStatus: (cb) => onIpc('watson-status', cb),
   onSessionTitleUpdated: (cb) => onIpc('session-title-updated', cb),
+  onSessionSummary: (cb) => onIpc('session-summary', cb),
   onTrayNewChat: (cb) => onIpc('tray-new-chat', cb),
   // File operations
   openFile: (p) => ipcRenderer.invoke('open-file', p),

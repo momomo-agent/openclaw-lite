@@ -80,7 +80,9 @@ async function streamChat({ messages, systemPrompt, config, requestId, tools, se
       // Legacy: record __text__ marker for finishChat segment splitting.
       if (roundText) {
         const stream = ctx._activeStream
-        if (stream) {
+        // Skip empty/NO_REPLY text for ConversationStream (avoids empty orchestrator cards)
+        const meaningfulText = roundText.trim() && !roundText.match(/^\s*NO_REPLY\s*$/i)
+        if (stream && meaningfulText) {
           stream.append({
             role: 'assistant', content: roundText,
             sender: wsIdentity?.agentName, senderWorkspaceId: wsIdentity?.workspaceId,
@@ -100,7 +102,10 @@ async function streamChat({ messages, systemPrompt, config, requestId, tools, se
             continue
           }
         }
-        ctx.pushStatus('done', 'Done')
+        // Phase 3: clear stream status on done
+        const doneStream = ctx._activeStream
+        if (doneStream) doneStream.clearStatus()
+        else ctx.pushStatus('done', 'Done')
         console.log(`[Paw] stream ${adapter.name} done, fullText=${fullText.length}ch`)
         return {
           answer: fullText,
@@ -111,7 +116,11 @@ async function streamChat({ messages, systemPrompt, config, requestId, tools, se
 
       // Extract round purpose for sidebar status
       const roundPurpose = _extractPurpose(roundThinking, roundText)
-      if (roundPurpose) ctx.pushStatus('thinking', roundPurpose.slice(0, 40))
+      if (roundPurpose) {
+        const purposeStream = ctx._activeStream
+        if (purposeStream) purposeStream.setStatus(wsIdentity?.agentName, roundPurpose.slice(0, 40), 'thinking')
+        else ctx.pushStatus('thinking', roundPurpose.slice(0, 40))
+      }
 
       // Add assistant message to transcript
       msgs.push(adapter.buildAssistantMsg(roundText, toolCalls))
@@ -135,7 +144,10 @@ async function streamChat({ messages, systemPrompt, config, requestId, tools, se
     const parseState = { curTool: null }
 
     ipc('chat-text-start', { requestId, ...(wsIdentity || {}) })
-    ctx.pushStatus('thinking', 'Thinking...')
+    // Phase 3: use ConversationStream as status source when available
+    const stream = ctx._activeStream
+    if (stream) stream.setStatus(wsIdentity?.agentName, 'Thinking...', 'thinking')
+    else ctx.pushStatus('thinking', 'Thinking...')
 
     const req = adapter.prepareRequest(round, msgs, systemPrompt, activeTools, config, ctx)
     console.log(`[Paw] stream ${adapter.name} round=${round} model=${config.model} msgs=${msgs.length} tools=${activeTools.length}`)
@@ -252,7 +264,11 @@ async function streamChat({ messages, systemPrompt, config, requestId, tools, se
 
       // Execute
       const silent = SILENT_TOOLS.has(tc.name)
-      if (!silent) ctx.pushStatus('tool', `Running ${tc.name}...`)
+      if (!silent) {
+        const toolStream = ctx._activeStream
+        if (toolStream) toolStream.setStatus(wsIdentity?.agentName, `Running ${tc.name}...`, 'running')
+        else ctx.pushStatus('tool', `Running ${tc.name}...`)
+      }
 
       let result, execError
       try {

@@ -176,7 +176,13 @@ The message labeled [${ownerName} to you] is your actual task. Answer ONLY what 
   // Full agent config
   const llmConfig = (() => { try { return JSON.parse(fs.readFileSync(ctx.configPath(), 'utf8')) } catch { return {} } })()
   const provider = llmConfig.provider || 'anthropic'
-  const fullConfig = { ...llmConfig, apiKey: config?.apiKey || llmConfig.apiKey, model: config?.model || llmConfig.model, baseUrl: config?.baseUrl || llmConfig.baseUrl }
+  const fullConfig = {
+    ...llmConfig,
+    apiKey: config?.apiKey || llmConfig.apiKey,
+    model: config?.model || llmConfig.model,
+    baseUrl: config?.baseUrl || llmConfig.baseUrl,
+    fetchTimeoutMs: 120_000, // delegates carry heavy context + tools, need more time
+  }
 
   // Delegate gets all tools EXCEPT delegate_to (no recursion)
   const delegateTools = ctx.getToolsWithMcp().filter(t => t.name !== 'delegate_to')
@@ -184,6 +190,7 @@ The message labeled [${ownerName} to you] is your actual task. Answer ONLY what 
   // Save and restore active request state (delegate runs inside orchestrator's tool loop)
   const savedRequestId = ctx._activeRequestId
   const savedAbortController = ctx._activeAbortController
+  const savedStream = ctx._activeStream  // Clear stream so delegate doesn't write to orchestrator's ConversationStream
   const parentRequestId = ctx._activeRequestId
 
   // Declared outside try so catch can clean up
@@ -197,6 +204,8 @@ The message labeled [${ownerName} to you] is your actual task. Answer ONLY what 
     if (parentRequestId) {
       eventBus.dispatch('chat-delegate-start', { requestId: parentRequestId, sender: myName, workspaceId: targetWs.id, avatar, sessionId })
     }
+    // Phase 3: set delegate status on parent stream
+    if (savedStream) savedStream.setStatus(myName, 'Thinking...', 'thinking')
 
     // Intercept delegate stream events and remap to delegate channels via eventBus
     const remapChannels = { 'chat-token': true, 'chat-tool-step': true, 'chat-round-info': true, 'chat-status': true, 'chat-text-start': true }
@@ -210,13 +219,19 @@ The message labeled [${ownerName} to you] is your actual task. Answer ONLY what 
         } else if (ch === 'chat-round-info') {
           eventBus.dispatch('chat-delegate-token', { requestId: parentRequestId, sender: myName, roundInfo: data, sessionId })
         } else if (ch === 'chat-status') {
-          eventBus.dispatch('chat-status', { ...data, sessionId })
+          // Phase 3: route delegate status through parent stream
+          if (savedStream) savedStream.setStatus(myName, data.text || '', 'running')
+          else eventBus.dispatch('chat-status', { ...data, sessionId })
         }
         // chat-text-start: no-op for delegate (text appends to same bubble)
       }
       eventBus.on(ch, handler)
       remapHandlers.push({ ch, handler })
     }
+
+    // Clear orchestrator's stream — delegate should NOT write to it.
+    // The delegate's text is persisted below via stream.append() with correct sender info.
+    ctx._activeStream = null
 
     let result
     if (provider === 'anthropic') {
@@ -231,6 +246,7 @@ The message labeled [${ownerName} to you] is your actual task. Answer ONLY what 
     // Restore parent state
     ctx._activeRequestId = savedRequestId
     ctx._activeAbortController = savedAbortController
+    ctx._activeStream = savedStream
 
     const responseText = result?.answer || ''
 
@@ -238,6 +254,8 @@ The message labeled [${ownerName} to you] is your actual task. Answer ONLY what 
     if (parentRequestId) {
       eventBus.dispatch('chat-delegate-end', { requestId: parentRequestId, sender: myName, workspaceId: targetWs.id, fullText: responseText, sessionId })
     }
+    // Phase 3: clear delegate status, restore orchestrator on parent stream
+    if (savedStream) savedStream.setStatus(null, '', 'idle')
 
     // Persist delegate message via ConversationStream or legacy accumulator
     if (parentRequestId && responseText.trim()) {
@@ -272,7 +290,9 @@ The message labeled [${ownerName} to you] is your actual task. Answer ONLY what 
     // Restore parent state
     ctx._activeRequestId = savedRequestId
     ctx._activeAbortController = savedAbortController
-    // Signal delegate end so frontend cleans up the bubble
+    ctx._activeStream = savedStream
+    // Phase 3: clear delegate status on error
+    if (savedStream) savedStream.setStatus(null, '', 'idle')
     if (parentRequestId) {
       eventBus.dispatch('chat-delegate-end', { requestId: parentRequestId, sender: myName, workspaceId: targetWs.id, fullText: `Error: ${err.message}`, sessionId })
     }

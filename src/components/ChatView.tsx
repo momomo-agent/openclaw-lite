@@ -373,7 +373,7 @@ export default function ChatView() {
     const ss = getStreamState(currentSessionId)
     ss.requestId = requestId
 
-    const streamingId = generateMessageId()
+    const streamingId = `streaming-${Date.now()}-retry`
     const retryOwnerWs = sessionParticipants[0] ? workspaces.find((w: any) => w.id === sessionParticipants[0]) : undefined
     ss.streamingMsg = {
       id: streamingId,
