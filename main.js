@@ -611,7 +611,8 @@ ipcMain.handle('set-user-profile', (_, { userName, presetIndex, customPath, useC
 })
 
 ipcMain.handle('get-user-avatar-path', () => {
-  return path.join(GLOBAL_DIR, 'user-avatar.png')
+  const p = path.join(GLOBAL_DIR, 'user-avatar.png')
+  return fs.existsSync(p) ? p : null
 })
 
 ipcMain.handle('pick-image', async () => {

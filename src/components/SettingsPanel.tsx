@@ -261,7 +261,8 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
                 onClick={handleAvatarUpload}
               >
                 {avatarSrc ? (
-                  <img src={avatarSrc} className="avatar-img" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  <img src={avatarSrc} className="avatar-img" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    onError={(e) => { e.currentTarget.src = '../avatars/0.png' }} />
                 ) : (
                   <span style={{ fontSize: 28 }}>&#128100;</span>
                 )}
