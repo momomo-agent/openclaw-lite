@@ -404,16 +404,6 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
                 ))}
               </div>
             </div>
-            <div className="settings-field">
-              <label className="toggle-label" style={{ justifyContent: 'space-between' }}>
-                <span style={{ flex: 1 }}>在对话中显示工具调用</span>
-                <input
-                  type="checkbox"
-                  checked={showTools}
-                  onChange={(e) => setShowTools(e.target.checked)}
-                />
-              </label>
-            </div>
           </div>
 
           {/* ── Tools ── */}
@@ -441,9 +431,19 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
             </div>
           </div>
 
-          {/* ── Permission ── */}
+          {/* ── Advanced ── */}
           <div className="settings-section">
-            <div className="settings-section-title">权限</div>
+            <div className="settings-section-title">高级设置</div>
+            <div className="settings-field">
+              <label className="toggle-label" style={{ justifyContent: 'space-between' }}>
+                <span style={{ flex: 1 }}>在对话中显示工具调用</span>
+                <input
+                  type="checkbox"
+                  checked={showTools}
+                  onChange={(e) => setShowTools(e.target.checked)}
+                />
+              </label>
+            </div>
             <div className="settings-field">
               <label className="toggle-label" style={{ justifyContent: 'space-between' }}>
                 <span style={{ flex: 1 }}>执行危险命令前需要确认</span>
