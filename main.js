@@ -1203,7 +1203,11 @@ function finishChat(sessionId, requestId, assistantText, wsIdentity, toolSteps, 
     if (delegateMsgs.length > 0) {
       // ── Group chat: split orchestrator toolSteps at delegate_to boundaries ──
       // Save in visual order: orch-segment → delegate → orch-segment → delegate → ...
-      // Delegate messages are already persisted immediately (crash-safe) — skip them here
+      // Delegate messages were persisted immediately during streaming (crash-safe),
+      // but their DB row IDs are earlier than orchestrator segments written here.
+      // Clean them up and re-write everything in correct visual order.
+      const cleaned = sessionStore.deleteMessagesByMeta(wsPath, sessionId, '_delegateImmediate')
+      if (cleaned) console.log(`[Paw] finishChat: cleaned ${cleaned} delegate immediate write(s) for re-ordering`)
       let currentSteps = []
       let delegateIdx = 0
       for (const step of steps) {
@@ -1217,9 +1221,9 @@ function finishChat(sessionId, requestId, assistantText, wsIdentity, toolSteps, 
             })
           }
           currentSteps = []
-          // Skip delegate if already persisted by delegate.js; fallback-write if persist failed
+          // Write delegate message in correct order (immediate writes already cleaned above)
           const dm = delegateMsgs[delegateIdx]
-          if (dm && !dm._persisted) {
+          if (dm) {
             const dmMeta = { sender: dm.sender, senderWorkspaceId: dm.senderWorkspaceId }
             if (dm.toolSteps?.length) dmMeta.toolSteps = dm.toolSteps
             sessionStore.appendMessage(wsPath, sessionId, {
@@ -1542,6 +1546,8 @@ async function _runChat({ prompt, files, agentId, sessionId, requestId, focus, t
         apiKey, baseUrl, model: target.model, tavilyKey: config.tavilyKey,
         maxToolRounds: config.maxToolRounds, maxTokens: config.maxTokens,
         _participantCount: participantCount,
+        // Group chats have larger context (multi-agent history + tools), need more time for first token
+        fetchTimeoutMs: participantCount > 1 ? 90_000 : 30_000,
       }
       if (target.provider === 'anthropic') {
         result = await streamAnthropic(finalMessages, systemPrompt, streamConfig, requestId, chatTools, sessionId, _wsIdentity, ctx)

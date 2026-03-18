@@ -9,7 +9,12 @@ const { fetchWithRetry } = require('./api-retry')
 const eventBus = require('./event-bus')
 
 const STALL_TIMEOUT_MS = 60_000
+// Tools that should not show "Running X..." in the status bar
 const SILENT_TOOLS = new Set(['ui_status_set', 'notify', 'delegate_to', 'stay_silent', 'session_title_set'])
+// Tools that should record full output to flowSteps (not truncated to 500 chars)
+// delegate_to returns the delegate's full response — preserving it in flowSteps
+// ensures finishChat can split orchestrator segments correctly
+const FULL_OUTPUT_TOOLS = new Set(['delegate_to'])
 
 /**
  * Main streaming function.
@@ -244,8 +249,9 @@ async function streamChat({ messages, systemPrompt, config, requestId, tools, se
       }
 
       loopDetector.recordOutcome(tc.name, input, result, execError)
+      const fullOutput = FULL_OUTPUT_TOOLS.has(tc.name)
       if (!silent) _recordToolStep(tc, input, result)
-      else flowSteps.push({ name: tc.name, input, output: String(result).slice(0, 500) })
+      else flowSteps.push({ name: tc.name, input, output: fullOutput ? String(result) : String(result).slice(0, 500) })
 
       // Build result (with image support)
       const content = (result?.image && adapter.buildToolResultWithImage)

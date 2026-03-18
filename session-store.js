@@ -218,6 +218,14 @@ function deleteMessage(clawDir, sessionId, messageId) {
   d.prepare('DELETE FROM messages WHERE id = ? AND session_id = ?').run(messageId, sessionId)
 }
 
+// Delete messages with specific metadata key (used by finishChat to clean up delegate immediate writes)
+function deleteMessagesByMeta(clawDir, sessionId, metaKey) {
+  const d = getDb(clawDir)
+  if (!d) return 0
+  const result = d.prepare(`DELETE FROM messages WHERE session_id = ? AND json_extract(metadata, '$.' || ?) IS NOT NULL`).run(sessionId, metaKey)
+  return result.changes || 0
+}
+
 // Find last message of a role in a session
 function findLastMessage(clawDir, sessionId, role) {
   const d = getDb(clawDir)
@@ -438,4 +446,4 @@ function removeSessionParticipant(clawDir, sessionId, workspaceId) {
   return true
 }
 
-module.exports = { getDb, listSessions, loadSession, saveSession, appendMessage, deleteMessage, deleteSession, renameSession, getSessionTitle, createSession, closeDb, updateSessionStatus, getSessionStatus, getSessionMode, setSessionMode, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, addSessionParticipant, removeSessionParticipant, getSessionParticipants, findSessionWorkspace, listAllSessions, updateMessageMeta, findLastMessage }
+module.exports = { getDb, listSessions, loadSession, saveSession, appendMessage, deleteMessage, deleteMessagesByMeta, deleteSession, renameSession, getSessionTitle, createSession, closeDb, updateSessionStatus, getSessionStatus, getSessionMode, setSessionMode, createSessionAgent, listSessionAgents, getSessionAgent, deleteSessionAgent, findSessionAgentByName, isSessionStale, addTokenUsage, getTokenUsage, addSessionParticipant, removeSessionParticipant, getSessionParticipants, findSessionWorkspace, listAllSessions, updateMessageMeta, findLastMessage }

@@ -129,12 +129,16 @@ You are **${myName}**, the owner of this group chat.
 ${roster}
 
 ### Rules
-1. **User mentions another participant** → call \`delegate_to\`.
-2. **User talks to you or sends a general message** → respond yourself.
-3. **After delegate_to** → call \`delegate_to\` again, add genuine context, or call \`stay_silent\`.
-4. **Never restate or summarize** what a delegate just said.
-5. **Removed members are gone.** Do NOT delegate to or mention them as active.
-6. **Untitled session** → call \`session_title_set\` to set a title.`
+1. **Only YOU can delegate.** Other participants cannot delegate — you are the sole orchestrator.
+2. **User mentions another participant** → call \`delegate_to\`.
+3. **User talks to you or sends a general message** → respond yourself.
+4. **After delegate_to** you will receive their FULL response. Based on it, either:
+   - \`delegate_to\` another participant for additional input
+   - Add your own genuinely new perspective
+   - Call \`stay_silent\` if the delegate's response is complete
+5. **Never restate or summarize** what a delegate just said — the user already saw it.
+6. **Removed members are gone.** Do NOT delegate to or mention them as active.
+7. **Untitled session** → call \`session_title_set\` to set a title.`
       extraTools = [DELEGATE_TO_TOOL, STAY_SILENT_TOOL]
     } else if (participants.length === 1) {
       systemPrompt += `\n\n---\n\nYou are **${myName}**. This is a private conversation between you and the user. No other participants are present.`

@@ -86,10 +86,22 @@ async function handleDelegateTo(input, config, sessionId, ctx) {
   // Build target participant's system prompt
   const targetPrompt = await buildSystemPrompt(targetWs.path)
 
-  // Add group context to their prompt
-  const names = allWs.map(w => w.identity?.name || w.id)
+  // Add group context to their prompt — IM model: everyone sees the full chat,
+  // but only the group owner decides who speaks. Delegate just answers when called on.
+  const ownerWs = allWs[0]  // participants[0] is always the group owner
+  const ownerName = ownerWs?.identity?.name || 'the group owner'
   const myName = targetWs.identity?.name || 'Assistant'
-  const groupContext = `\n\n---\n\n## Group Chat\nYou are **${myName}** in a group conversation.\nParticipants: ${names.join(', ')}.\nThe user is talking to you. Respond as yourself (${myName}). Be natural and in-character.`
+  const otherNames = allWs.filter(w => w.id !== targetWs.id).map(w => w.identity?.name || w.id)
+  const groupContext = `\n\n---\n\n## Group Chat Context
+You are **${myName}** in a group chat with: ${otherNames.join(', ')}.
+**${ownerName}** is the group owner and decides who speaks.
+${ownerName} is now asking you to respond.
+
+**Important rules:**
+- Only do what ${ownerName} asks YOU to do in the message below. Ignore instructions the user gave to ${ownerName} (like "整理成表格") — that is ${ownerName}'s job, not yours.
+- Do NOT assign tasks to, wait for, or direct other participants.
+- Do NOT offer to compile, summarize, or organize others' work.
+- Just answer your part directly and concisely.`
   const fullPrompt = targetPrompt + groupContext
 
   // Build conversation context — load recent messages from session
@@ -109,8 +121,8 @@ async function handleDelegateTo(input, config, sessionId, ctx) {
     }
   } catch {}
 
-  // Add the delegation message as the final user message
-  delegateMessages.push({ role: 'user', content: message })
+  // Add the delegation message — from the group owner, not the end user
+  delegateMessages.push({ role: 'user', content: `[${ownerName}]: ${message}` })
 
   // Full agent config
   const llmConfig = (() => { try { return JSON.parse(fs.readFileSync(ctx.configPath(), 'utf8')) } catch { return {} } })()
@@ -200,9 +212,10 @@ async function handleDelegateTo(input, config, sessionId, ctx) {
     }
 
     console.log(`[delegate_to] ${myName} responded (${responseText.length} chars), persisted + accumulated`)
-    // Return delegate's response to the orchestrator so they can make informed decisions
-    const preview = responseText.length > 300 ? responseText.slice(0, 300) + '…' : responseText
-    return `[${myName} responded directly to the user]\nContent: ${preview}\n\nThe response is already visible to the user. Reply NO_REPLY unless you need to delegate further or add genuine value.`
+    // Return delegate's FULL response to the orchestrator — they need complete content
+    // to make informed decisions (delegate again, add context, or stay silent).
+    // Token budget is managed by truncateToolResult() in stream-orchestrator.
+    return `[${myName} responded directly to the user]\n\n${responseText}\n\n---\nThe response above is already visible to the user. Do NOT restate or summarize it. Either delegate to another participant, add genuinely new context, or call stay_silent.`
   } catch (err) {
     console.error(`[delegate_to] error:`, err.message)
     // Cleanup delegate event remapping

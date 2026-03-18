@@ -356,7 +356,7 @@ export function useChatEvents(refs: Refs, router: StreamRouter) {
     // ── Done / Error / Queued ────────────────
 
     const handleDone = async (data: any) => {
-      const g = guard('done', data)
+      const g = guard('done', data, { allowAdopt: true })
       if (!g) return
       const { sid } = g
       router.clearStreamState(sid)
@@ -397,7 +397,7 @@ export function useChatEvents(refs: Refs, router: StreamRouter) {
     }
 
     const handleError = (data: any) => {
-      const g = guard('error', data)
+      const g = guard('error', data, { allowAdopt: true })
       if (!g) return
       const { sid } = g
       let errMsg = data.error || 'Something went wrong'
