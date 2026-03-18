@@ -1207,7 +1207,15 @@ function finishChat(sessionId, requestId, assistantText, wsIdentity, toolSteps, 
             })
           }
           currentSteps = []
-          // Skip delegate response — already written to DB by delegate.js
+          // Skip delegate if already persisted by delegate.js; fallback-write if persist failed
+          const dm = delegateMsgs[delegateIdx]
+          if (dm && !dm._persisted) {
+            const dmMeta = { sender: dm.sender, senderWorkspaceId: dm.senderWorkspaceId }
+            if (dm.toolSteps?.length) dmMeta.toolSteps = dm.toolSteps
+            sessionStore.appendMessage(wsPath, sessionId, {
+              role: 'assistant', content: dm.content, timestamp: dm.timestamp, ...dmMeta,
+            })
+          }
           delegateIdx++
         }
       }

@@ -64,7 +64,7 @@ async function handleDelegateTo(input, config, sessionId, ctx) {
     })
     // Persist delegate message immediately (crash-safe) + accumulate for finishChat ordering
     if (parentRequestId && (responseText || '').trim()) {
-      const dmsg = { sender: myName, senderWorkspaceId: targetWs.id, content: responseText, timestamp: Date.now() }
+      const dmsg = { sender: myName, senderWorkspaceId: targetWs.id, content: responseText, timestamp: Date.now(), _persisted: false }
       if (!ctx._pendingDelegateMessages.has(parentRequestId)) ctx._pendingDelegateMessages.set(parentRequestId, [])
       ctx._pendingDelegateMessages.get(parentRequestId).push(dmsg)
       // Immediate DB write — survives app crash
@@ -74,6 +74,7 @@ async function handleDelegateTo(input, config, sessionId, ctx) {
           role: 'assistant', content: responseText, timestamp: dmsg.timestamp,
           sender: myName, senderWorkspaceId: targetWs.id, _delegateImmediate: true,
         })
+        dmsg._persisted = true
       } catch (e) { console.error('[delegate_to] immediate persist failed:', e.message) }
     }
     console.log(`[delegate_to] ${myName} (coding-agent) responded (${(responseText||'').length} chars), persisted + accumulated`)
@@ -183,6 +184,7 @@ async function handleDelegateTo(input, config, sessionId, ctx) {
         sender: myName, senderWorkspaceId: targetWs.id,
         content: responseText, timestamp: Date.now(),
         toolSteps: result?.toolSteps || undefined,
+        _persisted: false,
       }
       if (!ctx._pendingDelegateMessages.has(parentRequestId)) ctx._pendingDelegateMessages.set(parentRequestId, [])
       ctx._pendingDelegateMessages.get(parentRequestId).push(dmsg)
@@ -193,6 +195,7 @@ async function handleDelegateTo(input, config, sessionId, ctx) {
           role: 'assistant', content: responseText, timestamp: dmsg.timestamp,
           sender: myName, senderWorkspaceId: targetWs.id, _delegateImmediate: true,
         })
+        dmsg._persisted = true
       } catch (e) { console.error('[delegate_to] immediate persist failed:', e.message) }
     }
 
