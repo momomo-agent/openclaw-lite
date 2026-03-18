@@ -46,7 +46,7 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
   const [apiKey, setApiKey] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
   const [tavilyKey, setTavilyKey] = useState('')
-  const [model, setModel] = useState('claude-sonnet-4-20250514')
+  const [model, setModel] = useState('claude-opus-4-6')
   const [provider, setProvider] = useState<'anthropic' | 'openai'>('anthropic')
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
@@ -285,7 +285,7 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
                   key={p}
                   onClick={() => {
                     setProvider(p)
-                    setModel(p === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o')
+                    setModel(p === 'anthropic' ? 'claude-opus-4-6' : 'GPT-5.2')
                     setTestResult(null)
                   }}
                   style={{
@@ -305,7 +305,7 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
             <TextInput
               value={model}
               onChange={e => setModel(e.target.value)}
-              placeholder={provider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o'}
+              placeholder={provider === 'anthropic' ? 'claude-opus-4-6' : 'GPT-5.2'}
               style={{ ...inputStyle, textAlign: 'left', fontFamily: "'SF Mono', monospace", fontSize: 13 }}
               onFocus={e => e.target.style.borderColor = 'var(--border-focus)'}
               onBlur={e => e.target.style.borderColor = 'var(--border-muted)'}

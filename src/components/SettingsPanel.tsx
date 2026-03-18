@@ -340,7 +340,7 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
               <label>模型</label>
               <input
                 type="text"
-                placeholder={((config.provider || 'anthropic') === 'anthropic') ? 'claude-sonnet-4-20250514' : 'gpt-4o'}
+                placeholder={((config.provider || 'anthropic') === 'anthropic') ? 'claude-opus-4-6' : 'GPT-5.2'}
                 value={config.model || ''}
                 onChange={(e) => setConfig({ ...config, model: e.target.value })}
               />
