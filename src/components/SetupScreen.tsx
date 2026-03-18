@@ -302,31 +302,14 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
               ))}
             </div>
 
-            <select
+            <TextInput
               value={model}
               onChange={e => setModel(e.target.value)}
-              style={{
-                ...inputStyle, textAlign: 'left', fontSize: 13,
-                appearance: 'none', WebkitAppearance: 'none',
-                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' stroke='%23999' stroke-width='1.5' fill='none'/%3E%3C/svg%3E")`,
-                backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center',
-                paddingRight: 32,
-              }}
-            >
-              {provider === 'anthropic' ? (
-                <>
-                  <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
-                  <option value="claude-opus-4-20250514">Claude Opus 4</option>
-                  <option value="claude-haiku-3-5-20241022">Claude 3.5 Haiku</option>
-                </>
-              ) : (
-                <>
-                  <option value="gpt-4o">GPT-4o</option>
-                  <option value="gpt-4o-mini">GPT-4o Mini</option>
-                  <option value="o3-mini">o3-mini</option>
-                </>
-              )}
-            </select>
+              placeholder={provider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o'}
+              style={{ ...inputStyle, textAlign: 'left', fontFamily: "'SF Mono', monospace", fontSize: 13 }}
+              onFocus={e => e.target.style.borderColor = 'var(--border-focus)'}
+              onBlur={e => e.target.style.borderColor = 'var(--border-muted)'}
+            />
 
             <TextInput
               ref={inputRef}

@@ -338,31 +338,11 @@ export default function SettingsPanel({ visible, onClose }: SettingsPanelProps) 
             </div>
             <div className="settings-field">
               <label>模型</label>
-              <select
-                value={config.model || ''}
-                onChange={(e) => setConfig({ ...config, model: e.target.value })}
-              >
-                <option value="">默认</option>
-                {(config.provider || 'anthropic') === 'anthropic' ? (
-                  <>
-                    <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
-                    <option value="claude-opus-4-20250514">Claude Opus 4</option>
-                    <option value="claude-haiku-3-5-20241022">Claude 3.5 Haiku</option>
-                  </>
-                ) : (
-                  <>
-                    <option value="gpt-4o">GPT-4o</option>
-                    <option value="gpt-4o-mini">GPT-4o Mini</option>
-                    <option value="o3-mini">o3-mini</option>
-                  </>
-                )}
-              </select>
               <input
                 type="text"
-                placeholder="或输入自定义模型名"
+                placeholder={((config.provider || 'anthropic') === 'anthropic') ? 'claude-sonnet-4-20250514' : 'gpt-4o'}
                 value={config.model || ''}
                 onChange={(e) => setConfig({ ...config, model: e.target.value })}
-                style={{ marginTop: 6 }}
               />
             </div>
             <div className="settings-field">
