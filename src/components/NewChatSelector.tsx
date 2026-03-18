@@ -230,6 +230,8 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
           const ws = result.workspace
           if (ws?.id) await api.setWorkspaceAvatar?.({ id: ws.id, presetIndex: editorAvatar })
           onWorkspacesChanged()
+          // Auto-create session for new workspace
+          if (ws?.id) onSelect({ workspaceId: ws.id })
         }
       } else if (editorMode === 'edit' && editorWsId) {
         await api.updateWorkspaceIdentity({ id: editorWsId, name: editorName.trim() })
@@ -261,9 +263,15 @@ export default function NewChatSelector({ workspaces, onSelect, onClose, onWorks
 
   const handleAddExisting = async () => {
     const result = await api.addWorkspace()
-    if (result?.ok) onWorkspacesChanged()
-    else if (result?.error === 'not_a_workspace') alert('该文件夹不是有效的工作区')
-    else if (result?.error === 'already_registered') alert('该工作区已添加')
+    if (result?.ok) {
+      onWorkspacesChanged()
+      // Auto-create session for added workspace
+      if (result.workspace?.id) onSelect({ workspaceId: result.workspace.id })
+    } else if (result?.error === 'not_a_workspace') {
+      alert('该文件夹不是有效的工作区')
+    } else if (result?.error === 'already_registered') {
+      alert('该工作区已添加')
+    }
   }
 
   const handleRemove = async (e: React.MouseEvent, id: string) => {
