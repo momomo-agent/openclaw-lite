@@ -1243,13 +1243,12 @@ function finishChat(sessionId, requestId, assistantText, wsIdentity, toolSteps, 
         }
       }
       // Final orchestrator segment (post-delegation text, if any)
-      // Combine any remaining __text__ segments with saveText
-      const finalText = [currentText, saveText].filter(t => t.trim()).join('\n').trim()
-      if (finalText || currentSteps.length) {
+      // All text is already distributed via __text__ markers — don't re-add saveText
+      if (currentText.trim() || currentSteps.length) {
         const finalMeta = { ...orchMeta }
         if (currentSteps.length) finalMeta.toolSteps = currentSteps
         sessionStore.appendMessage(wsPath, sessionId, {
-          role: 'assistant', content: finalText, timestamp: Date.now(), ...finalMeta,
+          role: 'assistant', content: currentText.trim(), timestamp: Date.now(), ...finalMeta,
         })
       }
     } else {

@@ -59,6 +59,21 @@ function buildDelegateContext(sessionId, delegateDb, ownerName, myName, message,
     }
   } catch {}
 
+  // Include pending delegate messages not yet written to DB —
+  // when orchestrator delegates to multiple participants sequentially,
+  // earlier delegates' responses are still in memory buffer.
+  // Without this, Paul can't see Alice's reply from the same turn.
+  const parentRequestId = ctx._activeRequestId
+  if (parentRequestId) {
+    const pending = ctx._pendingDelegateMessages.get(parentRequestId) || []
+    for (const dm of pending) {
+      messages.push({
+        role: 'assistant',
+        content: `[${dm.sender || ownerName}]: ${dm.content || ''}`
+      })
+    }
+  }
+
   // The actual delegation instruction — clearly from the owner, directed at this delegate
   messages.push({
     role: 'user',
