@@ -37,6 +37,7 @@ interface Refs {
   currentSessionId: React.MutableRefObject<string | null>
   api: React.MutableRefObject<any>
   workspaces: React.MutableRefObject<any[]>
+  messages: React.MutableRefObject<any[]>
   store: React.MutableRefObject<{
     setActivity: (sid: string, activity: string) => void
     setStatus: (sid: string, status: string) => void

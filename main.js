@@ -1433,6 +1433,17 @@ async function _runChat({ prompt, files, agentId, sessionId, requestId, focus, t
   // F046: Inject other agents' recent messages for visibility (M36: extracted)
   systemPrompt = injectTeammateContext(systemPrompt, { agent, sessionId, sessionDb: _sessionDb, sessionStore })
 
+  // Resolve workspace identity for streaming events (dynamic avatar/name)
+  // NOTE: must be before cross-session memory injection which uses _wsIdentity.workspaceId
+  const _wsPath = getSessionWorkspacePath(targetWorkspaceId || null)
+  const _wsObj = _wsPath ? workspaceRegistry.getWorkspaceByPath(_wsPath) : (workspaceRegistry.listWorkspaces()[0] || null)
+  const _wsIdentity = {
+    agentName: _wsObj?.identity?.name || currentAgentName || 'Assistant',
+    avatar: _wsObj?.identity?.avatar || null,
+    wsPath: _wsObj?.path || _wsPath || null,
+    workspaceId: _wsObj?.id || null,
+  }
+
   // Cross-session memory: let agent recall discussions from other sessions (e.g. group chats)
   if (!_isGroupChat && _wsIdentity?.workspaceId) {
     systemPrompt = injectCrossSessionContext(systemPrompt, {
@@ -1509,16 +1520,6 @@ async function _runChat({ prompt, files, agentId, sessionId, requestId, focus, t
 
   // Model fallback list (M36: extracted to chat-pipeline)
   const modelsToTry = buildFailoverList(model, provider, config, failoverManager)
-
-  // Resolve workspace identity for streaming events (dynamic avatar/name)
-  const _wsPath = getSessionWorkspacePath(targetWorkspaceId || null)
-  const _wsObj = _wsPath ? workspaceRegistry.getWorkspaceByPath(_wsPath) : (workspaceRegistry.listWorkspaces()[0] || null)
-  const _wsIdentity = {
-    agentName: _wsObj?.identity?.name || currentAgentName || 'Assistant',
-    avatar: _wsObj?.identity?.avatar || null,
-    wsPath: _wsObj?.path || _wsPath || null,
-    workspaceId: _wsObj?.id || null,
-  }
 
   // Persist user message BEFORE streaming — crash-safe (skip if already saved by queue)
   if (!userMessageSaved) persistUserMessage(sessionId, prompt)

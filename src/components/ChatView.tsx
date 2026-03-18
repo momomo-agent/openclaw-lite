@@ -44,11 +44,13 @@ export default function ChatView() {
   const currentSidRef = useRef<string | null>(null)
   const workspacesRef = useRef(workspaces)
   const apiRef = useRef(api)
+  const messagesRef = useRef<Message[]>([])
   const storeRef = useRef({ setActivity, setStatus, setSessions })
 
   useEffect(() => { currentSidRef.current = currentSessionId || null })
   useEffect(() => { workspacesRef.current = workspaces }, [workspaces])
   useEffect(() => { apiRef.current = api }, [api])
+  useEffect(() => { messagesRef.current = messages }, [messages])
   useEffect(() => { storeRef.current = { setActivity, setStatus, setSessions } }, [setActivity, setStatus, setSessions])
 
   // === Per-session streaming state ===
@@ -132,7 +134,7 @@ export default function ChatView() {
 
   // === Streaming events (via hook) ===
   useChatEvents(
-    { currentSessionId: currentSidRef, api: apiRef, workspaces: workspacesRef, store: storeRef },
+    { currentSessionId: currentSidRef, api: apiRef, workspaces: workspacesRef, messages: messagesRef, store: storeRef },
     { getStreamState, clearStreamState, ensureCardAdded, routeUpdate, routeAdd, routeRemove, routeSet, routeStatus, streamStates }
   )
 
