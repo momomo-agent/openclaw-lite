@@ -11,7 +11,7 @@ const { BrowserWindow } = require('electron')
 registerTool({
   name: 'screen_capture',
   description: 'Take a screenshot of the user\'s full screen. Hides Paw briefly to capture what\'s behind it. Use when you need to SEE the screen (UI issues, design review, visual debugging). Note: you already have window titles from ambient context — only capture if visual information is truly needed.',
-  input_schema: {
+  parameters: {
     type: 'object',
     properties: {},
   },
