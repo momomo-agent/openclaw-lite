@@ -299,18 +299,7 @@ export default function ChatView() {
 
   // === Send message ===
   const handleSend = async (text: string, files: File[]) => {
-    let sid = currentSessionId
-    let isNewSession = false
-    if (!sid) {
-      // Auto-create session when user sends first message with no active session
-      const result = await api.createSession({})
-      if (!result?.id) return
-      sid = result.id
-      isNewSession = true
-      setCurrentSessionId(sid)
-      const updated = await api.listSessions()
-      setSessions(updated)
-    }
+    if (!currentSessionId) return
     if (await handleSlashCommand(text)) return
 
     const serializedFiles = await Promise.all(files.map(async (f) => {
@@ -343,7 +332,7 @@ export default function ChatView() {
     setMessages(prev => [...prev, userMsg])
 
     const requestId = await api.chatPrepare?.() || generateMessageId()
-    const ss = getStreamState(sid)
+    const ss = getStreamState(currentSessionId)
     ss.requestId = requestId
 
     const streamingId = generateMessageId()
@@ -362,16 +351,11 @@ export default function ChatView() {
     setStreamingStatus('Thinking...')
     ss.status = 'Thinking...'
     ss.statusIsAiAuthored = false
-    setActivity(sid, 'thinking')
-    setStatus(sid, '')
-
-    // If we just created a new session, pre-populate cache to prevent useEffect from clearing messages
-    if (isNewSession) {
-      sessionCache.current.set(sid, [userMsg, ss.streamingMsg!])
-    }
+    setActivity(currentSessionId, 'thinking')
+    setStatus(currentSessionId, '')
 
     try {
-      await api.chat({ sessionId: sid, message: text, requestId, attachments: serializedFiles })
+      await api.chat({ sessionId: currentSessionId, message: text, requestId, attachments: serializedFiles })
     } catch (err: any) {
       console.error('[ChatView] chat error:', err)
       clearStreamState(currentSessionId)
