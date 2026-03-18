@@ -7,11 +7,15 @@ import { describe, it, expect } from 'vitest'
  */
 
 // Inline the function under test (can't import TS directly without full setup)
+function encodeFilePath(p) {
+  return p.split('/').map(seg => encodeURIComponent(seg)).join('/')
+}
+
 function resolveLocalHref(href, clawDir) {
   if (!href) return href
   if (href.startsWith('http') || href.startsWith('file://') || href.startsWith('data:')) return href
-  if (href.startsWith('/')) return `file://${href}`
-  if (clawDir) return `file://${clawDir}/${href}`
+  if (href.startsWith('/')) return 'file://' + encodeFilePath(href)
+  if (clawDir) return 'file://' + encodeFilePath(clawDir) + '/' + encodeFilePath(href)
   return href
 }
 
@@ -68,20 +72,19 @@ describe('🔴 BLUE TEAM: resolveLocalHref edge cases', () => {
 
   it('spaces in filename', () => {
     expect(resolveLocalHref('my folder/my image.png', WS))
-      .toBe(`file://${WS}/my folder/my image.png`)
+      .toBe(`file://${WS}/my%20folder/my%20image.png`)
     // Browser may need encoding: spaces → %20
   })
 
   it('Chinese characters in path', () => {
     expect(resolveLocalHref('图片/截图.png', WS))
-      .toBe(`file://${WS}/图片/截图.png`)
+      .toBe(`file://${WS}/${encodeURIComponent('图片')}/${encodeURIComponent('截图.png')}`)
   })
 
-  it('hash in filename', () => {
-    // # in filename gets interpreted as URL fragment
+  it('hash in filename — now encoded correctly', () => {
+    // # is now percent-encoded, so browser loads the file correctly
     expect(resolveLocalHref('img#1.png', WS))
-      .toBe(`file://${WS}/img#1.png`)
-    // This will break: browser sees file://.../img and fragment #1.png
+      .toBe(`file://${WS}/${encodeURIComponent('img#1.png')}`)
   })
 
   // ── ATTACK: protocol confusion ──
@@ -91,7 +94,7 @@ describe('🔴 BLUE TEAM: resolveLocalHref edge cases', () => {
     const result = resolveLocalHref('javascript:alert(1)', WS)
     // Current code: doesn't start with http/file/data, not /
     // Returns file:///Users/.../javascript:alert(1) — safe by accident
-    expect(result).toBe(`file://${WS}/javascript:alert(1)`)
+    expect(result).toBe(`file://${WS}/${encodeURIComponent('javascript:alert(1)')}`)
   })
 
   it('httpxyz should not be treated as http', () => {
@@ -124,6 +127,6 @@ describe('🔴 BLUE TEAM: resolveLocalHref edge cases', () => {
   it('Windows-style backslash path', () => {
     const result = resolveLocalHref('folder\\img.png', WS)
     // Treated as relative path — backslash not special on macOS
-    expect(result).toBe(`file://${WS}/folder\\img.png`)
+    expect(result).toBe(`file://${WS}/${encodeURIComponent('folder\\img.png')}`)
   })
 })

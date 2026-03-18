@@ -35,14 +35,20 @@ function fileNameFromHref(href: string): string {
   } catch { return 'file' }
 }
 
+function encodeFilePath(p: string): string {
+  // Encode characters that break file:// URLs: spaces, #, ?, CJK, etc.
+  // But preserve / and : (drive letters on Windows someday)
+  return p.split('/').map(seg => encodeURIComponent(seg)).join('/')
+}
+
 function resolveLocalHref(href: string): string {
   if (!href) return href
   // Already absolute URL or data URI
   if (href.startsWith('http') || href.startsWith('file://') || href.startsWith('data:')) return href
   // Absolute filesystem path — just add file:// protocol
-  if (href.startsWith('/')) return `file://${href}`
+  if (href.startsWith('/')) return `file://${encodeFilePath(href)}`
   // Relative path — resolve against workspace
-  if (_clawDir) return `file://${_clawDir}/${href}`
+  if (_clawDir) return `file://${encodeFilePath(_clawDir)}/${encodeFilePath(href)}`
   return href
 }
 
