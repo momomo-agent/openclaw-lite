@@ -373,6 +373,18 @@ export function useChatEvents(refs: Refs, router: StreamRouter) {
           errMsg = errMsg.replace(/^Error: /i, '')
           dbMessages.push({ id: generateStreamingId(), role: 'assistant', content: errMsg, timestamp: Date.now(), isError: true })
         }
+        // Safety: don't replace front-end messages with fewer DB messages
+        // This prevents data loss if finishChat hasn't persisted everything yet
+        const currentMsgs = sid === refs.currentSessionId.current
+          ? refs.messages.current
+          : (router.sessionCache.current.get(sid) || [])
+        if (dbMessages.length < currentMsgs.length && currentMsgs.length > 0) {
+          dbg('handleDone: DB has fewer messages than UI, skipping replace', dbMessages.length, '<', currentMsgs.length)
+          // Still update session list
+          const updated = await refs.api.current.listSessions()
+          refs.store.current.setSessions(updated)
+          return
+        }
         router.routeSet(sid, dbMessages)
 
         const updated = await refs.api.current.listSessions()

@@ -555,6 +555,12 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
 app.on('will-quit', () => {
+  // Abort any active streaming and save partial results
+  try {
+    if (ctx._activeAbortController) {
+      ctx._activeAbortController.abort(new Error('App quit'))
+    }
+  } catch {}
   sessionStore.closeDb(); memoryIndex.closeDb();
   mcpManager.disconnectAll().catch(() => {});
   if (cronService) cronService.stop();
