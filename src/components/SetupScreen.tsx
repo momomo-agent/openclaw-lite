@@ -46,6 +46,7 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
   const [apiKey, setApiKey] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
   const [tavilyKey, setTavilyKey] = useState('')
+  const [model, setModel] = useState('claude-sonnet-4-20250514')
   const [provider, setProvider] = useState<'anthropic' | 'openai'>('anthropic')
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
@@ -165,6 +166,7 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
     const cfg = await api.loadConfig?.() || {}
     cfg.provider = provider
     cfg.apiKey = apiKey.trim()
+    if (model) cfg.model = model
     if (baseUrl.trim()) cfg.baseUrl = baseUrl.trim()
     if (tavilyKey.trim()) cfg.tavilyApiKey = tavilyKey.trim()
     await api.saveConfig?.(cfg)
@@ -281,7 +283,11 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
               {(['anthropic', 'openai'] as const).map(p => (
                 <button
                   key={p}
-                  onClick={() => { setProvider(p); setTestResult(null) }}
+                  onClick={() => {
+                    setProvider(p)
+                    setModel(p === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o')
+                    setTestResult(null)
+                  }}
                   style={{
                     flex: 1, padding: '9px 0', fontSize: 13, fontWeight: 500,
                     borderRadius: 8, border: '1px solid',
@@ -295,6 +301,32 @@ export default function SetupScreen({ onEnterChat }: SetupScreenProps) {
                 </button>
               ))}
             </div>
+
+            <select
+              value={model}
+              onChange={e => setModel(e.target.value)}
+              style={{
+                ...inputStyle, textAlign: 'left', fontSize: 13,
+                appearance: 'none', WebkitAppearance: 'none',
+                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' stroke='%23999' stroke-width='1.5' fill='none'/%3E%3C/svg%3E")`,
+                backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center',
+                paddingRight: 32,
+              }}
+            >
+              {provider === 'anthropic' ? (
+                <>
+                  <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
+                  <option value="claude-opus-4-20250514">Claude Opus 4</option>
+                  <option value="claude-haiku-3-5-20241022">Claude 3.5 Haiku</option>
+                </>
+              ) : (
+                <>
+                  <option value="gpt-4o">GPT-4o</option>
+                  <option value="gpt-4o-mini">GPT-4o Mini</option>
+                  <option value="o3-mini">o3-mini</option>
+                </>
+              )}
+            </select>
 
             <TextInput
               ref={inputRef}
