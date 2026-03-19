@@ -8,7 +8,7 @@ const { LoopDetector } = require('./loop-detection')
 const { fetchWithRetry } = require('./api-retry')
 const eventBus = require('./event-bus')
 
-const STALL_TIMEOUT_MS = 60_000
+const STALL_TIMEOUT_MS = 120_000 // 2min — thinking models can have long pauses between chunks
 // Tools that should not show "Running X..." in the status bar
 const SILENT_TOOLS = new Set(['ui_status_set', 'notify', 'delegate_to', 'stay_silent', 'session_title_set'])
 // Tools that should record full output to flowSteps (not truncated to 500 chars)
@@ -152,9 +152,12 @@ async function streamChat({ messages, systemPrompt, config, requestId, tools, se
     const req = adapter.prepareRequest(round, msgs, systemPrompt, activeTools, config, ctx)
     console.log(`[Paw] stream ${adapter.name} round=${round} model=${config.model} msgs=${msgs.length} tools=${activeTools.length}`)
 
-    // Fetch with per-request timeout (30s connect + response start)
+    // Fetch with per-request timeout (time to first byte from API)
+    // Thinking models (o1/o3/extended thinking) need longer — first token can take 60s+
     // Uses AbortSignal.any to combine agent-level abort with per-request timeout
-    const fetchTimeoutMs = config.fetchTimeoutMs || 30_000
+    const isThinkingModel = /^o[1-9]|^o\d+-|thinking|deepseek.*r1/i.test(config.model || '')
+    const defaultFetchTimeout = isThinkingModel ? 300_000 : 120_000 // 5min for thinking, 2min otherwise
+    const fetchTimeoutMs = config.fetchTimeoutMs || defaultFetchTimeout
     const fetchTimeout = AbortSignal.timeout(fetchTimeoutMs)
     const combinedSignal = ctx._activeAbortController?.signal
       ? AbortSignal.any([ctx._activeAbortController.signal, fetchTimeout])
