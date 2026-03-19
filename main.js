@@ -1597,8 +1597,8 @@ async function _runChat({ prompt, files, agentId, sessionId, requestId, focus, t
         apiKey, baseUrl, model: target.model, tavilyKey: config.tavilyKey,
         maxToolRounds: config.maxToolRounds, maxTokens: config.maxTokens,
         _participantCount: participantCount,
-        // Group chats have larger context (multi-agent history + tools), need more time for first token
-        fetchTimeoutMs: participantCount > 1 ? 120_000 : 30_000,
+        // Thinking models need longer for first token; group chats have larger context
+        fetchTimeoutMs: participantCount > 1 ? 180_000 : 120_000,
       }
       if (target.provider === 'anthropic') {
         result = await streamAnthropic(finalMessages, systemPrompt, streamConfig, requestId, chatTools, sessionId, _wsIdentity, ctx)
