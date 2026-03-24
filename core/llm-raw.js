@@ -1,6 +1,12 @@
 // core/llm-raw.js — LLM 非流式调用（用于 heartbeat 等）
 const { getApiKey, rotateApiKey, recordKeyUsage } = require('./api-keys');
 
+// Aligned with OpenClaw: 30-minute timeout for streaming (bodyTimeout/headersTimeout),
+// 5-minute timeout for non-streaming. Streaming connections stay alive as long as
+// data keeps flowing — the timeout only fires if the connection goes completely silent.
+const NON_STREAM_TIMEOUT_MS = 5 * 60 * 1000;   // 5 min for non-streaming
+const STREAM_TIMEOUT_MS = 30 * 60 * 1000;       // 30 min for streaming (same as OpenClaw)
+
 async function streamAnthropicRaw(messages, system, config) {
   const base = (config.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '');
   const endpoint = base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`;
@@ -14,7 +20,7 @@ async function streamAnthropicRaw(messages, system, config) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({ model: config.model || 'claude-sonnet-4-20250514', max_tokens: config.maxTokens || 2048, system, messages: msgs }),
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(NON_STREAM_TIMEOUT_MS),
   });
 
   if (!res.ok) {
@@ -47,7 +53,7 @@ async function streamOpenAIRaw(messages, system, config) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(NON_STREAM_TIMEOUT_MS),
   });
 
   if (!res.ok) {
@@ -75,7 +81,7 @@ async function streamAnthropicRawStreaming(messages, system, config, onToken, on
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({ model: config.model || 'claude-sonnet-4-20250514', max_tokens: config.maxTokens || 2048, stream: true, system, messages: msgs }),
-    signal: AbortSignal.timeout(120000),
+    signal: AbortSignal.timeout(STREAM_TIMEOUT_MS),
   });
 
   if (!res.ok) {
@@ -133,7 +139,7 @@ async function streamOpenAIRawStreaming(messages, system, config, onToken) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
     body: JSON.stringify({ model: config.model || 'gpt-4o', max_tokens: config.maxTokens || 2048, stream: true, messages: [{ role: 'system', content: system }, ...messages] }),
-    signal: AbortSignal.timeout(120000),
+    signal: AbortSignal.timeout(STREAM_TIMEOUT_MS),
   });
 
   if (!res.ok) {

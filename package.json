@@ -1,6 +1,6 @@
 {
   "name": "paw",
-  "version": "0.25.1",
+  "version": "0.25.2",
   "description": "Portable local AI assistant with multi-agent chat",
   "main": "main.js",
   "scripts": {
