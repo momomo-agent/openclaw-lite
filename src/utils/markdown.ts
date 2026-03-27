@@ -9,6 +9,25 @@ let _clawDir: string | null = null
 let _cachedRenderer: any = null
 let _rendererClawDir: string | null = null
 
+// Detect if an HTML code block is an interactive widget vs plain HTML snippet
+// Widget indicators: <style>, <svg>, <canvas>, <script>, interactive elements,
+// CSS variables, or substantial HTML structure (not just a one-liner)
+function looksLikeWidget(code: string): boolean {
+  if (code.length < 50) return false
+  const lower = code.toLowerCase()
+  // Must have substantial HTML structure
+  const hasStyle = lower.includes('<style') || lower.includes('style="')
+  const hasSvg = lower.includes('<svg')
+  const hasCanvas = lower.includes('<canvas')
+  const hasScript = lower.includes('<script')
+  const hasInteractive = lower.includes('<button') || lower.includes('<input') ||
+    lower.includes('<select') || lower.includes('<range') || lower.includes('onclick')
+  const hasCssVars = lower.includes('var(--')
+  const hasDiv = lower.includes('<div')
+  // At least style+content or interactive elements or svg/canvas
+  return (hasStyle && hasDiv) || hasSvg || hasCanvas || hasScript || hasInteractive || hasCssVars
+}
+
 export function setClawDir(dir: string | null) {
   _clawDir = dir
 }
@@ -94,12 +113,17 @@ function getRenderer() {
 
   const renderer = new window.marked.Renderer()
 
-  // Code renderer: detect mermaid, render as <pre class="mermaid">
+  // Code renderer: detect mermaid and html widgets, render as special blocks
   renderer.code = function (token: any) {
     const lang = token.lang || ''
     const code = token.text || ''
     if (lang === 'mermaid') {
       return `<pre class="mermaid">${code}</pre>`
+    }
+    // HTML widget: render as interactive iframe
+    if (lang === 'html' && looksLikeWidget(code)) {
+      const escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+      return `<div class="widget-container" data-widget-code="${escaped}"><div class="widget-loading">Loading widget…</div></div>`
     }
     // Default: highlighted code block
     const langClass = lang ? ` class="language-${lang}"` : ''

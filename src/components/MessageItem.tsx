@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react'
 import { Message, ToolStep } from '../types'
 import { renderMarkdown } from '../utils/markdown'
 import { renderMermaidBlocks } from '../utils/mermaid-render'
+import { renderWidgets, finalizeWidgets } from '../utils/widget-render'
 import { useAppState } from '../store'
 import { Avatar } from './Avatar'
 import ToolGroup from './ToolGroup'
@@ -21,12 +22,22 @@ export default function MessageItem({ message, isStreaming, statusText, ownerWor
   const isError = message.isError === true  // assistant message that errored
   const isA2A = message.role === 'agent-to-agent'
 
-  // Render mermaid diagrams after content updates
+  // Render mermaid diagrams and widgets after content updates
   useEffect(() => {
     if (!isUser && message.content) {
       renderMermaidBlocks(contentRef.current)
+      renderWidgets(contentRef.current, !!isStreaming)
     }
-  }, [message.content, isUser])
+  }, [message.content, isUser, isStreaming])
+
+  // Finalize widgets when streaming ends
+  const prevStreamingRef = useRef(isStreaming)
+  useEffect(() => {
+    if (prevStreamingRef.current && !isStreaming) {
+      finalizeWidgets(contentRef.current)
+    }
+    prevStreamingRef.current = isStreaming
+  }, [isStreaming])
 
   // Dynamic workspace identity resolution — always use live identity, never stale history
   // Priority: senderWorkspaceId (from metadata/delegate) → workspaceId → workspacePath → ownerWorkspaceId → first workspace

@@ -299,6 +299,19 @@ export default function ChatView() {
     return false
   }
 
+  // === Widget sendPrompt bridge ===
+  const handleSendRef = useRef<(text: string, files: File[]) => void>(() => {})
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const text = (e as CustomEvent).detail
+      if (text && typeof text === 'string') {
+        handleSendRef.current(text, [])
+      }
+    }
+    window.addEventListener('widget-prompt', handler)
+    return () => window.removeEventListener('widget-prompt', handler)
+  }, [])
+
   // === Send message ===
   const handleSend = async (text: string, files: File[]) => {
     if (!currentSessionId) return
@@ -360,6 +373,9 @@ export default function ChatView() {
       }))
     }
   }
+
+  // Keep widget bridge ref updated
+  useEffect(() => { handleSendRef.current = handleSend })
 
   // === Retry ===
   const handleRetry = useCallback(async () => {
